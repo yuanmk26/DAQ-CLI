@@ -1,0 +1,34 @@
+devices:
+  dev1:
+    ip: 192.168.10.10
+    rbcp_port: 4660
+    tcp_port: 24
+    board_id: 0
+    role: adc
+
+  dev2:
+    ip: 192.168.10.11
+    rbcp_port: 4660
+    tcp_port: 24
+    board_id: 1
+    role: adc
+
+tcm:
+  main:
+    ip: 192.168.10.20
+    rbcp_port: 4660
+
+groups:
+  two_board:
+    devices: [dev1, dev2]
+    tcm: main
+
+defaults:
+  adc_length: 64
+  output_dir: out
+  trigger_mode: 1
+  trigger_position: 40
+  thresholds: [1950, 2400, 2300, 2300]
+
+legacy:
+  project_root: E:\projects\1-hardware\FDU-ADC-250M-16ch
