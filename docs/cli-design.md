@@ -16,6 +16,16 @@ Recommended top-level commands:
 
 The first release does not need to fully implement every command, but the namespace should be planned from the beginning.
 
+Current implementation status:
+
+- `profile`: partially implemented
+- `board`: partially implemented with real hardware-backed flows
+- `acquire`: partially implemented for single-board capture
+- `group`: placeholder only
+- `monitor`: placeholder only
+- `wave`: placeholder only
+- `shell`: not implemented
+
 ## 2. Profile Commands
 
 Purpose:
@@ -29,6 +39,15 @@ Planned commands:
 daq profile list
 daq profile show <profile>
 daq profile validate <profile>
+```
+
+Current implementation:
+
+```bash
+daq profile show
+daq profile validate
+daq profile show profiles/example.yaml
+daq profile validate profiles/example.yaml
 ```
 
 Possible future extensions:
@@ -66,6 +85,30 @@ First-phase minimum:
 - `sysmon`
 - `config`
 
+Current implementation details:
+
+- `daq board info <device>` works
+- `daq board sysmon <device>` works through the legacy `sysmon.py` adapter
+- `daq board config <device>` works through the legacy configuration script adapter
+
+Current `board config` options:
+
+```bash
+daq board config dev1 --adc --clock --trigger --tcp-mode2
+daq board config dev1 --trigger-mode 1 --trigger-position 40
+daq board config dev1 --threshold-1 1950 --threshold-2 2400 --threshold-3 2300 --threshold-4 2300
+daq board config dev1 --timestamp-clean
+daq board config dev1 --no-timestamp-clean
+daq board config dev1 --ext-trigger
+daq board config dev1 --no-ext-trigger
+daq board config dev1 --send-start-delay-us 100
+```
+
+Current defaults:
+
+- `ext-trigger` is off unless `--ext-trigger` is passed
+- `timestamp-clean` is off unless `--timestamp-clean` is passed
+
 ## 4. Group Commands
 
 Purpose:
@@ -88,6 +131,10 @@ First-phase minimum:
 - `info`
 - `config`
 - `align`
+
+Current status:
+
+- Placeholder only
 
 ## 5. Acquire Commands
 
@@ -115,6 +162,19 @@ First-phase minimum:
 
 - `single`
 - `multi`
+
+Current implementation:
+
+```bash
+daq acquire single <device> --events 1000
+daq acquire single <device> --timeout 10
+daq acquire single <device> --output-dir out/single
+```
+
+Implementation note:
+
+- `single` currently runs through the legacy `capture_tcp_sent_mode2.py` script adapter
+- `multi` is not implemented yet
 
 ## 6. Monitor Commands
 
@@ -145,6 +205,10 @@ First-phase minimum:
 
 - `board`
 - `board --watch`
+
+Current status:
+
+- Placeholder only
 
 ## 7. Wave Commands
 
@@ -181,6 +245,10 @@ The initial viewer only needs a few controls:
 - Timestamp display
 - Save current frame
 
+Current status:
+
+- Placeholder only
+
 ## 8. Shell Mode
 
 Purpose:
@@ -208,6 +276,10 @@ Recommendation:
 
 - Keep shell mode out of the first implementation milestone
 - Build it after the normal CLI commands are stable
+
+Current status:
+
+- Not implemented
 
 ## 9. Profile Structure
 
@@ -248,6 +320,10 @@ legacy:
   project_root: E:\\projects\\1-hardware\\FDU-ADC-250M-16ch
 ```
 
+Current implementation note:
+
+- `profiles/example.yaml` follows this structure and is used by the working commands today.
+
 ## 10. First Milestone
 
 The first milestone should produce a usable command-line skeleton with the following command paths working end-to-end:
@@ -266,6 +342,17 @@ This milestone is enough to validate:
 - Hardware communication
 - Console output structure
 - Waveform visualization path
+
+Current milestone progress:
+
+- Done:
+  - `daq board info <device>`
+  - `daq board sysmon <device>`
+  - `daq board config <device>`
+  - `daq acquire single <device>`
+- Not done yet:
+  - `daq monitor ...`
+  - `daq wave ...`
 
 ## 11. Follow-Up Milestone
 

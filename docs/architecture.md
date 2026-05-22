@@ -68,7 +68,7 @@ Responsible for:
 
 This layer should never contain acquisition or hardware logic.
 
-## 4. Proposed Repository Layout
+## 4. Repository Layout
 
 ```text
 daq-cli/
@@ -93,55 +93,36 @@ daq-cli/
         wave.py
       application/
         __init__.py
-        context.py
+        config_models.py
         models.py
         profile_service.py
         board_service.py
-        group_service.py
         acquire_service.py
-        monitor_service.py
-        wave_service.py
+        telemetry_service.py
       domain/
         __init__.py
         device.py
         group.py
-        capture.py
-        waveform.py
-        telemetry.py
       infrastructure/
         __init__.py
         config_loader.py
-        logging.py
         adapters/
           __init__.py
-          legacy_config_runner.py
+          legacy_board_adapter.py
           legacy_capture_runner.py
-        transport/
-          __init__.py
-          rbcp_client.py
-          tcp_stream_client.py
-        hardware/
-          __init__.py
-          board_controller.py
-          sysmon_reader.py
-          trigger_controller.py
-          tcm_controller.py
-        parsers/
-          __init__.py
-          tcp_sent_mode2.py
+          legacy_runtime.py
       presentation/
         __init__.py
         console/
           __init__.py
           printers.py
-          tables.py
-          formatters.py
-        wave_window/
-          __init__.py
-          viewer.py
-          plot_model.py
   tests/
 ```
+
+Current note:
+
+- The current repository implements the modules shown above.
+- Some directories from the original architecture sketch, such as `transport/`, `hardware/`, `parsers/`, and `wave_window/`, are still planned but not created yet.
 
 ## 5. Core Concepts
 
@@ -236,7 +217,7 @@ The waveform viewer should be isolated behind the presentation layer so it can l
 
 The first implementation phase should focus on a minimal but coherent vertical slice.
 
-Recommended commands:
+Planned commands:
 
 - `daq board info <device>`
 - `daq board sysmon <device>`
@@ -248,7 +229,49 @@ Recommended commands:
 
 These commands are enough to validate the architecture and cover the core DAQ workflow.
 
-## 9. Implementation Priorities
+## 9. Current Implementation Status
+
+Implemented end-to-end:
+
+- `daq board info <device>`
+  - Loads the selected profile
+  - Resolves the logical device
+  - Prints device metadata and legacy project path
+- `daq board sysmon <device>`
+  - Uses the legacy `lib/sysmon.py` flow through an adapter
+  - Prints temperature, `vccint`, `vccaux`, and `vccbram`
+- `daq board config <device>`
+  - Uses the legacy `start_16CH_two_board.py` flow through an adapter
+  - Supports step toggles:
+    - `--adc/--no-adc`
+    - `--clock/--no-clock`
+    - `--trigger/--no-trigger`
+    - `--tcp-mode2/--no-tcp-mode2`
+  - Supports trigger-related options:
+    - `--trigger-mode`
+    - `--trigger-position`
+    - `--threshold-1` to `--threshold-4`
+    - `--timestamp-clean/--no-timestamp-clean`
+    - `--ext-trigger/--no-ext-trigger`
+    - `--send-start-delay-us`
+- `daq acquire single <device>`
+  - Uses the legacy `capture_tcp_sent_mode2.py` flow through an adapter
+  - Supports event count, timeout, and output directory selection
+
+Implemented but still minimal:
+
+- `daq profile show`
+- `daq profile validate`
+
+Planned but not implemented:
+
+- Multi-board acquisition
+- Monitor commands
+- Waveform commands
+- Interactive shell mode
+- Native protocol, parser, and hardware modules
+
+## 10. Implementation Priorities
 
 Recommended order:
 
@@ -264,13 +287,11 @@ Recommended order:
 
 This sequence keeps the critical path short and testable.
 
-## 10. Near-Term Deliverables
+## 11. Near-Term Deliverables
 
-The next coding step after these documents should be:
+Recommended next coding steps:
 
-- Create the Python project skeleton under `src/daq_cli`
-- Add a minimal `pyproject.toml`
-- Add `profiles/example.yaml`
-- Implement a minimal `daq board info` command path
-
-That will establish the end-to-end structure for all later commands.
+- Extend TCP mode-2 configuration so integration window and hit settings are directly configurable
+- Add monitor commands on top of the existing telemetry adapter
+- Start separating protocol and parser logic from legacy-script wrappers
+- Add waveform viewing on top of the single-board acquisition path

@@ -1,0 +1,370 @@
+# daq-cli User Guide
+
+## 1. Purpose
+
+This guide explains how to use the currently implemented parts of `daq-cli`.
+
+At the moment, the most useful command paths are:
+
+- `daq board info <device>`
+- `daq board sysmon <device>`
+- `daq board config <device>`
+- `daq acquire single <device>`
+
+These commands use the profile file in `profiles/` and the legacy DAQ project referenced by `legacy.project_root`.
+
+## 2. Prerequisites
+
+Before using the CLI, make sure:
+
+- Python 3.10 or newer is available
+- The legacy hardware project exists on disk
+- The board is reachable through the configured IP and ports
+- The selected profile points to the correct legacy project path
+
+The current implementation depends on the legacy scripts under:
+
+```text
+FDU-ADC-250M-16ch/script
+```
+
+## 3. Installation
+
+From the repository root:
+
+```bash
+pip install -e .
+```
+
+After installation, the `daq` command should be available:
+
+```bash
+daq --help
+```
+
+If you do not want to install it yet, you can also run it directly:
+
+```bash
+$env:PYTHONPATH='src'
+python -m daq_cli.main --help
+```
+
+## 4. Profile File
+
+The CLI uses a YAML profile file to describe devices, groups, defaults, and the legacy project path.
+
+Current example:
+
+```yaml
+devices:
+  dev1:
+    ip: 192.168.10.10
+    rbcp_port: 4660
+    tcp_port: 24
+    board_id: 0
+    role: adc
+
+  dev2:
+    ip: 192.168.10.11
+    rbcp_port: 4660
+    tcp_port: 24
+    board_id: 1
+    role: adc
+
+tcm:
+  main:
+    ip: 192.168.10.20
+    rbcp_port: 4660
+
+groups:
+  two_board:
+    devices: [dev1, dev2]
+    tcm: main
+
+defaults:
+  adc_length: 64
+  output_dir: out
+  trigger_mode: 1
+  trigger_position: 40
+  thresholds: [1950, 2400, 2300, 2300]
+
+legacy:
+  project_root: E:\projects\1-hardware\FDU-ADC-250M-16ch
+```
+
+Important fields:
+
+- `devices`: logical names used by CLI commands
+- `rbcp_port`: UDP/RBCP port
+- `tcp_port`: TCP data port
+- `defaults.output_dir`: base output folder for capture results
+- `legacy.project_root`: path to the existing hardware-control project
+
+Example command with explicit profile:
+
+```bash
+daq board info dev1 --profile profiles/example.yaml
+```
+
+## 5. Inspecting the Profile
+
+Use these commands to inspect and validate a profile:
+
+```bash
+daq profile show --profile profiles/example.yaml
+daq profile validate --profile profiles/example.yaml
+```
+
+Note:
+
+- `profile show` prints a simple summary
+- `profile validate` checks whether the file can be loaded into the current data model
+
+## 6. Reading Board Information
+
+Use `board info` to confirm that the CLI resolves the logical device correctly:
+
+```bash
+daq board info dev1 --profile profiles/example.yaml
+```
+
+This command currently shows:
+
+- Device name
+- IP
+- RBCP port
+- TCP port
+- Board ID
+- Role
+- Profile path
+- Legacy project root path
+
+This is a profile-backed command. It does not talk to hardware yet.
+
+## 7. Reading FPGA Telemetry
+
+Use `board sysmon` to read telemetry from the board:
+
+```bash
+daq board sysmon dev1 --profile profiles/example.yaml
+```
+
+This command uses the legacy `lib/sysmon.py` path and currently reports:
+
+- Temperature
+- `vccint`
+- `vccaux`
+- `vccbram`
+
+If this command fails, the likely causes are:
+
+- Wrong device IP
+- Wrong RBCP port
+- Board not powered or not reachable
+- Incorrect `legacy.project_root`
+
+## 8. Configuring a Board
+
+Use `board config` to run the board configuration flow through the legacy script adapter.
+
+Basic usage:
+
+```bash
+daq board config dev1 --profile profiles/example.yaml
+```
+
+Default behavior:
+
+- ADC configuration: disabled
+- Clock configuration: disabled
+- Trigger configuration: enabled
+- TCP mode-2 configuration: enabled
+
+### 8.1 Step Toggles
+
+Use these options to control which configuration steps run:
+
+```bash
+daq board config dev1 --adc
+daq board config dev1 --clock
+daq board config dev1 --no-trigger
+daq board config dev1 --no-tcp-mode2
+```
+
+Common examples:
+
+```bash
+daq board config dev1 --adc --clock --trigger --tcp-mode2
+daq board config dev1 --no-trigger --tcp-mode2
+```
+
+### 8.2 Trigger Parameters
+
+The current implementation supports trigger-related options directly from CLI:
+
+```bash
+daq board config dev1 \
+  --trigger-mode 1 \
+  --trigger-position 40 \
+  --threshold-1 1950 \
+  --threshold-2 2400 \
+  --threshold-3 2300 \
+  --threshold-4 2300
+```
+
+Supported options:
+
+- `--trigger-mode`
+- `--trigger-position`
+- `--threshold-1`
+- `--threshold-2`
+- `--threshold-3`
+- `--threshold-4`
+- `--timestamp-clean/--no-timestamp-clean`
+- `--ext-trigger/--no-ext-trigger`
+- `--send-start-delay-us`
+
+Important default behavior:
+
+- `ext-trigger` is disabled by default
+- `timestamp-clean` is disabled by default
+
+To explicitly keep external trigger disabled:
+
+```bash
+daq board config dev1 --no-ext-trigger --profile profiles/example.yaml
+```
+
+To explicitly keep timestamp clean disabled:
+
+```bash
+daq board config dev1 --no-timestamp-clean --profile profiles/example.yaml
+```
+
+Example with external trigger enabled:
+
+```bash
+daq board config dev1 \
+  --trigger \
+  --ext-trigger \
+  --trigger-mode 1 \
+  --trigger-position 40
+```
+
+Example with send-start delay:
+
+```bash
+daq board config dev1 --send-start-delay-us 100
+```
+
+The command prints:
+
+- Whether configuration succeeded
+- Which steps were enabled
+- Final trigger-related options
+- Captured log output from the legacy script
+
+## 9. Single-Board Capture
+
+Use `acquire single` to capture mode-2 TCP packets from one device.
+
+Basic usage:
+
+```bash
+daq acquire single dev1 --profile profiles/example.yaml
+```
+
+Useful options:
+
+- `--events`: number of events to capture
+- `--timeout`: TCP socket timeout in seconds
+- `--output-dir`: base output directory for generated run folders
+
+Examples:
+
+```bash
+daq acquire single dev1 --events 100 --profile profiles/example.yaml
+daq acquire single dev1 --events 1000 --timeout 10 --profile profiles/example.yaml
+daq acquire single dev1 --events 200 --output-dir out/single --profile profiles/example.yaml
+```
+
+Current behavior:
+
+- The command uses the legacy `capture_tcp_sent_mode2.py` script through an adapter
+- A timestamped run directory is created under the selected output base directory
+- Raw event files are written by the legacy script
+- A summary table is printed after the run
+- The legacy script output is also shown
+
+Typical output data includes:
+
+- Event binary files
+- `capture_info.txt`
+
+## 10. Suggested Workflow
+
+A simple single-board workflow looks like this:
+
+1. Validate the profile.
+2. Check board metadata.
+3. Read telemetry.
+4. Configure the board.
+5. Run single-board capture.
+
+Example:
+
+```bash
+daq profile validate --profile profiles/example.yaml
+daq board info dev1 --profile profiles/example.yaml
+daq board sysmon dev1 --profile profiles/example.yaml
+daq board config dev1 --profile profiles/example.yaml
+daq acquire single dev1 --events 100 --profile profiles/example.yaml
+```
+
+## 11. Current Limitations
+
+Not implemented yet:
+
+- Multi-board acquisition
+- Monitor commands
+- Waveform viewing
+- Interactive shell mode
+- Native protocol and parser modules independent of legacy scripts
+
+Current technical limitation:
+
+- `board config` and `acquire single` still rely on legacy script behavior under the external project path
+
+## 12. Troubleshooting
+
+### Command not found
+
+If `daq` is not found, either:
+
+- run `pip install -e .`
+- or use `python -m daq_cli.main ...`
+
+### Profile loads but hardware commands fail
+
+Check:
+
+- Device IP
+- RBCP port
+- TCP port
+- Physical network connection
+- Board power state
+- `legacy.project_root`
+
+### Capture does not create output
+
+Check:
+
+- Whether the board was configured first
+- Whether the TCP port is correct
+- Whether the board is sending mode-2 data
+- Whether the selected output directory is writable
+
+## 13. Related Documents
+
+- [Architecture](./architecture.md)
+- [CLI Design](./cli-design.md)
