@@ -30,6 +30,31 @@ class LegacyBoardConfigResult:
     log_output: str
 
 
+@dataclass(slots=True)
+class LegacyRegisterReadResult:
+    address: int
+    data: bytes
+
+
+@dataclass(slots=True)
+class LegacyTriggerReadResult:
+    trigger_mode: int
+    trigger_position: int
+    thresholds: tuple[int, int, int, int]
+    send_start_delay: int
+    timestamp_clean_enabled: bool
+    ext_trigger_enabled: bool
+
+
+@dataclass(slots=True)
+class LegacyTcpMode2ReadResult:
+    send_mode: int
+    integration_pre_samples: int
+    integration_post_samples: int
+    hit_thresholds: list[int]
+    hit_polarities: list[int]
+
+
 class LegacyBoardAdapter:
     """Thin wrapper around the existing board-control scripts."""
 
@@ -71,6 +96,53 @@ class LegacyBoardAdapter:
             return LegacyBoardConfigResult(
                 success=success,
                 log_output=captured.getvalue(),
+            )
+
+    def read_registers(
+        self, device: DeviceConfig, address: int, length: int
+    ) -> LegacyRegisterReadResult:
+        with temporary_sys_path(self._script_dir), device_environment(device):
+            clear_legacy_modules()
+            rbcp_module = importlib.import_module("lib.rbcp")
+            rbcp_client = rbcp_module.Rbcp(device_ip=device.ip, udp_port=device.rbcp_port)
+            data = bytes(rbcp_client.read(address, length))
+            return LegacyRegisterReadResult(address=address, data=data)
+
+    def read_trigger_config(self, device: DeviceConfig) -> LegacyTriggerReadResult:
+        with temporary_sys_path(self._script_dir), device_environment(device):
+            clear_legacy_modules()
+            fpga_ctrl_module = importlib.import_module("FPGA_CTRL")
+            controller = fpga_ctrl_module.FPGAControl()
+            trigger_mode, trigger_position, thresholds = controller.read_trigger_info()
+            ctrl_reg = controller.rbcp.read(0x06, 1)[0]
+            delay_bytes = controller.rbcp.read(0x1B, 3)
+            send_start_delay = (
+                (delay_bytes[0] << 16) | (delay_bytes[1] << 8) | delay_bytes[2]
+            )
+            return LegacyTriggerReadResult(
+                trigger_mode=int(trigger_mode),
+                trigger_position=int(trigger_position),
+                thresholds=tuple(int(value) for value in thresholds),
+                send_start_delay=send_start_delay,
+                timestamp_clean_enabled=bool((ctrl_reg >> 1) & 0x1),
+                ext_trigger_enabled=bool((ctrl_reg >> 2) & 0x1),
+            )
+
+    def read_tcp_mode2_config(self, device: DeviceConfig) -> LegacyTcpMode2ReadResult:
+        with temporary_sys_path(self._script_dir), device_environment(device):
+            clear_legacy_modules()
+            fpga_ctrl_module = importlib.import_module("FPGA_CTRL")
+            controller = fpga_ctrl_module.FPGAControl()
+            hit_thresholds, hit_polarities = controller.read_hit_config()
+            send_mode = controller.rbcp.read(0x42, 1)[0] & 0x03
+            integration_pre_samples = controller.rbcp.read(0x43, 1)[0] & 0x7F
+            integration_post_samples = controller.rbcp.read(0x44, 1)[0] & 0x7F
+            return LegacyTcpMode2ReadResult(
+                send_mode=send_mode,
+                integration_pre_samples=integration_pre_samples,
+                integration_post_samples=integration_post_samples,
+                hit_thresholds=[int(value) for value in hit_thresholds],
+                hit_polarities=[int(value) for value in hit_polarities],
             )
 
     @contextmanager

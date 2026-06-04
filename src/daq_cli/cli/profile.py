@@ -3,12 +3,13 @@ from pathlib import Path
 import typer
 
 from daq_cli.application.profile_service import ProfileService
+from daq_cli.cli.common import ProfileOption
 
 app = typer.Typer(no_args_is_help=True, help="Manage DAQ profiles.")
 
 
 @app.command("show")
-def show_profile(profile: Path = Path("profiles/example.yaml")) -> None:
+def show_profile(profile: ProfileOption = Path("profiles/example.yaml")) -> None:
     """Show a profile summary."""
     service = ProfileService()
     loaded = service.load_profile(profile)
@@ -18,7 +19,7 @@ def show_profile(profile: Path = Path("profiles/example.yaml")) -> None:
 
 
 @app.command("validate")
-def validate_profile(profile: Path = Path("profiles/example.yaml")) -> None:
+def validate_profile(profile: ProfileOption = Path("profiles/example.yaml")) -> None:
     """Validate a profile file."""
     service = ProfileService()
     loaded = service.load_profile(profile)

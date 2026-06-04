@@ -9,6 +9,10 @@ At the moment, the most useful command paths are:
 - `daq board info <device>`
 - `daq board sysmon <device>`
 - `daq board config <device>`
+- `daq board trigger-show <device>`
+- `daq board tcp-mode2-show <device>`
+- `daq board config-show <device>`
+- `daq board reg-read <device> <address>`
 - `daq acquire single <device>`
 
 These commands use the profile file in `profiles/` and the legacy DAQ project referenced by `legacy.project_root`.
@@ -301,7 +305,61 @@ Typical output data includes:
 - Event binary files
 - `capture_info.txt`
 
-## 10. Suggested Workflow
+## 10. Reading Configuration Back
+
+The CLI now supports three levels of read-only configuration inspection.
+
+### 10.1 Semantic Block Readback
+
+These commands read meaningful configuration groups instead of raw register addresses:
+
+```bash
+daq board trigger-show dev1 --profile profiles/example.yaml
+daq board tcp-mode2-show dev1 --profile profiles/example.yaml
+```
+
+`trigger-show` currently reports:
+
+- Trigger mode
+- Trigger position
+- Four trigger thresholds
+- Send-start-delay register value
+- Timestamp clean enable state
+- External trigger enable state
+
+`tcp-mode2-show` currently reports:
+
+- Send mode
+- Integration pre-samples
+- Integration post-samples
+- Hit thresholds for all 16 channels
+- Hit polarities for all 16 channels
+
+### 10.2 Semantic Summary Readback
+
+To view the most important trigger and TCP mode-2 settings together:
+
+```bash
+daq board config-show dev1 --profile profiles/example.yaml
+```
+
+This is the recommended command for routine verification after configuration.
+
+### 10.3 Raw Register Readback
+
+For low-level debugging, a raw register-read command is also available:
+
+```bash
+daq board reg-read dev1 0x10 --len 1 --profile profiles/example.yaml
+daq board reg-read dev1 0x11 --len 8 --profile profiles/example.yaml
+```
+
+Recommended usage:
+
+- Use `trigger-show`, `tcp-mode2-show`, and `config-show` for normal operation
+- Use `reg-read` only when you need to inspect the underlying register bytes directly
+
+## 11. Suggested Workflow
 
 A simple single-board workflow looks like this:
 
@@ -309,7 +367,8 @@ A simple single-board workflow looks like this:
 2. Check board metadata.
 3. Read telemetry.
 4. Configure the board.
-5. Run single-board capture.
+5. Read configuration back.
+6. Run single-board capture.
 
 Example:
 
@@ -318,10 +377,11 @@ daq profile validate --profile profiles/example.yaml
 daq board info dev1 --profile profiles/example.yaml
 daq board sysmon dev1 --profile profiles/example.yaml
 daq board config dev1 --profile profiles/example.yaml
+daq board config-show dev1 --profile profiles/example.yaml
 daq acquire single dev1 --events 100 --profile profiles/example.yaml
 ```
 
-## 11. Current Limitations
+## 12. Current Limitations
 
 Not implemented yet:
 
@@ -335,7 +395,7 @@ Current technical limitation:
 
 - `board config` and `acquire single` still rely on legacy script behavior under the external project path
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 ### Command not found
 
@@ -364,7 +424,7 @@ Check:
 - Whether the board is sending mode-2 data
 - Whether the selected output directory is writable
 
-## 13. Related Documents
+## 14. Related Documents
 
 - [Architecture](./architecture.md)
 - [CLI Design](./cli-design.md)

@@ -16,6 +16,10 @@ The repository currently contains:
   - `daq board info <device>`
   - `daq board sysmon <device>`
   - `daq board config <device>`
+  - `daq board trigger-show <device>`
+  - `daq board tcp-mode2-show <device>`
+  - `daq board config-show <device>`
+  - `daq board reg-read <device> <address>`
   - `daq acquire single <device>`
 
 Not implemented yet:
@@ -51,6 +55,15 @@ Run configurable board setup:
 daq board config dev1 --profile profiles/example.yaml
 daq board config dev1 --adc --clock --trigger --tcp-mode2 --profile profiles/example.yaml
 daq board config dev1 --trigger-mode 1 --trigger-position 40 --threshold-1 1950 --threshold-2 2400 --threshold-3 2300 --threshold-4 2300
+```
+
+Read configuration back without writing:
+
+```bash
+daq board trigger-show dev1 --profile profiles/example.yaml
+daq board tcp-mode2-show dev1 --profile profiles/example.yaml
+daq board config-show dev1 --profile profiles/example.yaml
+daq board reg-read dev1 0x10 --len 1 --profile profiles/example.yaml
 ```
 
 Capture single-board data:

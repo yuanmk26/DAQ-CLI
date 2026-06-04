@@ -9,8 +9,12 @@ from daq_cli.application.telemetry_service import TelemetryService
 from daq_cli.cli.common import ProfileOption
 from daq_cli.presentation.console.printers import (
     print_board_config_result,
+    print_board_config_summary_result,
     print_board_info,
     print_board_sysmon,
+    print_register_read_result,
+    print_tcp_mode2_config_read_result,
+    print_trigger_config_read_result,
 )
 
 app = typer.Typer(no_args_is_help=True, help="Single-board operations.")
@@ -140,3 +144,68 @@ def board_config(
         ),
     )
     print_board_config_result(result)
+
+
+@app.command("trigger-show")
+def board_trigger_show(
+    device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
+    profile: ProfileOption = Path("profiles/example.yaml"),
+) -> None:
+    """Read trigger-related configuration without writing registers."""
+    service = BoardService()
+    result = service.read_trigger_config(device_name=device, profile_path=profile)
+    print_trigger_config_read_result(result)
+
+
+@app.command("tcp-mode2-show")
+def board_tcp_mode2_show(
+    device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
+    profile: ProfileOption = Path("profiles/example.yaml"),
+) -> None:
+    """Read TCP mode-2 configuration without writing registers."""
+    service = BoardService()
+    result = service.read_tcp_mode2_config(device_name=device, profile_path=profile)
+    print_tcp_mode2_config_read_result(result)
+
+
+@app.command("config-show")
+def board_config_show(
+    device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
+    profile: ProfileOption = Path("profiles/example.yaml"),
+) -> None:
+    """Read a semantic board configuration summary without writing registers."""
+    service = BoardService()
+    result = service.read_board_config_summary(
+        device_name=device, profile_path=profile
+    )
+    print_board_config_summary_result(result)
+
+
+@app.command("reg-read")
+def board_reg_read(
+    device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
+    address: Annotated[
+        str, typer.Argument(help="Register address such as 0x10 or 16.")
+    ],
+    length: Annotated[
+        int,
+        typer.Option("--len", min=1, max=255, help="Number of bytes to read."),
+    ] = 1,
+    profile: ProfileOption = Path("profiles/example.yaml"),
+) -> None:
+    """Read raw register bytes for debugging."""
+    try:
+        parsed_address = int(address, 0)
+    except ValueError as exc:
+        raise typer.BadParameter(
+            f"Invalid register address '{address}'. Use decimal or 0x-prefixed hex."
+        ) from exc
+
+    service = BoardService()
+    result = service.read_registers(
+        device_name=device,
+        profile_path=profile,
+        address=parsed_address,
+        length=length,
+    )
+    print_register_read_result(result)

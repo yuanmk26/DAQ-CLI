@@ -2,7 +2,14 @@ from rich.console import Console
 from rich.table import Table
 
 from daq_cli.application.acquire_service import SingleAcquireResult
-from daq_cli.application.board_service import BoardConfigResult, BoardInfoResult
+from daq_cli.application.board_service import (
+    BoardConfigResult,
+    BoardConfigSummaryResult,
+    BoardInfoResult,
+    RegisterReadResult,
+    TcpMode2ConfigReadResult,
+    TriggerConfigReadResult,
+)
 from daq_cli.application.telemetry_service import BoardSysmonResult
 
 console = Console()
@@ -81,3 +88,95 @@ def print_single_acquire_result(result: SingleAcquireResult) -> None:
 
     if result.log_output.strip():
         console.print(result.log_output.rstrip())
+
+
+def print_register_read_result(result: RegisterReadResult) -> None:
+    table = Table(title=f"Register Read: {result.device.name}")
+    table.add_column("Field", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
+
+    hex_bytes = " ".join(f"{byte:02X}" for byte in result.data)
+    table.add_row("address", f"0x{result.address:08X}")
+    table.add_row("length", str(len(result.data)))
+    table.add_row("hex", hex_bytes or "-")
+    table.add_row("profile", str(result.source_profile))
+    console.print(table)
+
+
+def print_trigger_config_read_result(result: TriggerConfigReadResult) -> None:
+    table = Table(title=f"Trigger Config: {result.device.name}")
+    table.add_column("Field", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
+
+    table.add_row("trigger_mode", str(result.trigger_mode))
+    table.add_row("trigger_position", str(result.trigger_position))
+    table.add_row("thresholds", ", ".join(str(value) for value in result.thresholds))
+    table.add_row("send_start_delay_reg", str(result.send_start_delay))
+    table.add_row("timestamp_clean_enabled", str(result.timestamp_clean_enabled))
+    table.add_row("ext_trigger_enabled", str(result.ext_trigger_enabled))
+    table.add_row("profile", str(result.source_profile))
+    console.print(table)
+
+
+def print_tcp_mode2_config_read_result(result: TcpMode2ConfigReadResult) -> None:
+    table = Table(title=f"TCP Mode-2 Config: {result.device.name}")
+    table.add_column("Field", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
+
+    table.add_row("send_mode", str(result.send_mode))
+    table.add_row("integration_pre_samples", str(result.integration_pre_samples))
+    table.add_row("integration_post_samples", str(result.integration_post_samples))
+    table.add_row(
+        "hit_thresholds",
+        ", ".join(str(value) for value in result.hit_thresholds),
+    )
+    table.add_row(
+        "hit_polarities",
+        ", ".join(str(value) for value in result.hit_polarities),
+    )
+    table.add_row("profile", str(result.source_profile))
+    console.print(table)
+
+
+def print_board_config_summary_result(result: BoardConfigSummaryResult) -> None:
+    trigger_table = Table(title=f"Config Summary: {result.device.name} / Trigger")
+    trigger_table.add_column("Field", style="cyan", no_wrap=True)
+    trigger_table.add_column("Value", style="white")
+    trigger_table.add_row("trigger_mode", str(result.trigger.trigger_mode))
+    trigger_table.add_row("trigger_position", str(result.trigger.trigger_position))
+    trigger_table.add_row(
+        "thresholds",
+        ", ".join(str(value) for value in result.trigger.thresholds),
+    )
+    trigger_table.add_row(
+        "send_start_delay_reg", str(result.trigger.send_start_delay)
+    )
+    trigger_table.add_row(
+        "timestamp_clean_enabled", str(result.trigger.timestamp_clean_enabled)
+    )
+    trigger_table.add_row(
+        "ext_trigger_enabled", str(result.trigger.ext_trigger_enabled)
+    )
+
+    tcp_table = Table(title=f"Config Summary: {result.device.name} / TCP Mode-2")
+    tcp_table.add_column("Field", style="cyan", no_wrap=True)
+    tcp_table.add_column("Value", style="white")
+    tcp_table.add_row("send_mode", str(result.tcp_mode2.send_mode))
+    tcp_table.add_row(
+        "integration_pre_samples", str(result.tcp_mode2.integration_pre_samples)
+    )
+    tcp_table.add_row(
+        "integration_post_samples", str(result.tcp_mode2.integration_post_samples)
+    )
+    tcp_table.add_row(
+        "hit_thresholds",
+        ", ".join(str(value) for value in result.tcp_mode2.hit_thresholds),
+    )
+    tcp_table.add_row(
+        "hit_polarities",
+        ", ".join(str(value) for value in result.tcp_mode2.hit_polarities),
+    )
+    tcp_table.add_row("profile", str(result.source_profile))
+
+    console.print(trigger_table)
+    console.print(tcp_table)

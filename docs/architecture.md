@@ -254,6 +254,17 @@ Implemented end-to-end:
     - `--timestamp-clean/--no-timestamp-clean`
     - `--ext-trigger/--no-ext-trigger`
     - `--send-start-delay-us`
+- `daq board trigger-show <device>`
+  - Reads trigger-related configuration without writing registers
+  - Reports mode, position, thresholds, send-start-delay register, and trigger control bits
+- `daq board tcp-mode2-show <device>`
+  - Reads TCP mode-2 configuration without writing registers
+  - Reports send mode, integration window, hit thresholds, and hit polarities
+- `daq board config-show <device>`
+  - Combines trigger and TCP mode-2 readback into a semantic summary view
+- `daq board reg-read <device> <address>`
+  - Provides raw register access for debugging
+  - Returns the selected bytes in hex form
 - `daq acquire single <device>`
   - Uses the legacy `capture_tcp_sent_mode2.py` flow through an adapter
   - Supports event count, timeout, and output directory selection

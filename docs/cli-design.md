@@ -90,6 +90,10 @@ Current implementation details:
 - `daq board info <device>` works
 - `daq board sysmon <device>` works through the legacy `sysmon.py` adapter
 - `daq board config <device>` works through the legacy configuration script adapter
+- `daq board trigger-show <device>` works
+- `daq board tcp-mode2-show <device>` works
+- `daq board config-show <device>` works
+- `daq board reg-read <device> <address>` works
 
 Current `board config` options:
 
@@ -108,6 +112,20 @@ Current defaults:
 
 - `ext-trigger` is off unless `--ext-trigger` is passed
 - `timestamp-clean` is off unless `--timestamp-clean` is passed
+
+Current readback commands:
+
+```bash
+daq board trigger-show dev1
+daq board tcp-mode2-show dev1
+daq board config-show dev1
+daq board reg-read dev1 0x10 --len 1
+```
+
+Recommended usage model:
+
+- Prefer `trigger-show`, `tcp-mode2-show`, and `config-show` for normal operation
+- Use `reg-read` only for low-level debugging
 
 ## 4. Group Commands
 
@@ -349,6 +367,10 @@ Current milestone progress:
   - `daq board info <device>`
   - `daq board sysmon <device>`
   - `daq board config <device>`
+  - `daq board trigger-show <device>`
+  - `daq board tcp-mode2-show <device>`
+  - `daq board config-show <device>`
+  - `daq board reg-read <device> <address>`
   - `daq acquire single <device>`
 - Not done yet:
   - `daq monitor ...`
