@@ -20,7 +20,7 @@ Current implementation status:
 
 - `profile`: partially implemented
 - `board`: partially implemented with real hardware-backed flows
-- `acquire`: partially implemented for single-board capture
+- `acquire`: partially implemented for single-board and multi-board capture
 - `group`: placeholder only
 - `monitor`: placeholder only
 - `wave`: placeholder only
@@ -187,12 +187,14 @@ Current implementation:
 daq acquire single <device> --events 1000
 daq acquire single <device> --timeout 10
 daq acquire single <device> --output-dir out/single
+daq acquire multi <group>
+daq acquire multi <group> --aggregation-key event_count
 ```
 
 Implementation note:
 
 - `single` currently runs through the legacy `capture_tcp_sent_mode2.py` script adapter
-- `multi` is not implemented yet
+- `multi` currently runs through the legacy `multi_board_acquire.py` script adapter
 
 ## 6. Monitor Commands
 
@@ -372,6 +374,7 @@ Current milestone progress:
   - `daq board config-show <device>`
   - `daq board reg-read <device> <address>`
   - `daq acquire single <device>`
+  - `daq acquire multi <group>`
 - Not done yet:
   - `daq monitor ...`
   - `daq wave ...`
@@ -380,7 +383,6 @@ Current milestone progress:
 
 After the first milestone works, the next expansion should add:
 
-- Multi-board acquisition
 - Group alignment workflows
 - Better waveform controls
 - Run metadata persistence

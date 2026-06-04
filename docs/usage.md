@@ -14,6 +14,7 @@ At the moment, the most useful command paths are:
 - `daq board config-show <device>`
 - `daq board reg-read <device> <address>`
 - `daq acquire single <device>`
+- `daq acquire multi <group>`
 
 These commands use the profile file in `profiles/` and the legacy DAQ project referenced by `legacy.project_root`.
 
@@ -359,7 +360,53 @@ Recommended usage:
 - Use `trigger-show`, `tcp-mode2-show`, and `config-show` for normal operation
 - Use `reg-read` only when you need to inspect the underlying register bytes directly
 
-## 11. Suggested Workflow
+## 11. Multi-Board Capture
+
+Use `acquire multi` to run the current legacy multi-board acquisition flow for a
+group defined in the profile.
+
+Basic usage:
+
+```bash
+daq acquire multi two_board --profile profiles/example.yaml
+```
+
+Useful options:
+
+- `--aggregation-key timestamp`
+- `--aggregation-key event_count`
+- `--timestamp-match-window`
+- `--event-timeout-ms`
+- `--timeout`
+- `--allow-start-without-ack`
+- `--output-dir`
+
+Examples:
+
+```bash
+daq acquire multi two_board --aggregation-key timestamp --timestamp-match-window 10
+daq acquire multi two_board --aggregation-key event_count --allow-start-without-ack
+```
+
+Current behavior:
+
+- The command generates a temporary JSON config for the legacy
+  `multi_board_acquire.py` script
+- The selected group devices and TCM endpoint are taken from the profile
+- The legacy script still performs the actual TCM align, TCP receive, packet
+  parse, aggregation, and run-file writing
+- The command prints the final run directory, generated config path, and status
+
+Typical output data includes:
+
+- `run_meta.json`
+- `complete_events.dat`
+- `partial_events.dat`
+- `complete_events.idx`
+- `monitor.jsonl`
+- `log.txt`
+
+## 12. Suggested Workflow
 
 A simple single-board workflow looks like this:
 
@@ -381,11 +428,19 @@ daq board config-show dev1 --profile profiles/example.yaml
 daq acquire single dev1 --events 100 --profile profiles/example.yaml
 ```
 
-## 12. Current Limitations
+For a synchronized multi-board run:
+
+```bash
+daq profile validate --profile profiles/example.yaml
+daq board config dev1 --profile profiles/example.yaml
+daq board config dev2 --profile profiles/example.yaml
+daq acquire multi two_board --profile profiles/example.yaml
+```
+
+## 13. Current Limitations
 
 Not implemented yet:
 
-- Multi-board acquisition
 - Monitor commands
 - Waveform viewing
 - Interactive shell mode
@@ -393,9 +448,10 @@ Not implemented yet:
 
 Current technical limitation:
 
-- `board config` and `acquire single` still rely on legacy script behavior under the external project path
+- `board config`, `acquire single`, and `acquire multi` still rely on legacy
+  script behavior under the external project path
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 ### Command not found
 
@@ -424,7 +480,17 @@ Check:
 - Whether the board is sending mode-2 data
 - Whether the selected output directory is writable
 
-## 14. Related Documents
+### Multi-board run does not start
+
+Check:
+
+- Whether the selected group defines a valid `tcm`
+- Whether each device in the group has the correct `board_id`
+- Whether the TCM IP and RBCP port are reachable
+- Whether you need `--allow-start-without-ack` for current bring-up conditions
+
+## 15. Related Documents
 
 - [Architecture](./architecture.md)
 - [CLI Design](./cli-design.md)
+- [Firmware Compatibility Notes](./firmware-compatibility.md)

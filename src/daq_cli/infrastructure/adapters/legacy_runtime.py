@@ -50,6 +50,7 @@ def clear_legacy_modules() -> None:
     module_names = [
         "start_16CH_two_board",
         "capture_tcp_sent_mode2",
+        "multi_board_acquire",
         "FPGA_CTRL",
         "HMCAD1511",
         "mux",

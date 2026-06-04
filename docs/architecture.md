@@ -268,6 +268,10 @@ Implemented end-to-end:
 - `daq acquire single <device>`
   - Uses the legacy `capture_tcp_sent_mode2.py` flow through an adapter
   - Supports event count, timeout, and output directory selection
+- `daq acquire multi <group>`
+  - Resolves a logical group and TCM from the selected profile
+  - Generates a temporary config for the legacy `multi_board_acquire.py` flow
+  - Uses the legacy multi-board align, receive, parse, and aggregation path
 
 Implemented but still minimal:
 
@@ -276,7 +280,6 @@ Implemented but still minimal:
 
 Planned but not implemented:
 
-- Multi-board acquisition
 - Monitor commands
 - Waveform commands
 - Interactive shell mode
@@ -306,3 +309,10 @@ Recommended next coding steps:
 - Add monitor commands on top of the existing telemetry adapter
 - Start separating protocol and parser logic from legacy-script wrappers
 - Add waveform viewing on top of the single-board acquisition path
+
+Firmware update note:
+
+- the latest firmware now defines four explicit `TCP_SENT` packet modes and a
+  usable legacy multi-board acquisition script
+- see `docs/firmware-compatibility.md` before expanding acquisition or parser
+  work

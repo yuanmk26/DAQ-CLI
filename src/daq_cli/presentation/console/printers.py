@@ -1,7 +1,7 @@
 from rich.console import Console
 from rich.table import Table
 
-from daq_cli.application.acquire_service import SingleAcquireResult
+from daq_cli.application.acquire_service import MultiAcquireResult, SingleAcquireResult
 from daq_cli.application.board_service import (
     BoardConfigResult,
     BoardConfigSummaryResult,
@@ -88,6 +88,29 @@ def print_single_acquire_result(result: SingleAcquireResult) -> None:
 
     if result.log_output.strip():
         console.print(result.log_output.rstrip())
+
+
+def print_multi_acquire_result(result: MultiAcquireResult) -> None:
+    table = Table(title=f"Multi Acquire: {result.group.name}")
+    table.add_column("Field", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
+
+    table.add_row("devices", ", ".join(device.name for device in result.devices))
+    table.add_row("aggregation_key", result.aggregation_key)
+    table.add_row(
+        "timestamp_match_window_ticks",
+        str(result.timestamp_match_window_ticks),
+    )
+    table.add_row("timeout_s", f"{result.tcp_timeout_s}")
+    table.add_row("allow_start_without_ack", str(result.allow_start_without_ack))
+    table.add_row("status", result.status or "-")
+    table.add_row("output_base_dir", str(result.output_base_dir))
+    table.add_row("run_output_dir", str(result.run_output_dir or "-"))
+    table.add_row("config_path", str(result.config_path))
+    table.add_row("meta_path", str(result.meta_path or "-"))
+    table.add_row("log_path", str(result.log_path or "-"))
+    table.add_row("profile", str(result.source_profile))
+    console.print(table)
 
 
 def print_register_read_result(result: RegisterReadResult) -> None:

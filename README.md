@@ -9,9 +9,10 @@ The repository currently contains:
 
 - Architecture and command design documents in `docs/`
 - A user guide in `docs/usage.md`
+- Firmware compatibility notes in `docs/firmware-compatibility.md`
 - A Python package skeleton under `src/`
 - Profile-driven device loading
-- Legacy-script adapters for board telemetry, board configuration, and single-board capture
+- Legacy-script adapters for board telemetry, board configuration, and acquisition
 - Working command paths:
   - `daq board info <device>`
   - `daq board sysmon <device>`
@@ -21,10 +22,10 @@ The repository currently contains:
   - `daq board config-show <device>`
   - `daq board reg-read <device> <address>`
   - `daq acquire single <device>`
+  - `daq acquire multi <group>`
 
 Not implemented yet:
 
-- `daq acquire multi`
 - `daq monitor ...`
 - `daq wave ...`
 - `daq shell`
@@ -66,8 +67,22 @@ daq board config-show dev1 --profile profiles/example.yaml
 daq board reg-read dev1 0x10 --len 1 --profile profiles/example.yaml
 ```
 
+Firmware notes:
+
+- current board readback commands still use historical `tcp-mode2` naming
+- latest firmware exposes four `TCP_SENT` packet modes rather than a single
+  special "mode-2" protocol
+- see `docs/firmware-compatibility.md` for the current firmware-facing contract
+
 Capture single-board data:
 
 ```bash
 daq acquire single dev1 --events 100 --profile profiles/example.yaml
+```
+
+Run multi-board acquisition:
+
+```bash
+daq acquire multi two_board --profile profiles/example.yaml
+daq acquire multi two_board --aggregation-key event_count --allow-start-without-ack --profile profiles/example.yaml
 ```
