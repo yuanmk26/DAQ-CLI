@@ -272,6 +272,10 @@ Implemented end-to-end:
   - Resolves a logical group and TCM from the selected profile
   - Generates a temporary config for the legacy `multi_board_acquire.py` flow
   - Uses the legacy multi-board align, receive, parse, and aggregation path
+- `daq monitor wave <device>`
+  - Uses a native TCP receive path for `send_mode = 1` full-waveform monitoring
+  - Supports live preview, bundled demo preview, and dump replay preview
+  - Restores the original `send_mode` on exit
 
 Implemented but still minimal:
 
@@ -280,7 +284,7 @@ Implemented but still minimal:
 
 Planned but not implemented:
 
-- Monitor commands
+- Additional monitor commands beyond `monitor wave`
 - Waveform commands
 - Interactive shell mode
 - Native protocol, parser, and hardware modules

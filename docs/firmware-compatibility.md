@@ -88,6 +88,10 @@ Receiver-side implication:
 - `hit_mask` alone is not enough to infer frame length
 - `mode 1` still carries a real `hit_mask`, even though payload is full-waveform
 
+Current `daq-cli` note:
+
+- first-version `daq monitor wave` supports only `send_mode = 1` live monitoring
+
 ### 2.4 Feature payload exists as a first-class format
 
 For `send_mode = 2` and `3`, each selected channel may emit a 10-byte feature

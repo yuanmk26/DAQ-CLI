@@ -15,6 +15,7 @@ At the moment, the most useful command paths are:
 - `daq board reg-read <device> <address>`
 - `daq acquire single <device>`
 - `daq acquire multi <group>`
+- `daq monitor wave <device>`
 
 These commands use the profile file in `profiles/` and the legacy DAQ project referenced by `legacy.project_root`.
 
@@ -406,7 +407,46 @@ Typical output data includes:
 - `monitor.jsonl`
 - `log.txt`
 
-## 12. Suggested Workflow
+## 12. Waveform Monitoring
+
+Use `monitor wave` to open a 16-channel waveform monitor window.
+
+Basic live usage:
+
+```bash
+daq monitor wave dev1 --profile profiles/example.yaml
+```
+
+Important behavior:
+
+- The live monitor reads the current `send_mode`
+- It then switches the board to `send_mode = 1` for full-waveform output
+- On exit, it attempts to restore the original `send_mode`
+- The first version supports manual exit only
+
+Offline preview modes:
+
+```bash
+daq monitor wave demo --demo
+daq monitor wave replay --replay src/daq_cli/monitoring_samples/replay_dump.txt
+```
+
+Preview notes:
+
+- `--demo` uses a bundled sample frame set
+- `--replay` reads a structured dump file and replays it in the same 16-channel view
+- `--demo` and `--replay` are mutually exclusive
+
+The monitor window currently shows:
+
+- 16 channels in a 4x4 layout
+- Current `event_count`
+- Current `timestamp`
+- Current `hit_mask`
+- Current `send_mode`
+- Current source mode: `live`, `demo`, or `replay`
+
+## 13. Suggested Workflow
 
 A simple single-board workflow looks like this:
 
@@ -437,12 +477,12 @@ daq board config dev2 --profile profiles/example.yaml
 daq acquire multi two_board --profile profiles/example.yaml
 ```
 
-## 13. Current Limitations
+## 14. Current Limitations
 
 Not implemented yet:
 
-- Monitor commands
-- Waveform viewing
+- Additional monitor commands beyond `monitor wave`
+- Separate `wave` command workflows
 - Interactive shell mode
 - Native protocol and parser modules independent of legacy scripts
 
@@ -450,8 +490,10 @@ Current technical limitation:
 
 - `board config`, `acquire single`, and `acquire multi` still rely on legacy
   script behavior under the external project path
+- `monitor wave` currently supports only `send_mode = 1` full-waveform monitoring
+- `monitor wave` currently supports only single-board monitoring
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
 ### Command not found
 
@@ -489,7 +531,16 @@ Check:
 - Whether the TCM IP and RBCP port are reachable
 - Whether you need `--allow-start-without-ack` for current bring-up conditions
 
-## 15. Related Documents
+### Wave monitor does not start
+
+Check:
+
+- Whether `matplotlib` is installed in the current environment
+- Whether the board TCP port is reachable for live mode
+- Whether the dump path passed to `--replay` is readable
+- Whether the board is producing `send_mode = 1` packets after the CLI switches modes
+
+## 16. Related Documents
 
 - [Architecture](./architecture.md)
 - [CLI Design](./cli-design.md)

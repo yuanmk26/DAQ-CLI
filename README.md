@@ -23,10 +23,11 @@ The repository currently contains:
   - `daq board reg-read <device> <address>`
   - `daq acquire single <device>`
   - `daq acquire multi <group>`
+  - `daq monitor wave <device>`
 
 Not implemented yet:
 
-- `daq monitor ...`
+- additional `daq monitor ...` commands
 - `daq wave ...`
 - `daq shell`
 
@@ -85,4 +86,12 @@ Run multi-board acquisition:
 ```bash
 daq acquire multi two_board --profile profiles/example.yaml
 daq acquire multi two_board --aggregation-key event_count --allow-start-without-ack --profile profiles/example.yaml
+```
+
+Preview or watch waveforms:
+
+```bash
+daq monitor wave dev1 --profile profiles/example.yaml
+daq monitor wave demo --demo
+daq monitor wave replay --replay src/daq_cli/monitoring_samples/replay_dump.txt
 ```

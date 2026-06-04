@@ -108,6 +108,13 @@ class LegacyBoardAdapter:
             data = bytes(rbcp_client.read(address, length))
             return LegacyRegisterReadResult(address=address, data=data)
 
+    def write_registers(self, device: DeviceConfig, address: int, data: bytes) -> None:
+        with temporary_sys_path(self._script_dir), device_environment(device):
+            clear_legacy_modules()
+            rbcp_module = importlib.import_module("lib.rbcp")
+            rbcp_client = rbcp_module.Rbcp(device_ip=device.ip, udp_port=device.rbcp_port)
+            rbcp_client.write(address, bytes(data))
+
     def read_trigger_config(self, device: DeviceConfig) -> LegacyTriggerReadResult:
         with temporary_sys_path(self._script_dir), device_environment(device):
             clear_legacy_modules()
@@ -144,6 +151,13 @@ class LegacyBoardAdapter:
                 hit_thresholds=[int(value) for value in hit_thresholds],
                 hit_polarities=[int(value) for value in hit_polarities],
             )
+
+    def write_send_mode(self, device: DeviceConfig, send_mode: int) -> None:
+        if send_mode < 0 or send_mode > 3:
+            raise ValueError("send_mode must stay in range 0..3")
+        current = self.read_registers(device, 0x42, 1).data[0]
+        updated = (current & 0xFC) | (send_mode & 0x03)
+        self.write_registers(device, 0x42, bytes([updated]))
 
     @contextmanager
     def _patched_trigger_behavior(

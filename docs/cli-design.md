@@ -22,7 +22,7 @@ Current implementation status:
 - `board`: partially implemented with real hardware-backed flows
 - `acquire`: partially implemented for single-board and multi-board capture
 - `group`: placeholder only
-- `monitor`: placeholder only
+- `monitor`: partially implemented for waveform monitoring
 - `wave`: placeholder only
 - `shell`: not implemented
 
@@ -226,6 +226,20 @@ First-phase minimum:
 - `board`
 - `board --watch`
 
+Current implementation:
+
+```bash
+daq monitor wave <device>
+daq monitor wave demo --demo
+daq monitor wave replay --replay src/daq_cli/monitoring_samples/replay_dump.txt
+```
+
+Implementation note:
+
+- `monitor wave` uses a native lightweight TCP parser for `send_mode = 1`
+- live mode temporarily switches the board to full-waveform mode and restores the previous `send_mode` on exit
+- offline preview is available through bundled demo data and replay dump input
+
 Current status:
 
 - Placeholder only
@@ -376,7 +390,6 @@ Current milestone progress:
   - `daq acquire single <device>`
   - `daq acquire multi <group>`
 - Not done yet:
-  - `daq monitor ...`
   - `daq wave ...`
 
 ## 11. Follow-Up Milestone
