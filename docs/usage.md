@@ -422,7 +422,7 @@ Important behavior:
 - The live monitor reads the current `send_mode`
 - It then switches the board to `send_mode = 1` for full-waveform output
 - On exit, it attempts to restore the original `send_mode`
-- The first version supports manual exit only
+- The viewer supports runtime `RUN`, `STOP`, and `SINGLE` display control
 
 Offline preview modes:
 
@@ -436,15 +436,33 @@ Preview notes:
 - `--demo` uses a bundled sample frame set
 - `--replay` reads a structured dump file and replays it in the same 16-channel view
 - `--demo` and `--replay` are mutually exclusive
+- The viewer scales its default window size to the current screen when possible
 
 The monitor window currently shows:
 
 - 16 channels in a 4x4 layout
+- Current viewer state: `RUN`, `STOP`, or `SINGLE-ARMED`
 - Current `event_count`
 - Current `timestamp`
 - Current `hit_mask`
 - Current `send_mode`
 - Current source mode: `live`, `demo`, or `replay`
+
+Viewer keyboard controls:
+
+- `space`: toggle between `RUN` and `STOP`
+- `s`: arm `SINGLE`, wait for the next frame, then freeze on it
+- `r`: force the viewer back to `RUN`
+- `q`: close the viewer
+
+Mode definitions:
+
+- `RUN`: keep consuming the stream and refresh on the latest frame
+- `STOP`: freeze the current display while the live stream continues in the background
+- `SINGLE`: wait for the next incoming frame, display it once, then automatically return to `STOP`
+
+`SINGLE` here means "wait for the next frame and freeze on it". It does not stop
+hardware acquisition and it is not a hardware single-shot sampling mode.
 
 ## 13. Suggested Workflow
 
@@ -492,6 +510,7 @@ Current technical limitation:
   script behavior under the external project path
 - `monitor wave` currently supports only `send_mode = 1` full-waveform monitoring
 - `monitor wave` currently supports only single-board monitoring
+- `monitor wave` currently has no advanced trigger conditions or frame history buffer
 
 ## 15. Troubleshooting
 
