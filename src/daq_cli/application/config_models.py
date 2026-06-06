@@ -13,3 +13,4 @@ class BoardConfigOptions:
     trigger_position: int = 40
     timestamp_clean_enabled: bool = False
     ext_trigger_enabled: bool = False
+    send_mode: int | None = None

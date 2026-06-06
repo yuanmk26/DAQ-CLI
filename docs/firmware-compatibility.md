@@ -143,6 +143,7 @@ Recommended direction:
 - keep current command names temporarily for compatibility
 - document clearly that these commands currently operate on the
   `0x42..0x44` `TCP_SENT` registers
+- expose explicit write commands with `send_mode` terminology where appropriate
 - plan a later rename toward `tcp-sent` or `packet-mode`
 
 ### 3.2 Acquisition docs currently overstate the packet assumption

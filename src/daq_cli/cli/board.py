@@ -11,6 +11,7 @@ from daq_cli.presentation.console.printers import (
     print_board_config_result,
     print_board_config_summary_result,
     print_board_info,
+    print_send_mode_set_result,
     print_board_sysmon,
     print_register_read_result,
     print_tcp_mode2_config_read_result,
@@ -118,6 +119,19 @@ def board_config(
             help="Enable or disable external trigger.",
         ),
     ] = False,
+    send_mode: Annotated[
+        int | None,
+        typer.Option(
+            "--send-mode",
+            min=0,
+            max=3,
+            help=(
+                "Optionally write TCP send mode after configuration: "
+                "0=hit-selected waveform, 1=full-channel waveform, "
+                "2=hit-selected feature, 3=hit-selected feature + waveform."
+            ),
+        ),
+    ] = None,
     profile: ProfileOption = Path("profiles/example.yaml"),
 ) -> None:
     """Configure a board through the legacy configuration script."""
@@ -141,6 +155,7 @@ def board_config(
             trigger_position=trigger_position,
             timestamp_clean_enabled=timestamp_clean_enabled,
             ext_trigger_enabled=ext_trigger_enabled,
+            send_mode=send_mode,
         ),
     )
     print_board_config_result(result)
@@ -166,6 +181,32 @@ def board_tcp_mode2_show(
     service = BoardService()
     result = service.read_tcp_mode2_config(device_name=device, profile_path=profile)
     print_tcp_mode2_config_read_result(result)
+
+
+@app.command("send-mode-set")
+def board_send_mode_set(
+    device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
+    mode: Annotated[
+        int,
+        typer.Argument(
+            min=0,
+            max=3,
+            help=(
+                "TCP send mode: 0=hit-selected waveform, 1=full-channel waveform, "
+                "2=hit-selected feature, 3=hit-selected feature + waveform."
+            ),
+        ),
+    ],
+    profile: ProfileOption = Path("profiles/example.yaml"),
+) -> None:
+    """Write the board send_mode register and verify it by readback."""
+    service = BoardService()
+    result = service.set_send_mode(
+        device_name=device,
+        profile_path=profile,
+        send_mode=mode,
+    )
+    print_send_mode_set_result(result)
 
 
 @app.command("config-show")

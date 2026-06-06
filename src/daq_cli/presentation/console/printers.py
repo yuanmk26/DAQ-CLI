@@ -7,6 +7,7 @@ from daq_cli.application.board_service import (
     BoardConfigSummaryResult,
     BoardInfoResult,
     RegisterReadResult,
+    SendModeSetResult,
     TcpMode2ConfigReadResult,
     TriggerConfigReadResult,
 )
@@ -65,6 +66,14 @@ def print_board_config_result(result: BoardConfigResult) -> None:
     table.add_row("trigger_position", str(result.trigger_position))
     table.add_row("timestamp_clean_enabled", str(result.timestamp_clean_enabled))
     table.add_row("ext_trigger_enabled", str(result.ext_trigger_enabled))
+    table.add_row(
+        "requested_send_mode",
+        "-" if result.requested_send_mode is None else str(result.requested_send_mode),
+    )
+    table.add_row(
+        "effective_send_mode",
+        "-" if result.effective_send_mode is None else str(result.effective_send_mode),
+    )
     table.add_row("send_start_delay_us", f"{result.send_start_delay_us}")
     table.add_row("profile", str(result.source_profile))
     console.print(table)
@@ -80,6 +89,23 @@ def print_single_acquire_result(result: SingleAcquireResult) -> None:
 
     table.add_row("requested_events", str(result.requested_events))
     table.add_row("captured_events", str(result.captured_events or "-"))
+    table.add_row("send_mode", str(result.send_mode))
+    table.add_row("decode_enabled", str(result.decode_enabled))
+    table.add_row(
+        "decoded_output_dir",
+        str(result.decoded_output_dir or "-"),
+    )
+    table.add_row(
+        "decoded_events",
+        "-" if result.decoded_events is None else str(result.decoded_events),
+    )
+    table.add_row("decode_errors", str(result.decode_errors))
+    table.add_row("watch_enabled", str(result.watch_enabled))
+    table.add_row(
+        "watch_every",
+        "-" if result.watch_every is None else str(result.watch_every),
+    )
+    table.add_row("watched_frames", str(result.watched_frames))
     table.add_row("timeout_s", f"{result.tcp_timeout_s}")
     table.add_row("output_base_dir", str(result.output_base_dir))
     table.add_row("run_output_dir", str(result.run_output_dir or "-"))
@@ -157,6 +183,17 @@ def print_tcp_mode2_config_read_result(result: TcpMode2ConfigReadResult) -> None
         "hit_polarities",
         ", ".join(str(value) for value in result.hit_polarities),
     )
+    table.add_row("profile", str(result.source_profile))
+    console.print(table)
+
+
+def print_send_mode_set_result(result: SendModeSetResult) -> None:
+    table = Table(title=f"Send Mode Set: {result.device.name}")
+    table.add_column("Field", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
+
+    table.add_row("requested_send_mode", str(result.requested_send_mode))
+    table.add_row("effective_send_mode", str(result.effective_send_mode))
     table.add_row("profile", str(result.source_profile))
     console.print(table)
 

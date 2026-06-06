@@ -92,6 +92,7 @@ Current implementation details:
 - `daq board config <device>` works through the legacy configuration script adapter
 - `daq board trigger-show <device>` works
 - `daq board tcp-mode2-show <device>` works
+- `daq board send-mode-set <device> <mode>` works
 - `daq board config-show <device>` works
 - `daq board reg-read <device> <address>` works
 
@@ -105,6 +106,7 @@ daq board config dev1 --timestamp-clean
 daq board config dev1 --no-timestamp-clean
 daq board config dev1 --ext-trigger
 daq board config dev1 --no-ext-trigger
+daq board config dev1 --send-mode 1
 daq board config dev1 --send-start-delay-us 100
 ```
 
@@ -118,6 +120,7 @@ Current readback commands:
 ```bash
 daq board trigger-show dev1
 daq board tcp-mode2-show dev1
+daq board send-mode-set dev1 1
 daq board config-show dev1
 daq board reg-read dev1 0x10 --len 1
 ```
@@ -187,13 +190,20 @@ Current implementation:
 daq acquire single <device> --events 1000
 daq acquire single <device> --timeout 10
 daq acquire single <device> --output-dir out/single
+daq acquire single <device> --decode-json
+daq acquire single <device> --watch-every 100
+daq decode run <run_dir>
+daq decode event <event_file>
 daq acquire multi <group>
 daq acquire multi <group> --aggregation-key event_count
 ```
 
 Implementation note:
 
-- `single` currently runs through the legacy `capture_tcp_sent_mode2.py` script adapter
+- `single` now uses a native single-board TCP_SENT capture path
+- `single --decode-json` adds a best-effort online decode pipeline while keeping raw capture as the priority path
+- `single --watch-every N` adds a best-effort sampled waveform watch path while keeping raw capture as the priority path
+- `decode` provides offline packet-to-JSON decoding for saved raw event files
 - `multi` currently runs through the legacy `multi_board_acquire.py` script adapter
 
 ## 6. Monitor Commands

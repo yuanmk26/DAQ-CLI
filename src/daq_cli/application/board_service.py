@@ -29,6 +29,8 @@ class BoardConfigResult:
     trigger_position: int
     timestamp_clean_enabled: bool
     ext_trigger_enabled: bool
+    requested_send_mode: int | None
+    effective_send_mode: int | None
     log_output: str
 
 
@@ -61,6 +63,14 @@ class TcpMode2ConfigReadResult:
     integration_post_samples: int
     hit_thresholds: list[int]
     hit_polarities: list[int]
+
+
+@dataclass(slots=True)
+class SendModeSetResult:
+    device: DeviceConfig
+    source_profile: Path
+    requested_send_mode: int
+    effective_send_mode: int
 
 
 @dataclass(slots=True)
@@ -121,6 +131,20 @@ class BoardService:
             send_start_delay_us=send_start_delay_us,
             options=options,
         )
+        effective_send_mode: int | None = None
+        log_output = raw_result.log_output
+        if options.send_mode is not None:
+            send_mode_result = self._set_send_mode_with_adapter(
+                adapter=adapter,
+                device=device,
+                source_profile=profile.path,
+                send_mode=options.send_mode,
+            )
+            effective_send_mode = send_mode_result.effective_send_mode
+            log_output = self._annotate_send_mode_log(
+                raw_result.log_output,
+                effective_send_mode=effective_send_mode,
+            )
         return BoardConfigResult(
             device=device,
             source_profile=profile.path,
@@ -135,7 +159,9 @@ class BoardService:
             trigger_position=options.trigger_position,
             timestamp_clean_enabled=options.timestamp_clean_enabled,
             ext_trigger_enabled=options.ext_trigger_enabled,
-            log_output=raw_result.log_output,
+            requested_send_mode=options.send_mode,
+            effective_send_mode=effective_send_mode,
+            log_output=log_output,
         )
 
     def read_registers(
@@ -187,7 +213,9 @@ class BoardService:
     def read_board_config_summary(
         self, device_name: str, profile_path: Path | str
     ) -> BoardConfigSummaryResult:
-        trigger = self.read_trigger_config(device_name=device_name, profile_path=profile_path)
+        trigger = self.read_trigger_config(
+            device_name=device_name, profile_path=profile_path
+        )
         tcp_mode2 = self.read_tcp_mode2_config(
             device_name=device_name, profile_path=profile_path
         )
@@ -198,7 +226,56 @@ class BoardService:
             tcp_mode2=tcp_mode2,
         )
 
+    def set_send_mode(
+        self,
+        device_name: str,
+        profile_path: Path | str,
+        send_mode: int,
+    ) -> SendModeSetResult:
+        profile, device = self._resolve_device(device_name, profile_path)
+        adapter = self._make_adapter(profile)
+        return self._set_send_mode_with_adapter(
+            adapter=adapter,
+            device=device,
+            source_profile=profile.path,
+            send_mode=send_mode,
+        )
+
     def _make_adapter(self, profile) -> LegacyBoardAdapter:
         if profile.legacy.project_root is None:
             raise ValueError("The selected profile does not define legacy.project_root")
         return LegacyBoardAdapter(profile.legacy.project_root)
+
+    def _set_send_mode_with_adapter(
+        self,
+        adapter: LegacyBoardAdapter,
+        device: DeviceConfig,
+        source_profile: Path,
+        send_mode: int,
+    ) -> SendModeSetResult:
+        adapter.write_send_mode(device, send_mode)
+        readback = adapter.read_tcp_mode2_config(device)
+        if readback.send_mode != send_mode:
+            raise RuntimeError(
+                f"send_mode write verification failed: requested {send_mode}, "
+                f"read back {readback.send_mode}."
+            )
+        return SendModeSetResult(
+            device=device,
+            source_profile=source_profile,
+            requested_send_mode=send_mode,
+            effective_send_mode=readback.send_mode,
+        )
+
+    def _annotate_send_mode_log(
+        self,
+        log_output: str,
+        effective_send_mode: int,
+    ) -> str:
+        normalized = log_output.replace(
+            "Read Send Mode:", "Pre-write Read Send Mode:"
+        )
+        suffix = f"\nFinal verified send_mode: {effective_send_mode}\n"
+        if normalized.endswith("\n"):
+            return normalized + suffix.lstrip("\n")
+        return normalized + suffix

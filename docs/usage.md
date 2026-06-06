@@ -11,6 +11,7 @@ At the moment, the most useful command paths are:
 - `daq board config <device>`
 - `daq board trigger-show <device>`
 - `daq board tcp-mode2-show <device>`
+- `daq board send-mode-set <device> <mode>`
 - `daq board config-show <device>`
 - `daq board reg-read <device> <address>`
 - `daq acquire single <device>`
@@ -228,6 +229,7 @@ Supported options:
 - `--threshold-4`
 - `--timestamp-clean/--no-timestamp-clean`
 - `--ext-trigger/--no-ext-trigger`
+- `--send-mode`
 - `--send-start-delay-us`
 
 Important default behavior:
@@ -263,11 +265,20 @@ Example with send-start delay:
 daq board config dev1 --send-start-delay-us 100
 ```
 
+Example with send mode:
+
+```bash
+daq board config dev1 --send-mode 1 --profile profiles/example.yaml
+```
+
 The command prints:
 
 - Whether configuration succeeded
 - Which steps were enabled
 - Final trigger-related options
+- Optional `send_mode` write request and readback
+- `Pre-write Read Send Mode` when the legacy config log reports the mode before the CLI writeback
+- `Final verified send_mode: ...` after the CLI readback check succeeds
 - Captured log output from the legacy script
 
 ## 9. Single-Board Capture
@@ -280,11 +291,30 @@ Basic usage:
 daq acquire single dev1 --profile profiles/example.yaml
 ```
 
+You can move the common `acquire single` defaults into the profile to keep commands short:
+
+```yaml
+defaults:
+  output_dir: out
+  acquire_single:
+    events: 1000
+    timeout_s: 10.0
+    progress_every: 50
+    decode_json: false
+    watch_every: null
+```
+
+When these keys are present, `daq acquire single dev1 --profile profiles/example.yaml` will use them automatically, and any explicit CLI option still overrides the profile value.
+
 Useful options:
 
 - `--events`: number of events to capture
 - `--timeout`: TCP socket timeout in seconds
 - `--output-dir`: base output directory for generated run folders
+- `--decode-json`: also generate decoded JSON during capture
+- `--decoded-output-dir`: choose where online decoded JSON files are written
+- `--watch-every`: show a low-rate waveform watch window using every Nth captured event
+- `--progress-every`: print one live progress line every N captured events
 
 Examples:
 
@@ -292,26 +322,75 @@ Examples:
 daq acquire single dev1 --events 100 --profile profiles/example.yaml
 daq acquire single dev1 --events 1000 --timeout 10 --profile profiles/example.yaml
 daq acquire single dev1 --events 200 --output-dir out/single --profile profiles/example.yaml
+daq acquire single dev1 --events 100 --decode-json --profile profiles/example.yaml
+daq acquire single dev1 --events 1000 --watch-every 100 --profile profiles/example.yaml
+daq acquire single dev1 --events 1000 --progress-every 50 --profile profiles/example.yaml
 ```
 
 Current behavior:
 
-- The command uses the legacy `capture_tcp_sent_mode2.py` script through an adapter
+- The command reads the board's current `send_mode` before capture
+- The native single-board receiver parses packet length from that `send_mode`
+- Current single-board capture supports firmware `send_mode` 0, 1, 2, and 3
 - A timestamped run directory is created under the selected output base directory
-- Raw event files are written by the legacy script
+- Raw event files are written by the native runner in the same per-event format as before
+- `--decode-json` adds a separate online decode pipeline that writes `decoded/event_XXXXX.json`
+- The online decode pipeline is best-effort and does not take priority over raw capture throughput
+- `--watch-every N` opens a waveform watch viewer and refreshes it with every Nth captured event
+- The watch viewer is a best-effort sampling path that always yields to raw capture throughput
+- A line-by-line live monitor shows progress, event rate, latest `hit_mask`, packet bytes, and output directory during capture
+- `--progress-every N` throttles those live progress lines while still forcing the final `events=N/N` line
+- `defaults.acquire_single` in the profile can provide default values for `events`, `timeout_s`, `output_dir`, `decode_json`, `decoded_output_dir`, `watch_every`, and `progress_every`
 - A summary table is printed after the run
-- The legacy script output is also shown
+- A final native capture summary is also shown
 
 Typical output data includes:
 
 - Event binary files
+- Optional decoded JSON files under `decoded/`
 - `capture_info.txt`
 
-## 10. Reading Configuration Back
+## 10. Offline Decode
+
+Use `decode` to convert raw single-board event packets into structured JSON.
+
+Run-level decode:
+
+```bash
+daq decode run out/single/20260606_205506
+```
+
+Single-event decode:
+
+```bash
+daq decode event out/single/20260606_205506/raw/event_00000.bin
+```
+
+Useful options:
+
+- `--output-dir`: choose where decoded JSON files are written
+- `--overwrite`: replace existing JSON outputs
+- `--limit`: decode only the first N event files when using `decode run`
+
+Current behavior:
+
+- `decode run` scans `raw/event_*.bin` in filename order
+- If `capture_info.txt` exists, it uses `send_mode` and `adc_length` as decode context
+- First-version output is one JSON file per event
+- The decoder supports `send_mode` 0, 1, 2, and 3
+- For partial-waveform modes, JSON still uses a fixed 16-channel structure, with missing channels written as `null`
+
+The mode1 sample directory below is a good first validation target:
+
+```bash
+daq decode run out/single/20260606_205506
+```
+
+## 11. Reading Configuration Back
 
 The CLI now supports three levels of read-only configuration inspection.
 
-### 10.1 Semantic Block Readback
+### 11.1 Semantic Block Readback
 
 These commands read meaningful configuration groups instead of raw register addresses:
 
@@ -337,7 +416,28 @@ daq board tcp-mode2-show dev1 --profile profiles/example.yaml
 - Hit thresholds for all 16 channels
 - Hit polarities for all 16 channels
 
-### 10.2 Semantic Summary Readback
+To write the current board `send_mode` directly:
+
+```bash
+daq board send-mode-set dev1 1 --profile profiles/example.yaml
+daq board tcp-mode2-show dev1 --profile profiles/example.yaml
+```
+
+Supported modes:
+
+- `0`: hit-selected waveform
+- `1`: full-channel waveform
+- `2`: hit-selected feature
+- `3`: hit-selected feature + waveform
+
+Important behavior:
+
+- `send-mode-set` writes the board's current `send_mode` persistently
+- it immediately reads the value back and fails if the readback does not match
+- `board config --send-mode ...` uses the same write-and-readback verification path
+- this is different from `monitor wave`, which temporarily switches to `send_mode = 1` for the live viewer session and then restores the previous mode
+
+### 11.2 Semantic Summary Readback
 
 To view the most important trigger and TCP mode-2 settings together:
 

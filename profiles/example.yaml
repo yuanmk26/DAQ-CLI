@@ -29,6 +29,12 @@ defaults:
   trigger_mode: 1
   trigger_position: 40
   thresholds: [1950, 2400, 2300, 2300]
+  acquire_single:
+    events: 1000
+    timeout_s: 10.0
+    progress_every: 50
+    decode_json: true
+    watch_every: 50
 
 legacy:
   project_root: E:\projects\1-hardware\FDU-ADC-250M-16ch

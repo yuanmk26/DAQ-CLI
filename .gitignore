@@ -39,6 +39,8 @@ runs/
 logs/
 tmp/
 temp/
+tmp_test_outputs/
+tmp_test_decode/
 
 # Waveform and acquisition scratch data
 captures/
@@ -47,4 +49,3 @@ artifacts/
 # Local profile overrides
 profiles/*.local.yaml
 profiles/*.private.yaml
-

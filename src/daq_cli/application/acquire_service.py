@@ -1,12 +1,16 @@
+import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from daq_cli.application.profile_service import ProfileService
 from daq_cli.domain.device import DeviceConfig
 from daq_cli.domain.group import GroupConfig
 from daq_cli.infrastructure.adapters.legacy_capture_runner import (
+    LegacySingleCaptureProgress,
     LegacySingleCaptureRunner,
 )
+from daq_cli.infrastructure.adapters.legacy_board_adapter import LegacyBoardAdapter
 from daq_cli.infrastructure.adapters.legacy_multi_capture_runner import (
     LegacyMultiCaptureConfig,
     LegacyMultiCaptureRunner,
@@ -21,8 +25,26 @@ class SingleAcquireResult:
     run_output_dir: Path | None
     requested_events: int
     captured_events: int | None
+    send_mode: int
+    decode_enabled: bool
+    decoded_output_dir: Path | None
+    decoded_events: int | None
+    decode_errors: int
+    watch_enabled: bool
+    watch_every: int | None
+    watched_frames: int
     tcp_timeout_s: float
     log_output: str
+
+
+@dataclass(slots=True)
+class SingleAcquireProgress:
+    captured_events: int
+    requested_events: int
+    packet_bytes: int | None
+    hit_mask: int | None
+    output_dir: Path | None
+    event_rate_hz: float
 
 
 @dataclass(slots=True)
@@ -55,6 +77,10 @@ class AcquireService:
         events: int,
         timeout_s: float,
         output_base_dir: Path | None = None,
+        decode_json: bool = False,
+        decoded_output_dir: Path | None = None,
+        watch_every: int | None = None,
+        progress_callback: Callable[[SingleAcquireProgress], None] | None = None,
     ) -> SingleAcquireResult:
         profile = self._profile_service.load_profile(profile_path)
         try:
@@ -71,12 +97,61 @@ class AcquireService:
         base_dir = output_base_dir or (
             self._default_output_base_dir(profile.path, profile) / "single"
         )
+        board_adapter = LegacyBoardAdapter(profile.legacy.project_root)
+        tcp_config = board_adapter.read_tcp_mode2_config(device)
         runner = LegacySingleCaptureRunner(profile.legacy.project_root)
+        capture_started_at: float | None = None
+        latest_output_dir: Path | None = None
+        latest_captured_events = 0
+        latest_packet_bytes: int | None = None
+        latest_hit_mask: int | None = None
+
+        def on_progress(raw_progress: LegacySingleCaptureProgress) -> None:
+            nonlocal capture_started_at, latest_output_dir
+            nonlocal latest_captured_events, latest_packet_bytes, latest_hit_mask
+            if raw_progress.output_dir is not None:
+                latest_output_dir = raw_progress.output_dir
+            if raw_progress.captured_events > 0:
+                latest_captured_events = raw_progress.captured_events
+            if raw_progress.packet_bytes is not None:
+                latest_packet_bytes = raw_progress.packet_bytes
+            if raw_progress.hit_mask is not None:
+                latest_hit_mask = raw_progress.hit_mask
+            if progress_callback is None:
+                return
+            if latest_captured_events > 0 and capture_started_at is None:
+                capture_started_at = time.perf_counter()
+            elapsed_s = (
+                max(time.perf_counter() - capture_started_at, 1e-9)
+                if capture_started_at is not None
+                else 0.0
+            )
+            event_rate_hz = (
+                latest_captured_events / elapsed_s
+                if latest_captured_events > 0 and elapsed_s > 0
+                else 0.0
+            )
+            progress_callback(
+                SingleAcquireProgress(
+                    captured_events=latest_captured_events,
+                    requested_events=events,
+                    packet_bytes=latest_packet_bytes,
+                    hit_mask=latest_hit_mask,
+                    output_dir=latest_output_dir,
+                    event_rate_hz=event_rate_hz,
+                )
+            )
+
         raw_result = runner.capture_single(
             device=device,
             output_base_dir=base_dir,
             events=events,
             timeout_s=timeout_s,
+            send_mode=tcp_config.send_mode,
+            decode_json=decode_json,
+            decoded_output_dir=decoded_output_dir,
+            watch_every=watch_every,
+            progress_callback=on_progress,
         )
         return SingleAcquireResult(
             device=device,
@@ -85,6 +160,14 @@ class AcquireService:
             run_output_dir=raw_result.run_output_dir,
             requested_events=events,
             captured_events=raw_result.captured_events,
+            send_mode=raw_result.send_mode,
+            decode_enabled=raw_result.decode_enabled,
+            decoded_output_dir=raw_result.decoded_output_dir,
+            decoded_events=raw_result.decoded_events,
+            decode_errors=raw_result.decode_errors,
+            watch_enabled=raw_result.watch_enabled,
+            watch_every=raw_result.watch_every,
+            watched_frames=raw_result.watched_frames,
             tcp_timeout_s=timeout_s,
             log_output=raw_result.log_output,
         )
