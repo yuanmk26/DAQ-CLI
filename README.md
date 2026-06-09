@@ -39,6 +39,21 @@ Install in editable mode:
 pip install -e .
 ```
 
+Install from a GitHub Releases wheel on a new PC:
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install -U pip
+python -m pip install daq_cli-0.1.0-py3-none-any.whl
+daq --help
+```
+
+For a release-style install and machine-specific profile setup, see
+`docs/install-on-new-pc.md`. For a public configuration starting point, copy
+`profiles/example.template.yaml` to your own `profiles/<machine>.local.yaml`
+and edit the hardware-specific values there.
+
 Run the example command:
 
 ```bash

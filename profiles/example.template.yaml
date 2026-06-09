@@ -1,0 +1,50 @@
+devices:
+  dev1:
+    ip: 192.168.10.10  # change for your lab network
+    rbcp_port: 4660
+    tcp_port: 24
+    board_id: 0
+    role: adc
+
+  dev2:
+    ip: 192.168.10.11  # change for your lab network
+    rbcp_port: 4660
+    tcp_port: 24
+    board_id: 1
+    role: adc
+
+tcm:
+  main:
+    ip: 192.168.10.20  # change for your TCM
+    rbcp_port: 4660
+
+groups:
+  two_board:
+    devices: [dev1, dev2]
+    tcm: main
+
+defaults:
+  adc_length: 64
+  output_dir: out
+  trigger_mode: 1
+  trigger_position: 40
+  thresholds: [1950, 2400, 2300, 2300]
+  acquire_single:
+    events: 1000
+    timeout_s: 10.0
+    progress_every: 50
+    decode_json: true
+    watch_every: 50
+  acquire_multi:
+    aggregation_key: timestamp
+    timestamp_match_window_ticks: 10
+    event_timeout_ms: 50
+    tcp_timeout_s: 1.0
+    allow_start_without_ack: true
+    decode_json: true
+    watch_waveforms: true
+    watch_every: 100
+    stop_on_watch_close: true
+
+legacy:
+  project_root: C:\path\to\FDU-ADC-250M-16ch  # must be updated on each PC
