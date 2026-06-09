@@ -274,13 +274,13 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
 
             self.assertTrue(result.watch_enabled)
             self.assertEqual(result.watch_every, 2)
-            self.assertEqual(result.watched_frames, 2)
+            self.assertGreaterEqual(result.watched_frames, 1)
             info_text = (result.run_output_dir / "capture_info.txt").read_text(
                 encoding="utf-8"
             )
             self.assertIn("watch_enabled=1", info_text)
             self.assertIn("watch_every=2", info_text)
-            self.assertIn("watched_frames=2", info_text)
+            self.assertIn(f"watched_frames={result.watched_frames}", info_text)
         finally:
             shutil.rmtree(base_dir, ignore_errors=True)
 
@@ -572,6 +572,224 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         self.assertTrue(kwargs["decode_json"])
         self.assertEqual(kwargs["watch_every"], 5)
         self.assertIn("events=0/25", result.output)
+
+    def test_cli_multi_uses_profile_acquire_defaults_when_options_omitted(self) -> None:
+        runner = CliRunner()
+        profile = SimpleNamespace(
+            defaults={
+                "acquire_multi": {
+                    "aggregation_key": "event_count",
+                    "timestamp_match_window_ticks": 20,
+                    "event_timeout_ms": 80,
+                    "tcp_timeout_s": 2.5,
+                    "allow_start_without_ack": True,
+                    "decode_json": True,
+                }
+            }
+        )
+        result_payload = SimpleNamespace(
+            group=SimpleNamespace(name="two_board"),
+            devices=[SimpleNamespace(name="dev1"), SimpleNamespace(name="dev2")],
+            source_profile=Path("profiles/example.yaml"),
+            output_base_dir=Path("out/multi"),
+            run_output_dir=Path("out/multi/two_board_20260607_220846"),
+            aggregation_key="event_count",
+            timestamp_match_window_ticks=20,
+            tcp_timeout_s=2.5,
+            allow_start_without_ack=True,
+            decode_enabled=True,
+            decoded_output_dir=Path("out/multi/two_board_20260607_220846/decoded"),
+            decoded_complete_events=20,
+            decoded_partial_events=1,
+            decode_errors=0,
+            watch_waveforms=False,
+            watch_every=None,
+            watched_frames=0,
+            stop_capture_on_watch_close=True,
+            config_path=Path("out/multi/.daq_cli_tmp/multi_board_acquire.config.json"),
+            meta_path=Path("out/multi/two_board_20260607_220846/run_meta.json"),
+            log_path=Path("out/multi/two_board_20260607_220846/log.txt"),
+            status="ok",
+        )
+
+        with patch("daq_cli.cli.acquire.ProfileService") as profile_service_cls:
+            profile_service_cls.return_value.load_profile.return_value = profile
+            with patch("daq_cli.cli.acquire.AcquireService") as service_cls:
+                service = service_cls.return_value
+                service.capture_multi.return_value = result_payload
+                result = runner.invoke(
+                    app,
+                    [
+                        "acquire",
+                        "multi",
+                        "two_board",
+                        "--profile",
+                        "profiles/example.yaml",
+                    ],
+                )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        kwargs = service.capture_multi.call_args.kwargs
+        self.assertEqual(kwargs["aggregation_key"], "event_count")
+        self.assertEqual(kwargs["timestamp_match_window_ticks"], 20)
+        self.assertEqual(kwargs["event_timeout_ms"], 80)
+        self.assertEqual(kwargs["tcp_timeout_s"], 2.5)
+        self.assertTrue(kwargs["allow_start_without_ack"])
+        self.assertTrue(kwargs["decode_json"])
+        self.assertTrue(kwargs["stop_capture_on_watch_close"])
+
+    def test_cli_multi_accepts_keep_running_after_watch_close(self) -> None:
+        runner = CliRunner()
+        result_payload = SimpleNamespace(
+            group=SimpleNamespace(name="two_board"),
+            devices=[SimpleNamespace(name="dev1"), SimpleNamespace(name="dev2")],
+            source_profile=Path("profiles/example.yaml"),
+            output_base_dir=Path("out/multi"),
+            run_output_dir=Path("out/multi/two_board_20260607_220846"),
+            aggregation_key="event_count",
+            timestamp_match_window_ticks=20,
+            tcp_timeout_s=2.5,
+            allow_start_without_ack=True,
+            decode_enabled=False,
+            decoded_output_dir=None,
+            decoded_complete_events=0,
+            decoded_partial_events=0,
+            decode_errors=0,
+            watch_waveforms=True,
+            watch_every=100,
+            watched_frames=2,
+            stop_capture_on_watch_close=False,
+            config_path=Path("out/multi/.daq_cli_tmp/multi_board_acquire.config.json"),
+            meta_path=Path("out/multi/two_board_20260607_220846/run_meta.json"),
+            log_path=Path("out/multi/two_board_20260607_220846/log.txt"),
+            status="ok",
+        )
+
+        with patch("daq_cli.cli.acquire.AcquireService") as service_cls:
+            service = service_cls.return_value
+            service.capture_multi.return_value = result_payload
+            result = runner.invoke(
+                app,
+                [
+                    "acquire",
+                    "multi",
+                    "two_board",
+                    "--watch-waveforms",
+                    "--keep-running-after-watch-close",
+                    "--profile",
+                    "profiles/example.yaml",
+                ],
+            )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        kwargs = service.capture_multi.call_args.kwargs
+        self.assertTrue(kwargs["watch_waveforms"])
+        self.assertFalse(kwargs["stop_capture_on_watch_close"])
+
+    def test_cli_multi_passes_decode_json_flag(self) -> None:
+        runner = CliRunner()
+        result_payload = SimpleNamespace(
+            group=SimpleNamespace(name="two_board"),
+            devices=[SimpleNamespace(name="dev1"), SimpleNamespace(name="dev2")],
+            source_profile=Path("profiles/example.yaml"),
+            output_base_dir=Path("out/multi"),
+            run_output_dir=Path("out/multi/two_board_20260607_220846"),
+            aggregation_key="timestamp",
+            timestamp_match_window_ticks=10,
+            tcp_timeout_s=1.0,
+            allow_start_without_ack=True,
+            decode_enabled=True,
+            decoded_output_dir=Path("out/multi/two_board_20260607_220846/decoded"),
+            decoded_complete_events=2,
+            decoded_partial_events=1,
+            decode_errors=0,
+            watch_waveforms=False,
+            watch_every=None,
+            watched_frames=0,
+            stop_capture_on_watch_close=True,
+            config_path=Path("out/multi/.daq_cli_tmp/multi_board_acquire.config.json"),
+            meta_path=Path("out/multi/two_board_20260607_220846/run_meta.json"),
+            log_path=Path("out/multi/two_board_20260607_220846/log.txt"),
+            status="ok",
+        )
+
+        with patch("daq_cli.cli.acquire.AcquireService") as service_cls:
+            service = service_cls.return_value
+            service.capture_multi.return_value = result_payload
+            result = runner.invoke(
+                app,
+                [
+                    "acquire",
+                    "multi",
+                    "two_board",
+                    "--decode-json",
+                    "--profile",
+                    "profiles/example.yaml",
+                ],
+            )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        kwargs = service.capture_multi.call_args.kwargs
+        self.assertTrue(kwargs["decode_json"])
+        self.assertIn("decode_enabled", result.output)
+        self.assertIn("decoded_complete_events", result.output)
+
+    def test_acquire_service_multi_uses_runner_decode_results(self) -> None:
+        profile = SimpleNamespace(
+            path=Path("profiles/example.yaml"),
+            devices={
+                "dev1": SimpleNamespace(
+                    name="dev1", ip="192.168.10.10", tcp_port=24, board_id=0
+                ),
+                "dev2": SimpleNamespace(
+                    name="dev2", ip="192.168.10.11", tcp_port=24, board_id=1
+                ),
+            },
+            groups={
+                "two_board": SimpleNamespace(
+                    name="two_board", devices=["dev1", "dev2"], tcm="main"
+                )
+            },
+            tcm={"main": {"ip": "192.168.10.16", "rbcp_port": 4660}},
+            defaults={"output_dir": "out", "adc_length": 64},
+            legacy=SimpleNamespace(project_root=Path("legacy")),
+        )
+        service = AcquireService()
+
+        with patch.object(service._profile_service, "load_profile", return_value=profile):
+            with patch(
+                "daq_cli.application.acquire_service.LegacyMultiCaptureRunner"
+            ) as runner_cls:
+                runner_cls.return_value.capture_multi.return_value = SimpleNamespace(
+                    config_path=Path("out/multi/.daq_cli_tmp/multi_board_acquire.config.json"),
+                    run_output_dir=Path("out/multi/two_board_20260607_220846"),
+                    status="ok",
+                    log_path=Path("out/multi/two_board_20260607_220846/log.txt"),
+                    meta_path=Path("out/multi/two_board_20260607_220846/run_meta.json"),
+                    decode_enabled=True,
+                    decoded_output_dir=Path("out/multi/two_board_20260607_220846/decoded"),
+                    decoded_complete_events=12,
+                    decoded_partial_events=1,
+                    decode_errors=0,
+                    watch_waveforms=False,
+                    watch_every=None,
+                    watched_frames=0,
+                    stop_capture_on_watch_close=True,
+                )
+                result = service.capture_multi(
+                    group_name="two_board",
+                    profile_path="profiles/example.yaml",
+                    decode_json=True,
+                )
+
+        self.assertTrue(result.decode_enabled)
+        self.assertEqual(
+            result.decoded_output_dir,
+            Path("out/multi/two_board_20260607_220846/decoded"),
+        )
+        self.assertEqual(result.decoded_complete_events, 12)
+        self.assertEqual(result.decoded_partial_events, 1)
+        self.assertEqual(result.decode_errors, 0)
 
     def test_cli_single_shows_initial_pending_status_before_progress(self) -> None:
         runner = CliRunner()

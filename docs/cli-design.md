@@ -196,6 +196,7 @@ daq decode run <run_dir>
 daq decode event <event_file>
 daq acquire multi <group>
 daq acquire multi <group> --aggregation-key event_count
+daq acquire multi <group> --watch-waveforms --watch-every 100
 ```
 
 Implementation note:
@@ -205,6 +206,7 @@ Implementation note:
 - `single --watch-every N` adds a best-effort sampled waveform watch path while keeping raw capture as the priority path
 - `decode` provides offline packet-to-JSON decoding for saved raw event files
 - `multi` currently runs through the legacy `multi_board_acquire.py` script adapter
+- `multi --watch-waveforms` samples waveform-bearing packets from the legacy receive path and shows one board at a time with keyboard switching
 
 ## 6. Monitor Commands
 

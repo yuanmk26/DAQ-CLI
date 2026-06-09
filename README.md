@@ -86,6 +86,7 @@ Run multi-board acquisition:
 ```bash
 daq acquire multi two_board --profile profiles/example.yaml
 daq acquire multi two_board --aggregation-key event_count --allow-start-without-ack --profile profiles/example.yaml
+daq acquire multi two_board --decode-json --profile profiles/example.yaml
 ```
 
 Preview or watch waveforms:

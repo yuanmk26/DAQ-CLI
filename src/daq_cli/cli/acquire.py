@@ -141,48 +141,91 @@ def acquire_multi(
         ),
     ] = None,
     aggregation_key: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--aggregation-key",
             help="Event aggregation key: timestamp or event_count.",
             case_sensitive=False,
         ),
-    ] = "timestamp",
+    ] = None,
     timestamp_match_window_ticks: Annotated[
-        int,
+        int | None,
         typer.Option(
             "--timestamp-match-window",
             min=0,
             help="Allowed timestamp skew in ticks when aggregation_key=timestamp.",
         ),
-    ] = 10,
+    ] = None,
     event_timeout_ms: Annotated[
-        int,
+        int | None,
         typer.Option(
             "--event-timeout-ms",
             min=1,
             help="Flush incomplete events after this timeout in milliseconds.",
         ),
-    ] = 50,
+    ] = None,
     tcp_timeout_s: Annotated[
-        float,
+        float | None,
         typer.Option(
             "--timeout",
             min=0.1,
             help="TCP socket timeout in seconds for each board receiver.",
         ),
-    ] = 1.0,
+    ] = None,
     allow_start_without_ack: Annotated[
-        bool,
+        bool | None,
         typer.Option(
             "--allow-start-without-ack/--require-ack",
             help="Continue even if TCM alignment does not report all ACK bits.",
         ),
-    ] = False,
+    ] = None,
+    decode_json: Annotated[
+        bool | None,
+        typer.Option(
+            "--decode-json/--raw-only",
+            help="Also decode aggregated multi-board events to JSON after capture.",
+        ),
+    ] = None,
+    watch_waveforms: Annotated[
+        bool | None,
+        typer.Option(
+            "--watch-waveforms/--no-watch-waveforms",
+            help="Show a sampled waveform monitor during multi-board capture when boards are in waveform send modes.",
+        ),
+    ] = None,
+    watch_every: Annotated[
+        int | None,
+        typer.Option(
+            "--watch-every",
+            min=1,
+            help="Sample one waveform frame every N frames per board for the multi-board watcher.",
+        ),
+    ] = None,
+    stop_on_watch_close: Annotated[
+        bool | None,
+        typer.Option(
+            "--stop-on-watch-close/--keep-running-after-watch-close",
+            help="When waveform watching is enabled, closing the watch window also stops acquisition by default.",
+        ),
+    ] = None,
     profile: ProfileOption = Path("profiles/example.yaml"),
 ) -> None:
     """Run legacy multi-board acquisition for one logical group."""
-    normalized_aggregation_key = aggregation_key.lower()
+    profile_data = ProfileService().load_profile(profile)
+    resolved = _resolve_multi_acquire_options(
+        defaults=profile_data.defaults,
+        output_dir=output_dir,
+        aggregation_key=aggregation_key,
+        timestamp_match_window_ticks=timestamp_match_window_ticks,
+        event_timeout_ms=event_timeout_ms,
+        tcp_timeout_s=tcp_timeout_s,
+        allow_start_without_ack=allow_start_without_ack,
+        decode_json=decode_json,
+        watch_waveforms=watch_waveforms,
+        watch_every=watch_every,
+        stop_on_watch_close=stop_on_watch_close,
+    )
+    normalized_aggregation_key = str(resolved["aggregation_key"]).lower()
     if normalized_aggregation_key not in {"timestamp", "event_count"}:
         raise typer.BadParameter(
             "aggregation key must be 'timestamp' or 'event_count'"
@@ -193,12 +236,16 @@ def acquire_multi(
         result = service.capture_multi(
             group_name=group,
             profile_path=profile,
-            output_base_dir=output_dir,
+            output_base_dir=resolved["output_dir"],
             aggregation_key=normalized_aggregation_key,
-            timestamp_match_window_ticks=timestamp_match_window_ticks,
-            event_timeout_ms=event_timeout_ms,
-            tcp_timeout_s=tcp_timeout_s,
-            allow_start_without_ack=allow_start_without_ack,
+            timestamp_match_window_ticks=resolved["timestamp_match_window_ticks"],
+            event_timeout_ms=resolved["event_timeout_ms"],
+            tcp_timeout_s=resolved["tcp_timeout_s"],
+            allow_start_without_ack=resolved["allow_start_without_ack"],
+            decode_json=resolved["decode_json"],
+            watch_waveforms=resolved["watch_waveforms"],
+            watch_every=resolved["watch_every"],
+            stop_capture_on_watch_close=resolved["stop_on_watch_close"],
         )
     except Exception as exc:
         typer.echo(f"Multi-board acquisition failed: {exc}", err=True)
@@ -254,5 +301,86 @@ def _resolve_single_acquire_options(
             progress_every
             if progress_every is not None
             else int(acquire_defaults.get("progress_every", 50))
+        ),
+    }
+
+
+def _resolve_multi_acquire_options(
+    *,
+    defaults: dict[str, object],
+    output_dir: Path | None,
+    aggregation_key: str | None,
+    timestamp_match_window_ticks: int | None,
+    event_timeout_ms: int | None,
+    tcp_timeout_s: float | None,
+    allow_start_without_ack: bool | None,
+    decode_json: bool | None,
+    watch_waveforms: bool | None,
+    watch_every: int | None,
+    stop_on_watch_close: bool | None,
+) -> dict[str, object]:
+    acquire_defaults = defaults.get("acquire_multi")
+    if not isinstance(acquire_defaults, dict):
+        acquire_defaults = {}
+
+    output_dir_value = acquire_defaults.get("output_dir")
+    resolved_output_dir = (
+        output_dir
+        if output_dir is not None
+        else (
+            Path(str(output_dir_value))
+            if output_dir_value not in (None, "")
+            else None
+        )
+    )
+
+    return {
+        "output_dir": resolved_output_dir,
+        "aggregation_key": aggregation_key or str(
+            acquire_defaults.get("aggregation_key", "timestamp")
+        ),
+        "timestamp_match_window_ticks": (
+            timestamp_match_window_ticks
+            if timestamp_match_window_ticks is not None
+            else int(acquire_defaults.get("timestamp_match_window_ticks", 10))
+        ),
+        "event_timeout_ms": (
+            event_timeout_ms
+            if event_timeout_ms is not None
+            else int(acquire_defaults.get("event_timeout_ms", 50))
+        ),
+        "tcp_timeout_s": (
+            tcp_timeout_s
+            if tcp_timeout_s is not None
+            else float(acquire_defaults.get("tcp_timeout_s", 1.0))
+        ),
+        "allow_start_without_ack": (
+            allow_start_without_ack
+            if allow_start_without_ack is not None
+            else bool(acquire_defaults.get("allow_start_without_ack", False))
+        ),
+        "decode_json": (
+            decode_json
+            if decode_json is not None
+            else bool(acquire_defaults.get("decode_json", False))
+        ),
+        "watch_waveforms": (
+            watch_waveforms
+            if watch_waveforms is not None
+            else bool(acquire_defaults.get("watch_waveforms", False))
+        ),
+        "watch_every": (
+            watch_every
+            if watch_every is not None
+            else (
+                int(acquire_defaults["watch_every"])
+                if acquire_defaults.get("watch_every") is not None
+                else 100
+            )
+        ),
+        "stop_on_watch_close": (
+            stop_on_watch_close
+            if stop_on_watch_close is not None
+            else bool(acquire_defaults.get("stop_on_watch_close", True))
         ),
     }

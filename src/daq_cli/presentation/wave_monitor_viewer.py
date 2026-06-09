@@ -32,11 +32,18 @@ class WaveMonitorLoopStepResult:
     should_render: bool
 
 
+@dataclass(slots=True)
+class MultiBoardWaveUpdate:
+    board_name: str
+    board_index: int
+    frame: WaveMonitorFrame
+
+
 DEFAULT_FIGSIZE = (14.0, 10.0)
 
 
 class WaveMonitorFigure:
-    def __init__(self, source_label: str) -> None:
+    def __init__(self, source_label: str, help_text: str | None = None) -> None:
         self._source_label = source_label
         figsize = _compute_default_figsize()
         self._figure, axes = plt.subplots(
@@ -56,7 +63,7 @@ class WaveMonitorFigure:
         self._figure.text(
             0.01,
             0.945,
-            "space: run/stop | s: single | r: run | q: quit",
+            help_text or "space: run/stop | s: single | r: run | q: quit",
             ha="left",
             va="top",
             fontsize=9,
@@ -86,12 +93,30 @@ class WaveMonitorFigure:
         self._set_title(frame=frame, run_state=run_state)
         self._figure.canvas.draw_idle()
 
+    def update_custom(self, frame: WaveMonitorFrame, title: str) -> None:
+        max_length = max(len(channel) for channel in frame.channels)
+        x_values = list(range(max_length))
+        for channel_index, (channel, line, axis) in enumerate(
+            zip(frame.channels, self._lines, self._axes, strict=True)
+        ):
+            line.set_data(x_values[: len(channel)], channel)
+            hit = bool(frame.hit_mask & (1 << channel_index))
+            line.set_color("#D94841" if hit else "#5B8FF9")
+            line.set_linewidth(1.9 if hit else 1.1)
+            line.set_alpha(0.95 if hit else 0.45)
+            axis.set_xlim(0, max(max_length - 1, 15))
+        self.set_custom_title(title)
+
     def set_state(
         self,
         run_state: WaveMonitorRunState,
         frame: WaveMonitorFrame | None = None,
     ) -> None:
         self._set_title(frame=frame, run_state=run_state)
+        self._figure.canvas.draw_idle()
+
+    def set_custom_title(self, title: str) -> None:
+        self._figure.suptitle(title)
         self._figure.canvas.draw_idle()
 
     def _set_title(
@@ -158,6 +183,7 @@ def run_wave_monitor_viewer(
             stop_event.set()
 
     figure.figure.canvas.mpl_connect("key_press_event", on_key_press)
+    figure.figure.canvas.mpl_connect("close_event", lambda _event: stop_event.set())
     plt.show(block=False)
     try:
         while plt.fignum_exists(figure.figure.number) and not stop_event.is_set():
@@ -172,6 +198,94 @@ def run_wave_monitor_viewer(
                     frame=loop_state.last_frame,
                     run_state=loop_state.run_state,
                 )
+            plt.pause(0.05)
+    except KeyboardInterrupt:
+        stop_event.set()
+    finally:
+        stop_event.set()
+        plt.close(figure.figure)
+
+
+def run_multi_board_wave_viewer(
+    group_label: str,
+    board_names: list[str],
+    frame_queue: Queue[object],
+    stop_event: threading.Event,
+) -> None:
+    plt.ion()
+    figure = WaveMonitorFigure(
+        source_label=f"multi-watch:{group_label}",
+        help_text="tab/[ ]/1-9: switch board | space: run/stop | s: single | r: run | q: quit",
+    )
+    run_state = WaveMonitorRunState.RUN
+    selected_board_index = 0
+    cached_frames: dict[int, WaveMonitorFrame] = {}
+    _disconnect_default_key_handler(figure.figure)
+
+    def render_selected() -> None:
+        board_name = board_names[selected_board_index]
+        current_frame = cached_frames.get(selected_board_index)
+        title = _format_multi_board_title(
+            group_label=group_label,
+            board_name=board_name,
+            board_index=selected_board_index,
+            board_count=len(board_names),
+            run_state=run_state,
+            frame=current_frame,
+        )
+        if current_frame is None:
+            figure.set_custom_title(title)
+        else:
+            figure.update_custom(current_frame, title)
+
+    def on_key_press(event) -> None:
+        nonlocal run_state, selected_board_index
+        key = (event.key or "").lower()
+        if key == " ":
+            run_state = (
+                WaveMonitorRunState.STOP
+                if run_state == WaveMonitorRunState.RUN
+                else WaveMonitorRunState.RUN
+            )
+            render_selected()
+        elif key == "s":
+            run_state = WaveMonitorRunState.SINGLE_ARMED
+            render_selected()
+        elif key == "r":
+            run_state = WaveMonitorRunState.RUN
+            render_selected()
+        elif key == "tab" or key == "]":
+            selected_board_index = (selected_board_index + 1) % len(board_names)
+            render_selected()
+        elif key == "[":
+            selected_board_index = (selected_board_index - 1) % len(board_names)
+            render_selected()
+        elif key.isdigit():
+            target_index = int(key) - 1
+            if 0 <= target_index < len(board_names):
+                selected_board_index = target_index
+                render_selected()
+        elif key == "q":
+            stop_event.set()
+
+    figure.figure.canvas.mpl_connect("key_press_event", on_key_press)
+    figure.figure.canvas.mpl_connect("close_event", lambda _event: stop_event.set())
+    render_selected()
+    plt.show(block=False)
+    try:
+        while plt.fignum_exists(figure.figure.number) and not stop_event.is_set():
+            updates = _drain_multi_board_updates(frame_queue)
+            selected_board_updated = False
+            for update in updates:
+                cached_frames[update.board_index] = update.frame
+                if update.board_index == selected_board_index:
+                    selected_board_updated = True
+            if selected_board_updated:
+                if run_state == WaveMonitorRunState.RUN:
+                    render_selected()
+                elif run_state == WaveMonitorRunState.SINGLE_ARMED:
+                    run_state = WaveMonitorRunState.STOP
+                    render_selected()
             plt.pause(0.05)
     except KeyboardInterrupt:
         stop_event.set()
@@ -204,6 +318,19 @@ def _drain_latest_frame(frame_queue: Queue[object]) -> WaveMonitorFrame | None:
             raise item
         latest_frame = item
     return latest_frame
+
+
+def _drain_multi_board_updates(frame_queue: Queue[object]) -> list[MultiBoardWaveUpdate]:
+    updates: list[MultiBoardWaveUpdate] = []
+    while True:
+        try:
+            item = frame_queue.get_nowait()
+        except Empty:
+            break
+        if isinstance(item, Exception):
+            raise item
+        updates.append(item)
+    return updates
 
 
 def _advance_loop_state(
@@ -274,3 +401,23 @@ def _get_screen_size_px() -> tuple[int, int] | None:
     finally:
         if root is not None:
             root.destroy()
+
+
+def _format_multi_board_title(
+    group_label: str,
+    board_name: str,
+    board_index: int,
+    board_count: int,
+    run_state: WaveMonitorRunState,
+    frame: WaveMonitorFrame | None,
+) -> str:
+    prefix = (
+        f"group={group_label} | board={board_name} ({board_index + 1}/{board_count}) | "
+        f"state={run_state.value}"
+    )
+    if frame is None:
+        return f"{prefix} | no frame yet"
+    return (
+        f"{prefix} | event={frame.event_count} | timestamp={frame.timestamp} | "
+        f"hit_mask=0x{frame.hit_mask:04X} | send_mode={frame.send_mode}"
+    )

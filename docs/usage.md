@@ -302,9 +302,18 @@ defaults:
     progress_every: 50
     decode_json: false
     watch_every: null
+  acquire_multi:
+    aggregation_key: timestamp
+    timestamp_match_window_ticks: 10
+    event_timeout_ms: 50
+    tcp_timeout_s: 1.0
+    decode_json: false
+    allow_start_without_ack: true
+    watch_waveforms: false
+    watch_every: 100
 ```
 
-When these keys are present, `daq acquire single dev1 --profile profiles/example.yaml` will use them automatically, and any explicit CLI option still overrides the profile value.
+When these keys are present, `daq acquire single dev1 --profile profiles/example.yaml` and `daq acquire multi two_board --profile profiles/example.yaml` will use them automatically, and any explicit CLI option still overrides the profile value.
 
 Useful options:
 
@@ -366,19 +375,28 @@ Single-event decode:
 daq decode event out/single/20260606_205506/raw/event_00000.bin
 ```
 
+Multi-board aggregated decode:
+
+```bash
+daq decode multi-run out/multi/two_board_20260607_220946
+```
+
 Useful options:
 
 - `--output-dir`: choose where decoded JSON files are written
 - `--overwrite`: replace existing JSON outputs
 - `--limit`: decode only the first N event files when using `decode run`
+- `decode multi-run` writes aggregated-event JSON into `decoded/complete/` and `decoded/partial/`
 
 Current behavior:
 
 - `decode run` scans `raw/event_*.bin` in filename order
+- `decode multi-run` scans `complete_events.dat` and `partial_events.dat`
 - If `capture_info.txt` exists, it uses `send_mode` and `adc_length` as decode context
 - First-version output is one JSON file per event
 - The decoder supports `send_mode` 0, 1, 2, and 3
 - For partial-waveform modes, JSON still uses a fixed 16-channel structure, with missing channels written as `null`
+- Multi decoded JSON is organized by aggregated event, not by original board packet
 
 The mode1 sample directory below is a good first validation target:
 
@@ -480,6 +498,9 @@ Useful options:
 - `--event-timeout-ms`
 - `--timeout`
 - `--allow-start-without-ack`
+- `--decode-json`
+- `--watch-waveforms`
+- `--watch-every`
 - `--output-dir`
 
 Examples:
@@ -487,6 +508,8 @@ Examples:
 ```bash
 daq acquire multi two_board --aggregation-key timestamp --timestamp-match-window 10
 daq acquire multi two_board --aggregation-key event_count --allow-start-without-ack
+daq acquire multi two_board --decode-json
+daq acquire multi two_board --watch-waveforms --watch-every 100
 ```
 
 Current behavior:
@@ -496,6 +519,12 @@ Current behavior:
 - The selected group devices and TCM endpoint are taken from the profile
 - The legacy script still performs the actual TCM align, TCP receive, packet
   parse, aggregation, and run-file writing
+- `--decode-json` performs a follow-up offline decode of aggregated events after
+  capture completes
+- `--watch-waveforms` adds a best-effort sampled waveform monitor with one window and keyboard board switching
+- Multi waveform watch only supports boards currently sending waveform-bearing modes `1` or `3`
+- The watcher samples packets from the legacy multi receive path; it does not read waveform data from `monitor.jsonl`
+- `defaults.acquire_multi` in the profile can provide default values for `output_dir`, `aggregation_key`, `timestamp_match_window_ticks`, `event_timeout_ms`, `tcp_timeout_s`, `allow_start_without_ack`, `decode_json`, `watch_waveforms`, and `watch_every`
 - The command prints the final run directory, generated config path, and status
 
 Typical output data includes:
@@ -506,6 +535,13 @@ Typical output data includes:
 - `complete_events.idx`
 - `monitor.jsonl`
 - `log.txt`
+- `decoded/complete/event_XXXXX.json` when multi decode is enabled
+- `decoded/partial/event_XXXXX.json` when multi decode is enabled
+
+Multi decoded JSON is written per aggregated event, not per original board packet.
+Each JSON contains top-level aggregation metadata plus one decoded board entry
+for each board that was present in that event. Partial events are decoded too,
+and include `missing_board_ids` derived from the aggregated file mask.
 
 ## 12. Waveform Monitoring
 

@@ -58,6 +58,15 @@ class MultiAcquireResult:
     timestamp_match_window_ticks: int
     tcp_timeout_s: float
     allow_start_without_ack: bool
+    decode_enabled: bool
+    decoded_output_dir: Path | None
+    decoded_complete_events: int
+    decoded_partial_events: int
+    decode_errors: int
+    watch_waveforms: bool
+    watch_every: int | None
+    watched_frames: int
+    stop_capture_on_watch_close: bool
     config_path: Path
     meta_path: Path | None
     log_path: Path | None
@@ -182,6 +191,10 @@ class AcquireService:
         event_timeout_ms: int = 50,
         tcp_timeout_s: float = 1.0,
         allow_start_without_ack: bool = False,
+        decode_json: bool = False,
+        watch_waveforms: bool = False,
+        watch_every: int | None = None,
+        stop_capture_on_watch_close: bool = True,
     ) -> MultiAcquireResult:
         profile = self._profile_service.load_profile(profile_path)
         try:
@@ -209,6 +222,18 @@ class AcquireService:
         base_dir = output_base_dir or (
             self._default_output_base_dir(profile.path, profile) / "multi"
         )
+        if watch_waveforms:
+            board_adapter = LegacyBoardAdapter(profile.legacy.project_root)
+            unsupported = []
+            for device in devices:
+                send_mode = board_adapter.read_tcp_mode2_config(device).send_mode
+                if send_mode not in {1, 3}:
+                    unsupported.append(f"{device.name}:{send_mode}")
+            if unsupported:
+                raise ValueError(
+                    "multi waveform watch only supports send_mode 1 or 3; "
+                    f"unsupported boards: {', '.join(unsupported)}"
+                )
         runner = LegacyMultiCaptureRunner(profile.legacy.project_root)
         raw_result = runner.capture_multi(
             LegacyMultiCaptureConfig(
@@ -223,6 +248,10 @@ class AcquireService:
                 tcp_timeout_s=tcp_timeout_s,
                 allow_start_without_ack=allow_start_without_ack,
                 boards=devices,
+                decode_json=decode_json,
+                watch_waveforms=watch_waveforms,
+                watch_every=watch_every,
+                stop_capture_on_watch_close=stop_capture_on_watch_close,
             )
         )
         return MultiAcquireResult(
@@ -235,6 +264,15 @@ class AcquireService:
             timestamp_match_window_ticks=timestamp_match_window_ticks,
             tcp_timeout_s=tcp_timeout_s,
             allow_start_without_ack=allow_start_without_ack,
+            decode_enabled=raw_result.decode_enabled,
+            decoded_output_dir=raw_result.decoded_output_dir,
+            decoded_complete_events=raw_result.decoded_complete_events,
+            decoded_partial_events=raw_result.decoded_partial_events,
+            decode_errors=raw_result.decode_errors,
+            watch_waveforms=raw_result.watch_waveforms,
+            watch_every=raw_result.watch_every,
+            watched_frames=raw_result.watched_frames,
+            stop_capture_on_watch_close=raw_result.stop_capture_on_watch_close,
             config_path=raw_result.config_path,
             meta_path=raw_result.meta_path,
             log_path=raw_result.log_path,

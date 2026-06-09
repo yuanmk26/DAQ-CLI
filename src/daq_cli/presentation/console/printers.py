@@ -129,6 +129,21 @@ def print_multi_acquire_result(result: MultiAcquireResult) -> None:
     )
     table.add_row("timeout_s", f"{result.tcp_timeout_s}")
     table.add_row("allow_start_without_ack", str(result.allow_start_without_ack))
+    table.add_row("decode_enabled", str(result.decode_enabled))
+    table.add_row("decoded_output_dir", str(result.decoded_output_dir or "-"))
+    table.add_row("decoded_complete_events", str(result.decoded_complete_events))
+    table.add_row("decoded_partial_events", str(result.decoded_partial_events))
+    table.add_row("decode_errors", str(result.decode_errors))
+    table.add_row("watch_waveforms", str(result.watch_waveforms))
+    table.add_row(
+        "watch_every",
+        "-" if result.watch_every is None else str(result.watch_every),
+    )
+    table.add_row(
+        "stop_capture_on_watch_close",
+        str(result.stop_capture_on_watch_close),
+    )
+    table.add_row("watched_frames", str(result.watched_frames))
     table.add_row("status", result.status or "-")
     table.add_row("output_base_dir", str(result.output_base_dir))
     table.add_row("run_output_dir", str(result.run_output_dir or "-"))

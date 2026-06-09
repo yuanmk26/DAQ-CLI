@@ -4,6 +4,7 @@ from typing import Annotated
 import typer
 
 from daq_cli.application.decode_service import DecodeService
+from daq_cli.application.multi_decode_service import MultiDecodeService
 
 app = typer.Typer(no_args_is_help=True, help="Offline decode commands.")
 
@@ -85,3 +86,39 @@ def decode_event(
     typer.echo(f"output_file={result.output_file}")
     typer.echo(f"send_mode={result.send_mode}")
     typer.echo(f"raw_packet_bytes={result.raw_packet_bytes}")
+
+
+@app.command("multi-run")
+def decode_multi_run(
+    run_dir: Annotated[
+        Path,
+        typer.Argument(
+            help="Multi-board acquisition run directory containing complete_events.dat and run_meta.json."
+        ),
+    ],
+    output_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-dir",
+            help="Directory for decoded JSON files. Defaults to <run_dir>/decoded.",
+        ),
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite/--no-overwrite",
+            help="Allow overwriting existing decoded JSON files.",
+        ),
+    ] = False,
+) -> None:
+    service = MultiDecodeService()
+    result = service.decode_multi_run(
+        run_dir=run_dir,
+        output_dir=output_dir,
+        overwrite=overwrite,
+    )
+    typer.echo(f"Decoded multi run: {result.run_dir}")
+    typer.echo(f"output_dir={result.output_dir}")
+    typer.echo(f"decoded_complete_events={result.decoded_complete_events}")
+    typer.echo(f"decoded_partial_events={result.decoded_partial_events}")
+    typer.echo(f"decode_errors={result.decode_errors}")

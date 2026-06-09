@@ -15,6 +15,7 @@ from daq_cli.infrastructure.wave_monitor import (  # noqa: E402
 )
 from daq_cli.presentation.wave_monitor_viewer import (  # noqa: E402
     DEFAULT_FIGSIZE,
+    _format_multi_board_title,
     WaveMonitorFigure,
     WaveMonitorLoopState,
     WaveMonitorRunState,
@@ -145,6 +146,21 @@ class WaveMonitorTests(unittest.TestCase):
             return_value=None,
         ):
             self.assertEqual(_compute_default_figsize(), DEFAULT_FIGSIZE)
+
+    def test_format_multi_board_title_includes_board_context(self) -> None:
+        frame = load_demo_frames()[0]
+        title = _format_multi_board_title(
+            group_label="two_board",
+            board_name="dev2",
+            board_index=1,
+            board_count=2,
+            run_state=WaveMonitorRunState.RUN,
+            frame=frame,
+        )
+        self.assertIn("group=two_board", title)
+        self.assertIn("board=dev2 (2/2)", title)
+        self.assertIn("state=RUN", title)
+        self.assertIn("event=", title)
 
 
 if __name__ == "__main__":
