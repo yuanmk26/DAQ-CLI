@@ -7,23 +7,18 @@ develop it.
 
 From the GitHub Release page, download:
 
-- `daq_cli-<version>-py3-none-any.whl`
-- `profiles/example.template.yaml`
+- `daq_cli-<version>-offline-win-amd64.zip`
 
 You also need:
 
 - Python 3.10 or newer
-- A local checkout or copy of the legacy hardware project
 
-## Install The Wheel
+## Install The Offline Package
 
-Open PowerShell in the folder that contains the wheel file and run:
+Extract the zip, open PowerShell in the extracted folder, and run:
 
 ```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -U pip
-python -m pip install .\daq_cli-<version>-py3-none-any.whl
+.\install_offline.ps1
 daq --help
 ```
 
@@ -36,17 +31,16 @@ again and retry the command.
 
 ## Prepare A Machine-Specific Profile
 
-Copy the template profile and create a local machine-specific file:
+Generate a template profile and create a local machine-specific file:
 
 ```powershell
-Copy-Item .\profiles\example.template.yaml .\profiles\lab-pc-01.local.yaml
+daq profile init .\profiles\lab-pc-01.local.yaml
 ```
 
 Edit `profiles\lab-pc-01.local.yaml` and update at least:
 
 - `devices.*.ip`
 - `tcm.main.ip`
-- `legacy.project_root`
 
 Optional machine-specific values:
 
@@ -79,7 +73,6 @@ daq acquire multi two_board --decode-json --profile .\profiles\lab-pc-01.local.y
 
 If installation works but hardware commands fail:
 
-- check `legacy.project_root`
 - check board and TCM IP addresses
 - check network access to the DAQ hardware
 - verify the selected profile path is the one you edited

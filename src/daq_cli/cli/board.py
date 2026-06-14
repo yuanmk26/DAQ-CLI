@@ -6,7 +6,7 @@ import typer
 from daq_cli.application.board_service import BoardService
 from daq_cli.application.config_models import BoardConfigOptions
 from daq_cli.application.telemetry_service import TelemetryService
-from daq_cli.cli.common import ProfileOption
+from daq_cli.cli.common import RequiredProfileOption
 from daq_cli.presentation.console.printers import (
     print_board_config_result,
     print_board_config_summary_result,
@@ -24,7 +24,7 @@ app = typer.Typer(no_args_is_help=True, help="Single-board operations.")
 @app.command("info")
 def board_info(
     device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
-    profile: ProfileOption = Path("profiles/example.yaml"),
+    profile: RequiredProfileOption = ...,
 ) -> None:
     """Show profile-backed board information."""
     service = BoardService()
@@ -35,7 +35,7 @@ def board_info(
 @app.command("sysmon")
 def board_sysmon(
     device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
-    profile: ProfileOption = Path("profiles/example.yaml"),
+    profile: RequiredProfileOption = ...,
 ) -> None:
     """Read FPGA telemetry through the legacy sysmon path."""
     service = TelemetryService()
@@ -132,7 +132,7 @@ def board_config(
             ),
         ),
     ] = None,
-    profile: ProfileOption = Path("profiles/example.yaml"),
+    profile: RequiredProfileOption = ...,
 ) -> None:
     """Configure a board through the legacy configuration script."""
     service = BoardService()
@@ -164,7 +164,7 @@ def board_config(
 @app.command("trigger-show")
 def board_trigger_show(
     device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
-    profile: ProfileOption = Path("profiles/example.yaml"),
+    profile: RequiredProfileOption = ...,
 ) -> None:
     """Read trigger-related configuration without writing registers."""
     service = BoardService()
@@ -175,7 +175,7 @@ def board_trigger_show(
 @app.command("tcp-mode2-show")
 def board_tcp_mode2_show(
     device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
-    profile: ProfileOption = Path("profiles/example.yaml"),
+    profile: RequiredProfileOption = ...,
 ) -> None:
     """Read TCP mode-2 configuration without writing registers."""
     service = BoardService()
@@ -197,7 +197,7 @@ def board_send_mode_set(
             ),
         ),
     ],
-    profile: ProfileOption = Path("profiles/example.yaml"),
+    profile: RequiredProfileOption = ...,
 ) -> None:
     """Write the board send_mode register and verify it by readback."""
     service = BoardService()
@@ -212,7 +212,7 @@ def board_send_mode_set(
 @app.command("config-show")
 def board_config_show(
     device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
-    profile: ProfileOption = Path("profiles/example.yaml"),
+    profile: RequiredProfileOption = ...,
 ) -> None:
     """Read a semantic board configuration summary without writing registers."""
     service = BoardService()
@@ -232,7 +232,7 @@ def board_reg_read(
         int,
         typer.Option("--len", min=1, max=255, help="Number of bytes to read."),
     ] = 1,
-    profile: ProfileOption = Path("profiles/example.yaml"),
+    profile: RequiredProfileOption = ...,
 ) -> None:
     """Read raw register bytes for debugging."""
     try:

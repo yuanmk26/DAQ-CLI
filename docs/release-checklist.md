@@ -30,19 +30,19 @@ Or run the equivalent commands manually:
 
 ```powershell
 python -m pip install -U build
-python -m build
+.\scripts\build_release.ps1
 ```
 
 Expected output:
 
 - `dist\daq_cli-<version>-py3-none-any.whl`
+- `dist\daq_cli-<version>-offline-win-amd64.zip`
 
 ## Release Assets
 
 Upload these to the GitHub Release page:
 
-- `dist\daq_cli-<version>-py3-none-any.whl`
-- `profiles/example.template.yaml`
+- `dist\daq_cli-<version>-offline-win-amd64.zip`
 
 Link or mention these docs in the release notes:
 
@@ -56,10 +56,10 @@ Highlights:
 - <short summary of the most important changes>
 
 Install:
-- Download the wheel from this release
+- Download the offline release zip from this release
 - Follow docs/install-on-new-pc.md
 
 Configuration:
-- Start from profiles/example.template.yaml
-- Update device IPs, TCM IP, and legacy.project_root on each PC
+- Run daq profile init to generate a profile file
+- Update device IPs and TCM IP on each PC
 ```

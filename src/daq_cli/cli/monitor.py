@@ -4,7 +4,7 @@ from typing import Annotated
 import typer
 
 from daq_cli.application.monitor_service import MonitorService
-from daq_cli.cli.common import ProfileOption
+from daq_cli.cli.common import RequiredProfileOption
 from daq_cli.presentation.wave_monitor_viewer import run_wave_monitor_viewer
 
 app = typer.Typer(no_args_is_help=True, help="Monitoring commands.")
@@ -38,7 +38,7 @@ def monitor_wave(
             readable=True,
         ),
     ] = None,
-    profile: ProfileOption = Path("profiles/example.yaml"),
+    profile: RequiredProfileOption = ...,
 ) -> None:
     """Open a 16-channel waveform monitor window."""
     if demo and replay is not None:

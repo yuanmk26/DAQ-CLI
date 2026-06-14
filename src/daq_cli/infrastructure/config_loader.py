@@ -2,7 +2,7 @@ from pathlib import Path
 
 import yaml
 
-from daq_cli.application.models import LegacyConfig, ProfileData
+from daq_cli.application.models import ProfileData
 from daq_cli.domain.device import DeviceConfig
 from daq_cli.domain.group import GroupConfig
 
@@ -31,16 +31,10 @@ def load_profile(profile_path: Path | str) -> ProfileData:
             tcm=str(item["tcm"]) if item.get("tcm") is not None else None,
         )
 
-    legacy = LegacyConfig()
-    legacy_raw = raw.get("legacy") or {}
-    if legacy_raw.get("project_root"):
-        legacy.project_root = Path(str(legacy_raw["project_root"]))
-
     return ProfileData(
         path=profile_path,
         devices=devices,
         groups=groups,
         tcm=dict(raw.get("tcm") or {}),
         defaults=dict(raw.get("defaults") or {}),
-        legacy=legacy,
     )

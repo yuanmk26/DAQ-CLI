@@ -3,10 +3,16 @@ from __future__ import annotations
 import os
 import sys
 from contextlib import contextmanager
+from importlib import resources
 from pathlib import Path
 from typing import Iterator
 
 from daq_cli.domain.device import DeviceConfig
+
+
+def bundled_legacy_script_dir() -> Path:
+    legacy_root = resources.files("daq_cli._vendor.fdu_legacy")
+    return Path(str(legacy_root))
 
 
 @contextmanager
@@ -55,6 +61,7 @@ def clear_legacy_modules() -> None:
         "HMCAD1511",
         "mux",
         "si5345_16ch",
+        "rbcp",
         "lib",
         "lib.rbcp",
         "lib.sysmon",

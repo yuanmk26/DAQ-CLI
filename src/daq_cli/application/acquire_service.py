@@ -100,15 +100,12 @@ class AcquireService:
                 f"Unknown device '{device_name}'. Available devices: {available}"
             ) from exc
 
-        if profile.legacy.project_root is None:
-            raise ValueError("The selected profile does not define legacy.project_root")
-
         base_dir = output_base_dir or (
             self._default_output_base_dir(profile.path, profile) / "single"
         )
-        board_adapter = LegacyBoardAdapter(profile.legacy.project_root)
+        board_adapter = LegacyBoardAdapter()
         tcp_config = board_adapter.read_tcp_mode2_config(device)
-        runner = LegacySingleCaptureRunner(profile.legacy.project_root)
+        runner = LegacySingleCaptureRunner()
         capture_started_at: float | None = None
         latest_output_dir: Path | None = None
         latest_captured_events = 0
@@ -205,8 +202,6 @@ class AcquireService:
                 f"Unknown group '{group_name}'. Available groups: {available}"
             ) from exc
 
-        if profile.legacy.project_root is None:
-            raise ValueError("The selected profile does not define legacy.project_root")
         if group.tcm is None:
             raise ValueError(f"Group '{group_name}' does not define a TCM reference")
 
@@ -223,7 +218,7 @@ class AcquireService:
             self._default_output_base_dir(profile.path, profile) / "multi"
         )
         if watch_waveforms:
-            board_adapter = LegacyBoardAdapter(profile.legacy.project_root)
+            board_adapter = LegacyBoardAdapter()
             unsupported = []
             for device in devices:
                 send_mode = board_adapter.read_tcp_mode2_config(device).send_mode
@@ -234,7 +229,7 @@ class AcquireService:
                     "multi waveform watch only supports send_mode 1 or 3; "
                     f"unsupported boards: {', '.join(unsupported)}"
                 )
-        runner = LegacyMultiCaptureRunner(profile.legacy.project_root)
+        runner = LegacyMultiCaptureRunner()
         raw_result = runner.capture_multi(
             LegacyMultiCaptureConfig(
                 run_name_prefix=group.name,

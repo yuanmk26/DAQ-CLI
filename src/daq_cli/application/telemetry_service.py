@@ -39,10 +39,7 @@ class TelemetryService:
                 f"Unknown device '{device_name}'. Available devices: {available}"
             ) from exc
 
-        if profile.legacy.project_root is None:
-            raise ValueError("The selected profile does not define legacy.project_root")
-
-        adapter = LegacyBoardAdapter(profile.legacy.project_root)
+        adapter = LegacyBoardAdapter()
         snapshot = adapter.read_sysmon(device)
         return BoardSysmonResult(
             device=device,

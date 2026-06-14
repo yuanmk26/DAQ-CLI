@@ -18,22 +18,15 @@ At the moment, the most useful command paths are:
 - `daq acquire multi <group>`
 - `daq monitor wave <device>`
 
-These commands use the profile file in `profiles/` and the legacy DAQ project referenced by `legacy.project_root`.
+These commands use a YAML profile file and the vendored legacy control scripts bundled inside `daq-cli`.
 
 ## 2. Prerequisites
 
 Before using the CLI, make sure:
 
 - Python 3.10 or newer is available
-- The legacy hardware project exists on disk
 - The board is reachable through the configured IP and ports
-- The selected profile points to the correct legacy project path
-
-The current implementation depends on the legacy scripts under:
-
-```text
-FDU-ADC-250M-16ch/script
-```
+- The selected profile points to the correct boards and TCM
 
 ## 3. Installation
 
@@ -58,7 +51,7 @@ python -m daq_cli.main --help
 
 ## 4. Profile File
 
-The CLI uses a YAML profile file to describe devices, groups, defaults, and the legacy project path.
+The CLI uses a YAML profile file to describe devices, groups, and defaults.
 
 Current example:
 
@@ -94,9 +87,6 @@ defaults:
   trigger_mode: 1
   trigger_position: 40
   thresholds: [1950, 2400, 2300, 2300]
-
-legacy:
-  project_root: E:\projects\1-hardware\FDU-ADC-250M-16ch
 ```
 
 Important fields:
@@ -105,8 +95,6 @@ Important fields:
 - `rbcp_port`: UDP/RBCP port
 - `tcp_port`: TCP data port
 - `defaults.output_dir`: base output folder for capture results
-- `legacy.project_root`: path to the existing hardware-control project
-
 Example command with explicit profile:
 
 ```bash
@@ -144,8 +132,6 @@ This command currently shows:
 - Board ID
 - Role
 - Profile path
-- Legacy project root path
-
 This is a profile-backed command. It does not talk to hardware yet.
 
 ## 7. Reading FPGA Telemetry
@@ -168,7 +154,6 @@ If this command fails, the likely causes are:
 - Wrong device IP
 - Wrong RBCP port
 - Board not powered or not reachable
-- Incorrect `legacy.project_root`
 
 ## 8. Configuring a Board
 
@@ -642,8 +627,8 @@ Not implemented yet:
 
 Current technical limitation:
 
-- `board config`, `acquire single`, and `acquire multi` still rely on legacy
-  script behavior under the external project path
+- `board config`, `acquire single`, and `acquire multi` still rely on bundled
+  legacy script behavior
 - `monitor wave` currently supports only `send_mode = 1` full-waveform monitoring
 - `monitor wave` currently supports only single-board monitoring
 - `monitor wave` currently has no advanced trigger conditions or frame history buffer
@@ -666,7 +651,6 @@ Check:
 - TCP port
 - Physical network connection
 - Board power state
-- `legacy.project_root`
 
 ### Capture does not create output
 

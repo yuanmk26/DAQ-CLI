@@ -38,9 +38,11 @@ out/
 runs/
 logs/
 tmp/
+tmp*/
 temp/
 tmp_test_outputs/
 tmp_test_decode/
+.tmp-build/
 
 # Waveform and acquisition scratch data
 captures/

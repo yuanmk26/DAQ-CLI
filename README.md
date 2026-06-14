@@ -39,20 +39,20 @@ Install in editable mode:
 pip install -e .
 ```
 
-Install from a GitHub Releases wheel on a new PC:
+Install from a GitHub Releases offline package on a new PC:
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
-python -m pip install -U pip
-python -m pip install daq_cli-0.1.0-py3-none-any.whl
+python -m pip install --no-index --find-links wheelhouse daq_cli-0.1.0-py3-none-any.whl
 daq --help
+daq profile init .\lab-pc-01.yaml
 ```
 
 For a release-style install and machine-specific profile setup, see
-`docs/install-on-new-pc.md`. For a public configuration starting point, copy
-`profiles/example.template.yaml` to your own `profiles/<machine>.local.yaml`
-and edit the hardware-specific values there.
+`docs/install-on-new-pc.md`. For a public configuration starting point, use
+`daq profile init` to write a machine-local YAML file and then edit the
+hardware-specific values there.
 
 Run the example command:
 
@@ -71,7 +71,7 @@ Run configurable board setup:
 ```bash
 daq board config dev1 --profile profiles/example.yaml
 daq board config dev1 --adc --clock --trigger --tcp-mode2 --profile profiles/example.yaml
-daq board config dev1 --trigger-mode 1 --trigger-position 40 --threshold-1 1950 --threshold-2 2400 --threshold-3 2300 --threshold-4 2300
+daq board config dev1 --trigger-mode 1 --trigger-position 40 --threshold-1 1950 --threshold-2 2400 --threshold-3 2300 --threshold-4 2300 --profile profiles/example.yaml
 ```
 
 Read configuration back without writing:

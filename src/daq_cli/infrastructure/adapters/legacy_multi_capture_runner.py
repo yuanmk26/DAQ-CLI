@@ -11,6 +11,7 @@ from typing import Any
 
 from daq_cli.domain.device import DeviceConfig
 from daq_cli.infrastructure.adapters.legacy_runtime import (
+    bundled_legacy_script_dir,
     clear_legacy_modules,
     temporary_sys_path,
 )
@@ -156,9 +157,10 @@ class _MultiBoardWatchPublisher:
 class LegacyMultiCaptureRunner:
     """Wrapper for the legacy multi-board acquisition script."""
 
-    def __init__(self, legacy_project_root: Path | str) -> None:
-        self._project_root = Path(legacy_project_root)
-        self._script_dir = self._project_root / "script"
+    def __init__(self, script_dir: Path | str | None = None) -> None:
+        self._script_dir = (
+            Path(script_dir) if script_dir is not None else bundled_legacy_script_dir()
+        )
 
     def capture_multi(
         self,

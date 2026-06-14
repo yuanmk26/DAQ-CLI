@@ -5,7 +5,7 @@ import typer
 
 from daq_cli.application.acquire_service import AcquireService, SingleAcquireProgress
 from daq_cli.application.profile_service import ProfileService
-from daq_cli.cli.common import ProfileOption
+from daq_cli.cli.common import RequiredProfileOption
 from daq_cli.presentation.console.printers import (
     print_multi_acquire_result,
     print_single_acquire_result,
@@ -62,7 +62,7 @@ def acquire_single(
             help="Print one live progress line every N captured events.",
         ),
     ] = None,
-    profile: ProfileOption = Path("profiles/example.yaml"),
+    profile: RequiredProfileOption = ...,
 ) -> None:
     """Capture raw TCP_SENT packets from one device."""
     profile_data = ProfileService().load_profile(profile)
@@ -208,7 +208,7 @@ def acquire_multi(
             help="When waveform watching is enabled, closing the watch window also stops acquisition by default.",
         ),
     ] = None,
-    profile: ProfileOption = Path("profiles/example.yaml"),
+    profile: RequiredProfileOption = ...,
 ) -> None:
     """Run legacy multi-board acquisition for one logical group."""
     profile_data = ProfileService().load_profile(profile)

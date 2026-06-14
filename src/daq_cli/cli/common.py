@@ -15,3 +15,17 @@ ProfileOption = Annotated[
         readable=True,
     ),
 ]
+
+RequiredProfileOption = Annotated[
+    Path,
+    typer.Option(
+        ...,
+        "--profile",
+        "-p",
+        help="Path to the DAQ profile YAML file.",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+    ),
+]

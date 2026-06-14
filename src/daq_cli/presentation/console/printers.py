@@ -28,8 +28,6 @@ def print_board_info(info: BoardInfoResult) -> None:
     table.add_row("board_id", str(info.device.board_id))
     table.add_row("role", info.device.role or "-")
     table.add_row("profile", str(info.source_profile))
-    table.add_row("legacy_project_root", str(info.legacy_project_root or "-"))
-
     console.print(table)
 
 

@@ -11,7 +11,6 @@ from daq_cli.infrastructure.adapters.legacy_board_adapter import LegacyBoardAdap
 class BoardInfoResult:
     device: DeviceConfig
     source_profile: Path
-    legacy_project_root: Path | None
 
 
 @dataclass(slots=True)
@@ -109,7 +108,6 @@ class BoardService:
         return BoardInfoResult(
             device=device,
             source_profile=profile.path,
-            legacy_project_root=profile.legacy.project_root,
         )
 
     def configure_board(
@@ -121,11 +119,8 @@ class BoardService:
     ) -> BoardConfigResult:
         profile, device = self._resolve_device(device_name, profile_path)
 
-        if profile.legacy.project_root is None:
-            raise ValueError("The selected profile does not define legacy.project_root")
-
         options = options or BoardConfigOptions()
-        adapter = LegacyBoardAdapter(profile.legacy.project_root)
+        adapter = LegacyBoardAdapter()
         raw_result = adapter.configure_board(
             device=device,
             send_start_delay_us=send_start_delay_us,
@@ -242,9 +237,7 @@ class BoardService:
         )
 
     def _make_adapter(self, profile) -> LegacyBoardAdapter:
-        if profile.legacy.project_root is None:
-            raise ValueError("The selected profile does not define legacy.project_root")
-        return LegacyBoardAdapter(profile.legacy.project_root)
+        return LegacyBoardAdapter()
 
     def _set_send_mode_with_adapter(
         self,

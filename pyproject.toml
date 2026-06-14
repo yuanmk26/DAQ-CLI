@@ -26,3 +26,4 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "daq_cli.monitoring_samples" = ["*.json", "*.txt"]
+"daq_cli.profile_templates" = ["*.yaml"]
