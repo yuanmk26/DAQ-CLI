@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from bisect import bisect_left
 from dataclasses import dataclass
 from enum import Enum
 from os import PathLike
@@ -11,7 +12,7 @@ import tkinter
 
 import matplotlib.pyplot as plt
 
-from daq_cli.infrastructure.wave_monitor import WaveMonitorFrame
+from daq_cli.infrastructure.wave_monitor import MultiBoardWaveUpdate, WaveMonitorFrame
 
 
 class WaveMonitorRunState(str, Enum):
@@ -32,14 +33,29 @@ class WaveMonitorLoopStepResult:
     should_render: bool
 
 
-@dataclass(slots=True)
-class MultiBoardWaveUpdate:
-    board_name: str
-    board_index: int
-    frame: WaveMonitorFrame
-
-
 DEFAULT_FIGSIZE = (14.0, 10.0)
+DEFAULT_MULTI_BOARD_HISTORY_LIMIT = 200
+
+
+@dataclass(slots=True)
+class MultiBoardViewerState:
+    run_state: WaveMonitorRunState = WaveMonitorRunState.RUN
+    selected_board_index: int = 0
+    selected_event_count: int | None = None
+    board_histories: dict[int, dict[int, WaveMonitorFrame]] | None = None
+    board_event_order: dict[int, list[int]] | None = None
+
+    def __post_init__(self) -> None:
+        if self.board_histories is None:
+            self.board_histories = {}
+        if self.board_event_order is None:
+            self.board_event_order = {}
+
+
+@dataclass(slots=True)
+class MultiBoardViewerStepResult:
+    viewer_state: MultiBoardViewerState
+    should_render: bool
 
 
 class WaveMonitorFigure:
@@ -214,22 +230,24 @@ def run_multi_board_wave_viewer(
     plt.ion()
     figure = WaveMonitorFigure(
         source_label=f"multi-watch:{group_label}",
-        help_text="tab/[ ]/1-9: switch board | space: run/stop | s: single | r: run | q: quit",
+        help_text=(
+            "tab/[ ]/1-9: switch board | ,/left: prev event (STOP) | "
+            "./right: next event (STOP) | space: run/stop | s: single | r: run | q: quit"
+        ),
     )
-    run_state = WaveMonitorRunState.RUN
-    selected_board_index = 0
-    cached_frames: dict[int, WaveMonitorFrame] = {}
+    viewer_state = MultiBoardViewerState()
     _disconnect_default_key_handler(figure.figure)
 
     def render_selected() -> None:
-        board_name = board_names[selected_board_index]
-        current_frame = cached_frames.get(selected_board_index)
+        board_name = board_names[viewer_state.selected_board_index]
+        current_frame = _get_selected_multi_board_frame(viewer_state)
         title = _format_multi_board_title(
             group_label=group_label,
             board_name=board_name,
-            board_index=selected_board_index,
+            board_index=viewer_state.selected_board_index,
             board_count=len(board_names),
-            run_state=run_state,
+            run_state=viewer_state.run_state,
+            selected_event_count=viewer_state.selected_event_count,
             frame=current_frame,
         )
         if current_frame is None:
@@ -238,31 +256,54 @@ def run_multi_board_wave_viewer(
             figure.update_custom(current_frame, title)
 
     def on_key_press(event) -> None:
-        nonlocal run_state, selected_board_index
+        nonlocal viewer_state
         key = (event.key or "").lower()
         if key == " ":
-            run_state = (
-                WaveMonitorRunState.STOP
-                if run_state == WaveMonitorRunState.RUN
-                else WaveMonitorRunState.RUN
-            )
+            if viewer_state.run_state == WaveMonitorRunState.RUN:
+                viewer_state.run_state = WaveMonitorRunState.STOP
+            else:
+                _jump_to_latest_multi_board_event(viewer_state)
+                viewer_state.run_state = WaveMonitorRunState.RUN
             render_selected()
         elif key == "s":
-            run_state = WaveMonitorRunState.SINGLE_ARMED
+            viewer_state.run_state = WaveMonitorRunState.SINGLE_ARMED
             render_selected()
         elif key == "r":
-            run_state = WaveMonitorRunState.RUN
+            _jump_to_latest_multi_board_event(viewer_state)
+            viewer_state.run_state = WaveMonitorRunState.RUN
             render_selected()
         elif key == "tab" or key == "]":
-            selected_board_index = (selected_board_index + 1) % len(board_names)
+            viewer_state.selected_board_index = (
+                viewer_state.selected_board_index + 1
+            ) % len(board_names)
+            if viewer_state.run_state == WaveMonitorRunState.RUN:
+                _jump_to_latest_multi_board_event(viewer_state)
             render_selected()
         elif key == "[":
-            selected_board_index = (selected_board_index - 1) % len(board_names)
+            viewer_state.selected_board_index = (
+                viewer_state.selected_board_index - 1
+            ) % len(board_names)
+            if viewer_state.run_state == WaveMonitorRunState.RUN:
+                _jump_to_latest_multi_board_event(viewer_state)
             render_selected()
         elif key.isdigit():
             target_index = int(key) - 1
             if 0 <= target_index < len(board_names):
-                selected_board_index = target_index
+                viewer_state.selected_board_index = target_index
+                if viewer_state.run_state == WaveMonitorRunState.RUN:
+                    _jump_to_latest_multi_board_event(viewer_state)
+                render_selected()
+        elif key in {",", "left"}:
+            if (
+                _can_navigate_multi_board_history(viewer_state)
+                and _select_previous_multi_board_event(viewer_state)
+            ):
+                render_selected()
+        elif key in {".", "right"}:
+            if (
+                _can_navigate_multi_board_history(viewer_state)
+                and _select_next_multi_board_event(viewer_state)
+            ):
                 render_selected()
         elif key == "q":
             stop_event.set()
@@ -274,17 +315,17 @@ def run_multi_board_wave_viewer(
     try:
         while plt.fignum_exists(figure.figure.number) and not stop_event.is_set():
             updates = _drain_multi_board_updates(frame_queue)
-            selected_board_updated = False
+            should_render = False
             for update in updates:
-                cached_frames[update.board_index] = update.frame
-                if update.board_index == selected_board_index:
-                    selected_board_updated = True
-            if selected_board_updated:
-                if run_state == WaveMonitorRunState.RUN:
-                    render_selected()
-                elif run_state == WaveMonitorRunState.SINGLE_ARMED:
-                    run_state = WaveMonitorRunState.STOP
-                    render_selected()
+                step_result = _advance_multi_board_viewer_state(
+                    viewer_state=viewer_state,
+                    update=update,
+                    history_limit=DEFAULT_MULTI_BOARD_HISTORY_LIMIT,
+                )
+                viewer_state = step_result.viewer_state
+                should_render = should_render or step_result.should_render
+            if should_render:
+                render_selected()
             plt.pause(0.05)
     except KeyboardInterrupt:
         stop_event.set()
@@ -360,6 +401,127 @@ def _advance_loop_state(
     )
 
 
+def _advance_multi_board_viewer_state(
+    viewer_state: MultiBoardViewerState,
+    update: MultiBoardWaveUpdate,
+    *,
+    history_limit: int = DEFAULT_MULTI_BOARD_HISTORY_LIMIT,
+) -> MultiBoardViewerStepResult:
+    _store_multi_board_frame(viewer_state, update, history_limit=history_limit)
+    if update.board_index != viewer_state.selected_board_index:
+        return MultiBoardViewerStepResult(
+            viewer_state=viewer_state,
+            should_render=False,
+        )
+
+    if viewer_state.run_state == WaveMonitorRunState.RUN:
+        viewer_state.selected_event_count = update.frame.event_count
+        return MultiBoardViewerStepResult(
+            viewer_state=viewer_state,
+            should_render=True,
+        )
+    if viewer_state.run_state == WaveMonitorRunState.SINGLE_ARMED:
+        viewer_state.selected_event_count = update.frame.event_count
+        viewer_state.run_state = WaveMonitorRunState.STOP
+        return MultiBoardViewerStepResult(
+            viewer_state=viewer_state,
+            should_render=True,
+        )
+    return MultiBoardViewerStepResult(
+        viewer_state=viewer_state,
+        should_render=False,
+    )
+
+
+def _store_multi_board_frame(
+    viewer_state: MultiBoardViewerState,
+    update: MultiBoardWaveUpdate,
+    *,
+    history_limit: int = DEFAULT_MULTI_BOARD_HISTORY_LIMIT,
+) -> None:
+    history = viewer_state.board_histories.setdefault(update.board_index, {})
+    order = viewer_state.board_event_order.setdefault(update.board_index, [])
+    event_count = update.frame.event_count
+    if event_count not in history:
+        order.append(event_count)
+    history[event_count] = update.frame
+    while len(order) > history_limit:
+        dropped_event_count = order.pop(0)
+        history.pop(dropped_event_count, None)
+
+
+def _get_selected_multi_board_frame(
+    viewer_state: MultiBoardViewerState,
+) -> WaveMonitorFrame | None:
+    selected_event_count = viewer_state.selected_event_count
+    if selected_event_count is None:
+        return None
+    history = viewer_state.board_histories.get(viewer_state.selected_board_index, {})
+    return history.get(selected_event_count)
+
+
+def _get_latest_multi_board_event_count(
+    viewer_state: MultiBoardViewerState,
+) -> int | None:
+    order = viewer_state.board_event_order.get(viewer_state.selected_board_index, [])
+    if not order:
+        return None
+    return order[-1]
+
+
+def _jump_to_latest_multi_board_event(viewer_state: MultiBoardViewerState) -> bool:
+    latest_event_count = _get_latest_multi_board_event_count(viewer_state)
+    if latest_event_count is None:
+        return False
+    viewer_state.selected_event_count = latest_event_count
+    return True
+
+
+def _select_previous_multi_board_event(viewer_state: MultiBoardViewerState) -> bool:
+    return _select_relative_multi_board_event(viewer_state, step=-1)
+
+
+def _select_next_multi_board_event(viewer_state: MultiBoardViewerState) -> bool:
+    return _select_relative_multi_board_event(viewer_state, step=1)
+
+
+def _select_relative_multi_board_event(
+    viewer_state: MultiBoardViewerState,
+    *,
+    step: int,
+) -> bool:
+    order = viewer_state.board_event_order.get(viewer_state.selected_board_index, [])
+    if not order:
+        return False
+    if viewer_state.selected_event_count is None:
+        viewer_state.selected_event_count = order[-1 if step < 0 else 0]
+        return True
+
+    insertion_index = bisect_left(order, viewer_state.selected_event_count)
+    if step < 0:
+        candidate_index = insertion_index - 1
+        if (
+            insertion_index < len(order)
+            and order[insertion_index] == viewer_state.selected_event_count
+        ):
+            candidate_index = insertion_index - 1
+    else:
+        candidate_index = insertion_index
+        if (
+            insertion_index < len(order)
+            and order[insertion_index] == viewer_state.selected_event_count
+        ):
+            candidate_index = insertion_index + 1
+    if not (0 <= candidate_index < len(order)):
+        return False
+    viewer_state.selected_event_count = order[candidate_index]
+    return True
+
+
+def _can_navigate_multi_board_history(viewer_state: MultiBoardViewerState) -> bool:
+    return viewer_state.run_state == WaveMonitorRunState.STOP
+
+
 def _disconnect_default_key_handler(figure) -> None:
     manager = getattr(figure.canvas, "manager", None)
     if manager is None:
@@ -419,6 +581,7 @@ def _format_multi_board_title(
     board_index: int,
     board_count: int,
     run_state: WaveMonitorRunState,
+    selected_event_count: int | None,
     frame: WaveMonitorFrame | None,
 ) -> str:
     prefix = (
@@ -426,8 +589,11 @@ def _format_multi_board_title(
         f"state={run_state.value}"
     )
     if frame is None:
-        return f"{prefix} | no frame yet"
+        if selected_event_count is None:
+            return f"{prefix} | no frame yet"
+        return f"{prefix} | event={selected_event_count} | missing on this board"
     return (
-        f"{prefix} | event={frame.event_count} | timestamp={frame.timestamp} | "
+        f"{prefix} | event={selected_event_count if selected_event_count is not None else frame.event_count} | "
+        f"timestamp={frame.timestamp} | "
         f"hit_mask=0x{frame.hit_mask:04X} | send_mode={frame.send_mode}"
     )

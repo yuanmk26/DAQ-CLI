@@ -5,7 +5,10 @@ import typer
 
 from daq_cli.application.monitor_service import MonitorService
 from daq_cli.cli.common import RequiredProfileOption
-from daq_cli.presentation.wave_monitor_viewer import run_wave_monitor_viewer
+from daq_cli.presentation.wave_monitor_viewer import (
+    run_multi_board_wave_viewer,
+    run_wave_monitor_viewer,
+)
 
 app = typer.Typer(no_args_is_help=True, help="Monitoring commands.")
 
@@ -66,4 +69,32 @@ def monitor_wave(
             )
     except Exception as exc:
         typer.echo(f"Wave monitor failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+@app.command("multi-demo")
+def monitor_multi_demo(
+    events: Annotated[
+        int,
+        typer.Option(
+            "--events",
+            "-n",
+            min=1,
+            help="Number of offline demo events to generate for the multi-board viewer.",
+        ),
+    ] = 100,
+) -> None:
+    """Open an offline multi-board waveform demo viewer."""
+    service = MonitorService()
+    try:
+        context = service.open_multi_board_demo_wave_session(events=events)
+        with context as session:
+            run_multi_board_wave_viewer(
+                group_label="multi-demo",
+                board_names=session.board_names,
+                frame_queue=session.frame_queue,
+                stop_event=session.stop_event,
+            )
+    except Exception as exc:
+        typer.echo(f"Multi-board demo monitor failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc

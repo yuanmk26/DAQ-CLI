@@ -24,6 +24,13 @@ class WaveMonitorFrame:
     channels: list[list[int]]
 
 
+@dataclass(slots=True)
+class MultiBoardWaveUpdate:
+    board_name: str
+    board_index: int
+    frame: WaveMonitorFrame
+
+
 class WaveMonitorError(RuntimeError):
     """Wave monitor runtime failure."""
 
@@ -32,6 +39,17 @@ class BaseWaveMonitorSource:
     source_label = "unknown"
 
     def frames(self, stop_event: threading.Event) -> Iterator[WaveMonitorFrame]:
+        raise NotImplementedError
+
+
+class BaseMultiBoardWaveMonitorSource:
+    source_label = "unknown"
+
+    @property
+    def board_names(self) -> list[str]:
+        raise NotImplementedError
+
+    def updates(self, stop_event: threading.Event) -> Iterator[MultiBoardWaveUpdate]:
         raise NotImplementedError
 
 
@@ -171,6 +189,67 @@ class ReplayWaveMonitorSource(BaseWaveMonitorSource):
                     return
 
 
+class DemoMultiBoardWaveMonitorSource(BaseMultiBoardWaveMonitorSource):
+    source_label = "multi-demo"
+
+    def __init__(
+        self,
+        board_names: list[str] | None = None,
+        events: int = 100,
+    ) -> None:
+        resolved_board_names = board_names or ["dev1", "dev2"]
+        if len(resolved_board_names) < 2:
+            raise WaveMonitorError("Multi-board demo requires at least two board names.")
+        self._board_names = list(resolved_board_names)
+        self._events = max(int(events), 1)
+        self._templates = load_demo_frames()
+
+    @property
+    def board_names(self) -> list[str]:
+        return list(self._board_names)
+
+    def updates(self, stop_event: threading.Event) -> Iterator[MultiBoardWaveUpdate]:
+        for event_count in range(1, self._events + 1):
+            if stop_event.is_set():
+                return
+            for board_index, board_name in enumerate(self._board_names):
+                if board_index == 1 and event_count % 7 == 0:
+                    continue
+                yield MultiBoardWaveUpdate(
+                    board_name=board_name,
+                    board_index=board_index,
+                    frame=self._build_frame(
+                        board_name=board_name,
+                        board_index=board_index,
+                        event_count=event_count,
+                    ),
+                )
+                if stop_event.wait(0.03):
+                    return
+
+    def _build_frame(
+        self,
+        *,
+        board_name: str,
+        board_index: int,
+        event_count: int,
+    ) -> WaveMonitorFrame:
+        template = self._templates[(event_count + board_index) % len(self._templates)]
+        channel_bias = board_index * 12 + (event_count % 5)
+        channels = [
+            [sample + channel_bias + channel_index for sample in channel]
+            for channel_index, channel in enumerate(template.channels)
+        ]
+        return WaveMonitorFrame(
+            device_name=board_name,
+            event_count=event_count,
+            timestamp=(event_count * 100) + board_index,
+            hit_mask=((template.hit_mask << board_index) | (template.hit_mask >> (16 - board_index))) & 0xFFFF,
+            send_mode=template.send_mode,
+            channels=channels,
+        )
+
+
 class LiveWaveMonitorSource(BaseWaveMonitorSource):
     source_label = "live"
 
@@ -270,6 +349,40 @@ class WaveMonitorProducer(threading.Thread):
                 if self._stop_event.is_set():
                     return
                 self._publish(frame)
+        except Exception as exc:
+            self._publish(exc)
+
+    def _publish(self, item: object) -> None:
+        try:
+            self._queue.put_nowait(item)
+            return
+        except Exception:
+            pass
+        try:
+            self._queue.get_nowait()
+        except Empty:
+            pass
+        self._queue.put_nowait(item)
+
+
+class MultiBoardWaveMonitorProducer(threading.Thread):
+    def __init__(
+        self,
+        source: BaseMultiBoardWaveMonitorSource,
+        queue: Queue[object],
+        stop_event: threading.Event,
+    ) -> None:
+        super().__init__(daemon=True, name="multi_board_wave_monitor_producer")
+        self._source = source
+        self._queue = queue
+        self._stop_event = stop_event
+
+    def run(self) -> None:
+        try:
+            for update in self._source.updates(self._stop_event):
+                if self._stop_event.is_set():
+                    return
+                self._publish(update)
         except Exception as exc:
             self._publish(exc)
 

@@ -496,9 +496,8 @@ def _multi_board_watch_backend_main(
     import threading
     from queue import Queue
 
-    from daq_cli.infrastructure.wave_monitor import WaveMonitorFrame
+    from daq_cli.infrastructure.wave_monitor import MultiBoardWaveUpdate, WaveMonitorFrame
     from daq_cli.presentation.wave_monitor_viewer import (
-        MultiBoardWaveUpdate,
         run_multi_board_wave_viewer,
     )
 

@@ -110,6 +110,7 @@ Preview or watch waveforms:
 daq monitor wave dev1 --profile profiles/example.yaml
 daq monitor wave demo --demo
 daq monitor wave replay --replay src/daq_cli/monitoring_samples/replay_dump.txt
+daq monitor multi-demo
 ```
 
 The waveform viewer supports keyboard-driven `RUN`, `STOP`, and `SINGLE`

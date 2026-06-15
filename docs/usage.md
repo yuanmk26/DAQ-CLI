@@ -506,7 +506,7 @@ Current behavior:
   parse, aggregation, and run-file writing
 - `--decode-json` performs a follow-up offline decode of aggregated events after
   capture completes
-- `--watch-waveforms` adds a best-effort sampled waveform monitor with one window and keyboard board switching
+- `--watch-waveforms` adds a best-effort sampled waveform monitor with one window, same-event board switching, and short history navigation
 - Multi waveform watch only supports boards currently sending waveform-bearing modes `1` or `3`
 - The watcher samples packets from the legacy multi receive path; it does not read waveform data from `monitor.jsonl`
 - `defaults.acquire_multi` in the profile can provide default values for `output_dir`, `aggregation_key`, `timestamp_match_window_ticks`, `event_timeout_ms`, `tcp_timeout_s`, `allow_start_without_ack`, `decode_json`, `watch_waveforms`, and `watch_every`
@@ -550,6 +550,7 @@ Offline preview modes:
 ```bash
 daq monitor wave demo --demo
 daq monitor wave replay --replay src/daq_cli/monitoring_samples/replay_dump.txt
+daq monitor multi-demo
 ```
 
 Preview notes:
@@ -557,6 +558,7 @@ Preview notes:
 - `--demo` uses a bundled sample frame set
 - `--replay` reads a structured dump file and replays it in the same 16-channel view
 - `--demo` and `--replay` are mutually exclusive
+- `monitor multi-demo` opens a two-board offline viewer with about 100 sampled events by default
 - The viewer scales its default window size to the current screen when possible
 
 The monitor window currently shows:
@@ -571,10 +573,21 @@ The monitor window currently shows:
 
 Viewer keyboard controls:
 
-- `space`: toggle between `RUN` and `STOP`
+- `space`: toggle between `RUN` and `STOP`; returning to `RUN` immediately jumps to the latest cached event on the selected board
 - `s`: arm `SINGLE`, wait for the next frame, then freeze on it
-- `r`: force the viewer back to `RUN`
+- `r`: force the viewer back to `RUN` and immediately jump to the latest cached event on the selected board
+- `tab`, `]`, `[` and `1-9`: switch boards in the multi-board watcher while keeping the same `event_count`
+- `,` or `left`: in `STOP` only, move to the previous captured event in the selected board history
+- `.` or `right`: in `STOP` only, move to the next captured event in the selected board history
 - `q`: close the viewer
+
+Multi-board watcher notes:
+
+- Board switching locks onto the same `event_count` across boards instead of each board's latest frame
+- If another board does not yet have the selected `event_count`, the title reports that the event is missing on that board
+- The multi-board watcher keeps a short recent history per board so you can step backward and forward through sampled events
+- History browsing is only available in `STOP`; `RUN` always tracks the latest event for the selected board
+- `daq monitor multi-demo --events 100` is the quickest offline way to test this behavior without hardware
 
 Mode definitions:
 

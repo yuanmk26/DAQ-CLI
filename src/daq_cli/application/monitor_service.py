@@ -11,8 +11,11 @@ from daq_cli.domain.device import DeviceConfig
 from daq_cli.infrastructure.adapters.legacy_board_adapter import LegacyBoardAdapter
 from daq_cli.infrastructure.wave_monitor import (
     BaseWaveMonitorSource,
+    BaseMultiBoardWaveMonitorSource,
+    DemoMultiBoardWaveMonitorSource,
     DemoWaveMonitorSource,
     LiveWaveMonitorSource,
+    MultiBoardWaveMonitorProducer,
     ReplayWaveMonitorSource,
     WaveMonitorProducer,
 )
@@ -24,6 +27,15 @@ class WaveMonitorSession:
     frame_queue: Queue[object]
     stop_event: threading.Event
     producer: WaveMonitorProducer
+
+
+@dataclass(slots=True)
+class MultiBoardWaveMonitorSession:
+    source_label: str
+    board_names: list[str]
+    frame_queue: Queue[object]
+    stop_event: threading.Event
+    producer: MultiBoardWaveMonitorProducer
 
 
 class LiveWaveMonitorContext(AbstractContextManager["WaveMonitorSession"]):
@@ -63,6 +75,24 @@ class OfflineWaveMonitorContext(AbstractContextManager["WaveMonitorSession"]):
 
     def __enter__(self) -> WaveMonitorSession:
         self._session = _make_session(self._source)
+        return self._session
+
+    def __exit__(self, exc_type, exc, tb) -> bool | None:
+        if self._session is not None:
+            self._session.stop_event.set()
+            self._session.producer.join(timeout=2.0)
+        return None
+
+
+class OfflineMultiBoardWaveMonitorContext(
+    AbstractContextManager["MultiBoardWaveMonitorSession"]
+):
+    def __init__(self, source: BaseMultiBoardWaveMonitorSource) -> None:
+        self._source = source
+        self._session: MultiBoardWaveMonitorSession | None = None
+
+    def __enter__(self) -> MultiBoardWaveMonitorSession:
+        self._session = _make_multi_board_session(self._source)
         return self._session
 
     def __exit__(self, exc_type, exc, tb) -> bool | None:
@@ -116,6 +146,18 @@ class MonitorService:
             ReplayWaveMonitorSource(device_name=device_name, replay_path=replay_path)
         )
 
+    def open_multi_board_demo_wave_session(
+        self,
+        events: int = 100,
+        board_names: list[str] | None = None,
+    ) -> OfflineMultiBoardWaveMonitorContext:
+        return OfflineMultiBoardWaveMonitorContext(
+            DemoMultiBoardWaveMonitorSource(
+                board_names=board_names,
+                events=events,
+            )
+        )
+
 
 def _make_session(source: BaseWaveMonitorSource) -> WaveMonitorSession:
     frame_queue: Queue[object] = Queue(maxsize=1)
@@ -128,6 +170,26 @@ def _make_session(source: BaseWaveMonitorSource) -> WaveMonitorSession:
     producer.start()
     return WaveMonitorSession(
         source_label=source.source_label,
+        frame_queue=frame_queue,
+        stop_event=stop_event,
+        producer=producer,
+    )
+
+
+def _make_multi_board_session(
+    source: BaseMultiBoardWaveMonitorSource,
+) -> MultiBoardWaveMonitorSession:
+    frame_queue: Queue[object] = Queue(maxsize=1)
+    stop_event = threading.Event()
+    producer = MultiBoardWaveMonitorProducer(
+        source=source,
+        queue=frame_queue,
+        stop_event=stop_event,
+    )
+    producer.start()
+    return MultiBoardWaveMonitorSession(
+        source_label=source.source_label,
+        board_names=source.board_names,
         frame_queue=frame_queue,
         stop_event=stop_event,
         producer=producer,
