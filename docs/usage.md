@@ -509,6 +509,7 @@ Current behavior:
 - `--watch-waveforms` adds a best-effort sampled waveform monitor with one window, same-event board switching, and short history navigation
 - Multi waveform watch only supports boards currently sending waveform-bearing modes `1` or `3`
 - The watcher samples packets from the legacy multi receive path; it does not read waveform data from `monitor.jsonl`
+- If you want the viewer to follow essentially every watched event, use `--watch-every 1`; larger values intentionally sample the stream
 - `defaults.acquire_multi` in the profile can provide default values for `output_dir`, `aggregation_key`, `timestamp_match_window_ticks`, `event_timeout_ms`, `tcp_timeout_s`, `allow_start_without_ack`, `decode_json`, `watch_waveforms`, and `watch_every`
 - The command prints the final run directory, generated config path, and status
 
@@ -586,6 +587,7 @@ Multi-board watcher notes:
 - Board switching locks onto the same `event_count` across boards instead of each board's latest frame
 - If another board does not yet have the selected `event_count`, the title reports that the event is missing on that board
 - The multi-board watcher keeps a short recent history per board so you can step backward and forward through sampled events
+- That recent history is intentionally much larger than before, but it is still a recent-window cache rather than the full run archive
 - The multi-board viewer also keeps a small recent update queue so same-event board switching can compare multiple board updates before they are drained into the viewer cache
 - History browsing is only available in `STOP`; `RUN` always tracks the latest event for the selected board
 - `daq monitor multi-demo --events 100` is the quickest offline way to test this behavior without hardware

@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from daq_cli.infrastructure.adapters.legacy_multi_capture_runner import (
+    DEFAULT_MULTI_WATCH_QUEUE_SIZE,
     LegacyMultiCaptureConfig,
     LegacyMultiCaptureRunner,
     MultiBoardDecodeRuntime,
@@ -67,6 +68,9 @@ class MultiWaveWatchTests(unittest.TestCase):
         self.assertEqual(sampled.board_name, "dev1")
         self.assertEqual(sampled.board_index, 0)
         self.assertGreater(len(sampled.packet), 20)
+
+    def test_multi_watch_queue_size_is_large_enough_for_bursty_watch_every_one(self) -> None:
+        self.assertGreaterEqual(DEFAULT_MULTI_WATCH_QUEUE_SIZE, 1024)
 
     def test_queue_proxy_forwards_to_aggregator_and_watcher(self) -> None:
         downstream_queue: queue.Queue = queue.Queue()

@@ -27,7 +27,9 @@ from daq_cli.infrastructure.tcp_sent_decode import decode_tcp_sent_packet
 from daq_cli.infrastructure.wave_monitor import compute_multi_board_viewer_queue_size
 
 
-DEFAULT_MULTI_WATCH_QUEUE_SIZE = 8
+# Multi-board watch can receive bursts from several boards while the
+# decode/viewer worker catches up, especially when watch_every=1.
+DEFAULT_MULTI_WATCH_QUEUE_SIZE = 1024
 
 
 @dataclass(slots=True)

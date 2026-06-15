@@ -360,6 +360,9 @@ class WaveMonitorTests(unittest.TestCase):
         self.assertNotIn(0, history)
         self.assertEqual(order[0], 1)
 
+    def test_multi_board_default_history_limit_is_large_enough_for_dense_watch_sessions(self) -> None:
+        self.assertGreaterEqual(DEFAULT_MULTI_BOARD_HISTORY_LIMIT, 5000)
+
     def test_multi_board_history_navigation_moves_selected_event(self) -> None:
         viewer_state = MultiBoardViewerState(selected_board_index=0)
         for event_count in (10, 11, 12):

@@ -34,7 +34,9 @@ class WaveMonitorLoopStepResult:
 
 
 DEFAULT_FIGSIZE = (14.0, 10.0)
-DEFAULT_MULTI_BOARD_HISTORY_LIMIT = 200
+# Keep a materially larger recent window so watch_every=1 does not
+# silently collapse most of the sampled session into a tiny history.
+DEFAULT_MULTI_BOARD_HISTORY_LIMIT = 5000
 
 
 @dataclass(slots=True)
