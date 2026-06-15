@@ -73,7 +73,19 @@ class LegacyMultiCaptureResult:
 class MultiBoardSampledPacket:
     board_name: str
     board_index: int
+    aggregate_event_id: int
+    aggregate_timestamp: int
+    board_event_count: int
+    board_timestamp: int
     packet: bytes
+
+
+@dataclass(slots=True)
+class _ViewerAggregateBucket:
+    aggregate_event_id: int
+    aggregate_timestamp: int
+    created_monotonic_s: float
+    sampled_frames: dict[int, Any]
 
 
 @dataclass(slots=True)
@@ -120,12 +132,20 @@ class _MultiBoardWatchPublisher:
         *,
         board_order: dict[int, tuple[str, int]],
         watch_every: int,
+        aggregation_key: str,
+        timestamp_match_window_ticks: int,
+        event_timeout_ms: int,
         task_queue: Any,
     ) -> None:
         self._board_order = board_order
         self._watch_every = watch_every
+        self._aggregation_key = aggregation_key
+        self._timestamp_match_window_ticks = max(int(timestamp_match_window_ticks), 0)
+        self._event_timeout_s = max(float(event_timeout_ms) / 1000.0, 0.001)
         self._task_queue = task_queue
         self._board_counts: dict[int, int] = {board_id: 0 for board_id in board_order}
+        self._next_aggregate_event_id = 1
+        self._buckets: dict[int, _ViewerAggregateBucket] = {}
 
     def publish(self, frame: Any) -> None:
         board_id = int(frame.board_id)
@@ -137,11 +157,28 @@ class _MultiBoardWatchPublisher:
             return
         if int(frame.mode) not in (1, 3):
             return
-        sampled_packet = MultiBoardSampledPacket(
-            board_name=board_info[0],
-            board_index=board_info[1],
-            packet=_legacy_frame_to_tcp_sent_packet(frame),
+        bucket_key, aggregate_event_id, aggregate_timestamp, sampled_frames, should_close = (
+            self._assign_viewer_aggregate(frame)
         )
+        for sampled_frame in sampled_frames:
+            sampled_board_info = self._board_order.get(int(sampled_frame.board_id))
+            if sampled_board_info is None:
+                continue
+            self._enqueue_sampled_packet(
+                MultiBoardSampledPacket(
+                    board_name=sampled_board_info[0],
+                    board_index=sampled_board_info[1],
+                    aggregate_event_id=aggregate_event_id,
+                    aggregate_timestamp=aggregate_timestamp,
+                    board_event_count=int(sampled_frame.event_count),
+                    board_timestamp=int(sampled_frame.timestamp),
+                    packet=_legacy_frame_to_tcp_sent_packet(sampled_frame),
+                )
+            )
+        if should_close:
+            self._close_viewer_bucket(bucket_key)
+
+    def _enqueue_sampled_packet(self, sampled_packet: MultiBoardSampledPacket) -> None:
         try:
             self._task_queue.put_nowait(sampled_packet)
         except queue.Full:
@@ -155,6 +192,67 @@ class _MultiBoardWatchPublisher:
                 return
         except Exception:
             return
+
+    def _assign_viewer_aggregate(
+        self,
+        frame: Any,
+    ) -> tuple[int, int, int, list[Any], bool]:
+        self._cleanup_stale_buckets()
+        bucket_key = self._frame_key(frame)
+        if self._aggregation_key == "timestamp":
+            matched_key = self._find_timestamp_bucket_key(int(frame.timestamp))
+            if matched_key is not None:
+                bucket_key = matched_key
+        bucket = self._buckets.get(bucket_key)
+        if bucket is None:
+            bucket = _ViewerAggregateBucket(
+                aggregate_event_id=self._next_aggregate_event_id,
+                aggregate_timestamp=int(frame.timestamp),
+                created_monotonic_s=time.monotonic(),
+                sampled_frames={},
+            )
+            self._buckets[bucket_key] = bucket
+            self._next_aggregate_event_id += 1
+
+        previous_timestamp = bucket.aggregate_timestamp
+        bucket.aggregate_timestamp = min(bucket.aggregate_timestamp, int(frame.timestamp))
+        bucket.sampled_frames[int(frame.board_id)] = frame
+        timestamp_changed = bucket.aggregate_timestamp != previous_timestamp
+        sampled_frames = (
+            list(bucket.sampled_frames.values()) if timestamp_changed else [frame]
+        )
+        should_close = len(bucket.sampled_frames) >= len(self._board_order)
+        return (
+            bucket_key,
+            bucket.aggregate_event_id,
+            bucket.aggregate_timestamp,
+            sampled_frames,
+            should_close,
+        )
+
+    def _close_viewer_bucket(self, bucket_key: int) -> None:
+        self._buckets.pop(bucket_key, None)
+
+    def _frame_key(self, frame: Any) -> int:
+        if self._aggregation_key == "event_count":
+            return int(frame.event_count)
+        return int(frame.timestamp)
+
+    def _find_timestamp_bucket_key(self, timestamp: int) -> int | None:
+        for bucket_key in self._buckets:
+            if abs(bucket_key - timestamp) <= self._timestamp_match_window_ticks:
+                return bucket_key
+        return None
+
+    def _cleanup_stale_buckets(self) -> None:
+        now_s = time.monotonic()
+        expired_keys = [
+            bucket_key
+            for bucket_key, bucket in self._buckets.items()
+            if now_s - bucket.created_monotonic_s >= self._event_timeout_s
+        ]
+        for bucket_key in expired_keys:
+            self._buckets.pop(bucket_key, None)
 
 
 class LegacyMultiCaptureRunner:
@@ -357,6 +455,9 @@ class LegacyMultiCaptureRunner:
         publisher = _MultiBoardWatchPublisher(
             board_order=board_order,
             watch_every=int(config.watch_every or 100),
+            aggregation_key=config.aggregation_key,
+            timestamp_match_window_ticks=config.timestamp_match_window_ticks,
+            event_timeout_ms=config.event_timeout_ms,
             task_queue=watch_runtime.task_queue,
         )
         for receiver in app.receivers:
@@ -538,6 +639,10 @@ def _multi_board_watch_backend_main(
                     MultiBoardWaveUpdate(
                         board_name=item.board_name,
                         board_index=item.board_index,
+                        aggregate_event_id=item.aggregate_event_id,
+                        aggregate_timestamp=item.aggregate_timestamp,
+                        board_event_count=item.board_event_count,
+                        board_timestamp=item.board_timestamp,
                         frame=frame,
                     ),
                 )

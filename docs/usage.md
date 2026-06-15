@@ -506,7 +506,7 @@ Current behavior:
   parse, aggregation, and run-file writing
 - `--decode-json` performs a follow-up offline decode of aggregated events after
   capture completes
-- `--watch-waveforms` adds a best-effort sampled waveform monitor with one window, same-event board switching, and short history navigation
+- `--watch-waveforms` adds a best-effort sampled waveform monitor with one window, same-aggregate-event board switching, and short history navigation
 - Multi waveform watch only supports boards currently sending waveform-bearing modes `1` or `3`
 - The watcher samples packets from the legacy multi receive path; it does not read waveform data from `monitor.jsonl`
 - If you want the viewer to follow essentially every watched event, use `--watch-every 1`; larger values intentionally sample the stream
@@ -577,15 +577,16 @@ Viewer keyboard controls:
 - `space`: toggle between `RUN` and `STOP`; returning to `RUN` immediately jumps to the latest cached event on the selected board
 - `s`: arm `SINGLE`, wait for the next frame, then freeze on it
 - `r`: force the viewer back to `RUN` and immediately jump to the latest cached event on the selected board
-- `tab`, `]`, `[` and `1-9`: switch boards in the multi-board watcher while keeping the same `event_count`
+- `tab`, `]`, `[` and `1-9`: switch boards in the multi-board watcher while keeping the same aggregated event
 - `,` or `left`: in `STOP` only, move to the previous captured event in the selected board history
 - `.` or `right`: in `STOP` only, move to the next captured event in the selected board history
 - `q`: close the viewer
 
 Multi-board watcher notes:
 
-- Board switching locks onto the same `event_count` across boards instead of each board's latest frame
-- If another board does not yet have the selected `event_count`, the title reports that the event is missing on that board
+- Board switching locks onto the same aggregated event across boards instead of each board's latest frame
+- In the multi-board viewer, title `event=` and `timestamp=` are aggregated-event values, not the raw per-board packet fields
+- If another board does not yet belong to the selected aggregated event, the title reports that the event is missing on that board
 - The multi-board watcher keeps a short recent history per board so you can step backward and forward through sampled events
 - That recent history is intentionally much larger than before, but it is still a recent-window cache rather than the full run archive
 - The multi-board viewer also keeps a small recent update queue so same-event board switching can compare multiple board updates before they are drained into the viewer cache

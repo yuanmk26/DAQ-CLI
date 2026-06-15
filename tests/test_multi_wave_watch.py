@@ -56,6 +56,9 @@ class MultiWaveWatchTests(unittest.TestCase):
         publisher = _MultiBoardWatchPublisher(
             board_order={0: ("dev1", 0)},
             watch_every=2,
+            aggregation_key="event_count",
+            timestamp_match_window_ticks=0,
+            event_timeout_ms=50,
             task_queue=task_queue,
         )
         frame = _build_legacy_frame(mode=1, hit_mask=0x00FF, event_count=1, timestamp=1)
@@ -78,6 +81,9 @@ class MultiWaveWatchTests(unittest.TestCase):
         publisher = _MultiBoardWatchPublisher(
             board_order={0: ("dev1", 0)},
             watch_every=1,
+            aggregation_key="event_count",
+            timestamp_match_window_ticks=0,
+            event_timeout_ms=50,
             task_queue=task_queue,
         )
         proxy = _MultiBoardFrameQueueProxy(downstream_queue, publisher)
@@ -97,6 +103,10 @@ class MultiWaveWatchTests(unittest.TestCase):
                 MultiBoardWaveUpdate(
                     board_name=board_name,
                     board_index=board_index,
+                    aggregate_event_id=123,
+                    aggregate_timestamp=456,
+                    board_event_count=123,
+                    board_timestamp=456,
                     frame=WaveMonitorFrame(
                         device_name=board_name,
                         event_count=123,
@@ -123,6 +133,10 @@ class MultiWaveWatchTests(unittest.TestCase):
                 MultiBoardWaveUpdate(
                     board_name=board_name,
                     board_index=board_index,
+                    aggregate_event_id=123,
+                    aggregate_timestamp=456,
+                    board_event_count=123,
+                    board_timestamp=456,
                     frame=WaveMonitorFrame(
                         device_name=board_name,
                         event_count=123,
@@ -337,6 +351,76 @@ class MultiWaveWatchTests(unittest.TestCase):
         self.assertEqual(result.decoded_complete_events, 9)
         self.assertEqual(result.decoded_partial_events, 2)
         self.assertEqual(result.decode_errors, 0)
+
+    def test_watch_publisher_assigns_same_aggregate_id_for_same_event_count(self) -> None:
+        task_queue: queue.Queue = queue.Queue(maxsize=8)
+        publisher = _MultiBoardWatchPublisher(
+            board_order={0: ("dev1", 0), 1: ("dev2", 1)},
+            watch_every=1,
+            aggregation_key="event_count",
+            timestamp_match_window_ticks=0,
+            event_timeout_ms=50,
+            task_queue=task_queue,
+        )
+        frame_a = _build_legacy_frame(mode=1, hit_mask=0x00FF, event_count=12, timestamp=500)
+        frame_b = _build_legacy_frame(mode=1, hit_mask=0x00FF, event_count=12, timestamp=900)
+        frame_b.board_id = 1
+        frame_b.board_name = "dev2"
+
+        publisher.publish(frame_a)
+        publisher.publish(frame_b)
+
+        first = task_queue.get_nowait()
+        second = task_queue.get_nowait()
+        self.assertEqual(first.aggregate_event_id, second.aggregate_event_id)
+        self.assertEqual(first.aggregate_timestamp, 500)
+        self.assertEqual(second.aggregate_timestamp, 500)
+
+    def test_watch_publisher_assigns_same_aggregate_id_within_timestamp_window(self) -> None:
+        task_queue: queue.Queue = queue.Queue(maxsize=8)
+        publisher = _MultiBoardWatchPublisher(
+            board_order={0: ("dev1", 0), 1: ("dev2", 1)},
+            watch_every=1,
+            aggregation_key="timestamp",
+            timestamp_match_window_ticks=10,
+            event_timeout_ms=50,
+            task_queue=task_queue,
+        )
+        frame_a = _build_legacy_frame(mode=1, hit_mask=0x00FF, event_count=20, timestamp=1000)
+        frame_b = _build_legacy_frame(mode=1, hit_mask=0x00FF, event_count=21, timestamp=1007)
+        frame_b.board_id = 1
+        frame_b.board_name = "dev2"
+
+        publisher.publish(frame_a)
+        publisher.publish(frame_b)
+
+        first = task_queue.get_nowait()
+        second = task_queue.get_nowait()
+        self.assertEqual(first.aggregate_event_id, second.aggregate_event_id)
+        self.assertEqual(first.aggregate_timestamp, 1000)
+        self.assertEqual(second.aggregate_timestamp, 1000)
+
+    def test_watch_publisher_splits_timestamp_aggregates_outside_window(self) -> None:
+        task_queue: queue.Queue = queue.Queue(maxsize=8)
+        publisher = _MultiBoardWatchPublisher(
+            board_order={0: ("dev1", 0), 1: ("dev2", 1)},
+            watch_every=1,
+            aggregation_key="timestamp",
+            timestamp_match_window_ticks=10,
+            event_timeout_ms=50,
+            task_queue=task_queue,
+        )
+        frame_a = _build_legacy_frame(mode=1, hit_mask=0x00FF, event_count=20, timestamp=1000)
+        frame_b = _build_legacy_frame(mode=1, hit_mask=0x00FF, event_count=21, timestamp=1020)
+        frame_b.board_id = 1
+        frame_b.board_name = "dev2"
+
+        publisher.publish(frame_a)
+        publisher.publish(frame_b)
+
+        first = task_queue.get_nowait()
+        second = task_queue.get_nowait()
+        self.assertNotEqual(first.aggregate_event_id, second.aggregate_event_id)
 
 
 def _build_legacy_frame(mode: int, hit_mask: int, event_count: int, timestamp: int):

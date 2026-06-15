@@ -43,15 +43,18 @@ DEFAULT_MULTI_BOARD_HISTORY_LIMIT = 5000
 class MultiBoardViewerState:
     run_state: WaveMonitorRunState = WaveMonitorRunState.RUN
     selected_board_index: int = 0
-    selected_event_count: int | None = None
-    board_histories: dict[int, dict[int, WaveMonitorFrame]] | None = None
+    selected_aggregate_event_id: int | None = None
+    board_histories: dict[int, dict[int, MultiBoardWaveUpdate]] | None = None
     board_event_order: dict[int, list[int]] | None = None
+    aggregate_timestamps: dict[int, int] | None = None
 
     def __post_init__(self) -> None:
         if self.board_histories is None:
             self.board_histories = {}
         if self.board_event_order is None:
             self.board_event_order = {}
+        if self.aggregate_timestamps is None:
+            self.aggregate_timestamps = {}
 
 
 @dataclass(slots=True)
@@ -249,7 +252,10 @@ def run_multi_board_wave_viewer(
             board_index=viewer_state.selected_board_index,
             board_count=len(board_names),
             run_state=viewer_state.run_state,
-            selected_event_count=viewer_state.selected_event_count,
+            selected_aggregate_event_id=viewer_state.selected_aggregate_event_id,
+            aggregate_timestamp=_get_selected_multi_board_aggregate_timestamp(
+                viewer_state
+            ),
             frame=current_frame,
         )
         if current_frame is None:
@@ -417,13 +423,13 @@ def _advance_multi_board_viewer_state(
         )
 
     if viewer_state.run_state == WaveMonitorRunState.RUN:
-        viewer_state.selected_event_count = update.frame.event_count
+        viewer_state.selected_aggregate_event_id = update.aggregate_event_id
         return MultiBoardViewerStepResult(
             viewer_state=viewer_state,
             should_render=True,
         )
     if viewer_state.run_state == WaveMonitorRunState.SINGLE_ARMED:
-        viewer_state.selected_event_count = update.frame.event_count
+        viewer_state.selected_aggregate_event_id = update.aggregate_event_id
         viewer_state.run_state = WaveMonitorRunState.STOP
         return MultiBoardViewerStepResult(
             viewer_state=viewer_state,
@@ -443,26 +449,45 @@ def _store_multi_board_frame(
 ) -> None:
     history = viewer_state.board_histories.setdefault(update.board_index, {})
     order = viewer_state.board_event_order.setdefault(update.board_index, [])
-    event_count = update.frame.event_count
-    if event_count not in history:
-        order.append(event_count)
-    history[event_count] = update.frame
+    aggregate_event_id = update.aggregate_event_id
+    viewer_state.aggregate_timestamps[aggregate_event_id] = update.aggregate_timestamp
+    if aggregate_event_id not in history:
+        order.append(aggregate_event_id)
+    history[aggregate_event_id] = update
     while len(order) > history_limit:
-        dropped_event_count = order.pop(0)
-        history.pop(dropped_event_count, None)
+        dropped_event_id = order.pop(0)
+        history.pop(dropped_event_id, None)
 
 
 def _get_selected_multi_board_frame(
     viewer_state: MultiBoardViewerState,
 ) -> WaveMonitorFrame | None:
-    selected_event_count = viewer_state.selected_event_count
-    if selected_event_count is None:
+    selected_update = _get_selected_multi_board_update(viewer_state)
+    if selected_update is None:
+        return None
+    return selected_update.frame
+
+
+def _get_selected_multi_board_update(
+    viewer_state: MultiBoardViewerState,
+) -> MultiBoardWaveUpdate | None:
+    selected_aggregate_event_id = viewer_state.selected_aggregate_event_id
+    if selected_aggregate_event_id is None:
         return None
     history = viewer_state.board_histories.get(viewer_state.selected_board_index, {})
-    return history.get(selected_event_count)
+    return history.get(selected_aggregate_event_id)
 
 
-def _get_latest_multi_board_event_count(
+def _get_selected_multi_board_aggregate_timestamp(
+    viewer_state: MultiBoardViewerState,
+) -> int | None:
+    selected_aggregate_event_id = viewer_state.selected_aggregate_event_id
+    if selected_aggregate_event_id is None:
+        return None
+    return viewer_state.aggregate_timestamps.get(selected_aggregate_event_id)
+
+
+def _get_latest_multi_board_aggregate_event_id(
     viewer_state: MultiBoardViewerState,
 ) -> int | None:
     order = viewer_state.board_event_order.get(viewer_state.selected_board_index, [])
@@ -472,10 +497,10 @@ def _get_latest_multi_board_event_count(
 
 
 def _jump_to_latest_multi_board_event(viewer_state: MultiBoardViewerState) -> bool:
-    latest_event_count = _get_latest_multi_board_event_count(viewer_state)
-    if latest_event_count is None:
+    latest_aggregate_event_id = _get_latest_multi_board_aggregate_event_id(viewer_state)
+    if latest_aggregate_event_id is None:
         return False
-    viewer_state.selected_event_count = latest_event_count
+    viewer_state.selected_aggregate_event_id = latest_aggregate_event_id
     return True
 
 
@@ -495,28 +520,28 @@ def _select_relative_multi_board_event(
     order = viewer_state.board_event_order.get(viewer_state.selected_board_index, [])
     if not order:
         return False
-    if viewer_state.selected_event_count is None:
-        viewer_state.selected_event_count = order[-1 if step < 0 else 0]
+    if viewer_state.selected_aggregate_event_id is None:
+        viewer_state.selected_aggregate_event_id = order[-1 if step < 0 else 0]
         return True
 
-    insertion_index = bisect_left(order, viewer_state.selected_event_count)
+    insertion_index = bisect_left(order, viewer_state.selected_aggregate_event_id)
     if step < 0:
         candidate_index = insertion_index - 1
         if (
             insertion_index < len(order)
-            and order[insertion_index] == viewer_state.selected_event_count
+            and order[insertion_index] == viewer_state.selected_aggregate_event_id
         ):
             candidate_index = insertion_index - 1
     else:
         candidate_index = insertion_index
         if (
             insertion_index < len(order)
-            and order[insertion_index] == viewer_state.selected_event_count
+            and order[insertion_index] == viewer_state.selected_aggregate_event_id
         ):
             candidate_index = insertion_index + 1
     if not (0 <= candidate_index < len(order)):
         return False
-    viewer_state.selected_event_count = order[candidate_index]
+    viewer_state.selected_aggregate_event_id = order[candidate_index]
     return True
 
 
@@ -583,7 +608,8 @@ def _format_multi_board_title(
     board_index: int,
     board_count: int,
     run_state: WaveMonitorRunState,
-    selected_event_count: int | None,
+    selected_aggregate_event_id: int | None,
+    aggregate_timestamp: int | None,
     frame: WaveMonitorFrame | None,
 ) -> str:
     prefix = (
@@ -591,11 +617,17 @@ def _format_multi_board_title(
         f"state={run_state.value}"
     )
     if frame is None:
-        if selected_event_count is None:
+        if selected_aggregate_event_id is None:
             return f"{prefix} | no frame yet"
-        return f"{prefix} | event={selected_event_count} | missing on this board"
+        timestamp_text = (
+            f" | timestamp={aggregate_timestamp}" if aggregate_timestamp is not None else ""
+        )
+        return (
+            f"{prefix} | event={selected_aggregate_event_id}{timestamp_text} | "
+            "missing on this board"
+        )
     return (
-        f"{prefix} | event={selected_event_count if selected_event_count is not None else frame.event_count} | "
-        f"timestamp={frame.timestamp} | "
+        f"{prefix} | event={selected_aggregate_event_id if selected_aggregate_event_id is not None else '?'} | "
+        f"timestamp={aggregate_timestamp if aggregate_timestamp is not None else '?'} | "
         f"hit_mask=0x{frame.hit_mask:04X} | send_mode={frame.send_mode}"
     )

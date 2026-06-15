@@ -33,8 +33,8 @@ from daq_cli.presentation.wave_monitor_viewer import (  # noqa: E402
     _compute_default_figsize,
     _can_navigate_multi_board_history,
     _disconnect_default_key_handler,
+    _get_latest_multi_board_aggregate_event_id,
     _get_selected_multi_board_frame,
-    _get_latest_multi_board_event_count,
     _jump_to_latest_multi_board_event,
     _select_next_multi_board_event,
     _select_previous_multi_board_event,
@@ -261,13 +261,16 @@ class WaveMonitorTests(unittest.TestCase):
             board_index=1,
             board_count=2,
             run_state=WaveMonitorRunState.RUN,
-            selected_event_count=frame.event_count,
+            selected_aggregate_event_id=1001,
+            aggregate_timestamp=2002,
             frame=frame,
         )
         self.assertIn("group=two_board", title)
         self.assertIn("board=dev2 (2/2)", title)
         self.assertIn("state=RUN", title)
-        self.assertIn("event=", title)
+        self.assertIn("event=1001", title)
+        self.assertIn("timestamp=2002", title)
+        self.assertNotIn(f"timestamp={frame.timestamp}", title)
 
     def test_format_multi_board_title_reports_missing_selected_event(self) -> None:
         title = _format_multi_board_title(
@@ -276,11 +279,13 @@ class WaveMonitorTests(unittest.TestCase):
             board_index=1,
             board_count=2,
             run_state=WaveMonitorRunState.STOP,
-            selected_event_count=42,
+            selected_aggregate_event_id=42,
+            aggregate_timestamp=4200,
             frame=None,
         )
         self.assertIn("state=STOP", title)
         self.assertIn("event=42", title)
+        self.assertIn("timestamp=4200", title)
         self.assertIn("missing on this board", title)
 
     def test_multi_board_run_updates_selected_event_for_selected_board(self) -> None:
@@ -288,10 +293,16 @@ class WaveMonitorTests(unittest.TestCase):
         frame = load_demo_frames()[0]
         step_result = _advance_multi_board_viewer_state(
             viewer_state,
-            MultiBoardWaveUpdate(board_name="dev1", board_index=0, frame=frame),
+            _make_multi_board_update(
+                board_name="dev1",
+                board_index=0,
+                aggregate_event_id=10,
+                aggregate_timestamp=1000,
+                frame=frame,
+            ),
         )
         self.assertTrue(step_result.should_render)
-        self.assertEqual(step_result.viewer_state.selected_event_count, frame.event_count)
+        self.assertEqual(step_result.viewer_state.selected_aggregate_event_id, 10)
         self.assertIs(_get_selected_multi_board_frame(step_result.viewer_state), frame)
 
     def test_multi_board_switches_board_without_changing_selected_event(self) -> None:
@@ -299,17 +310,25 @@ class WaveMonitorTests(unittest.TestCase):
         viewer_state = MultiBoardViewerState(selected_board_index=0)
         _advance_multi_board_viewer_state(
             viewer_state,
-            MultiBoardWaveUpdate(board_name="dev1", board_index=0, frame=first_frame),
+            _make_multi_board_update(
+                board_name="dev1",
+                board_index=0,
+                aggregate_event_id=100,
+                aggregate_timestamp=9000,
+                frame=first_frame,
+            ),
         )
         _advance_multi_board_viewer_state(
             viewer_state,
-            MultiBoardWaveUpdate(
+            _make_multi_board_update(
                 board_name="dev2",
                 board_index=1,
+                aggregate_event_id=100,
+                aggregate_timestamp=9000,
                 frame=WaveMonitorFrame(
                     device_name="dev2",
-                    event_count=first_frame.event_count,
-                    timestamp=next_frame.timestamp,
+                    event_count=first_frame.event_count + 7,
+                    timestamp=next_frame.timestamp + 500,
                     hit_mask=next_frame.hit_mask,
                     send_mode=next_frame.send_mode,
                     channels=next_frame.channels,
@@ -317,10 +336,10 @@ class WaveMonitorTests(unittest.TestCase):
             ),
         )
         viewer_state.selected_board_index = 1
-        self.assertEqual(viewer_state.selected_event_count, first_frame.event_count)
+        self.assertEqual(viewer_state.selected_aggregate_event_id, 100)
         self.assertEqual(
             _get_selected_multi_board_frame(viewer_state).event_count,  # type: ignore[union-attr]
-            first_frame.event_count,
+            first_frame.event_count + 7,
         )
 
     def test_multi_board_missing_event_keeps_selected_event_locked(self) -> None:
@@ -328,14 +347,26 @@ class WaveMonitorTests(unittest.TestCase):
         first_frame, next_frame = load_demo_frames()[:2]
         _advance_multi_board_viewer_state(
             viewer_state,
-            MultiBoardWaveUpdate(board_name="dev1", board_index=0, frame=first_frame),
+            _make_multi_board_update(
+                board_name="dev1",
+                board_index=0,
+                aggregate_event_id=200,
+                aggregate_timestamp=2000,
+                frame=first_frame,
+            ),
         )
         _advance_multi_board_viewer_state(
             viewer_state,
-            MultiBoardWaveUpdate(board_name="dev2", board_index=1, frame=next_frame),
+            _make_multi_board_update(
+                board_name="dev2",
+                board_index=1,
+                aggregate_event_id=201,
+                aggregate_timestamp=2010,
+                frame=next_frame,
+            ),
         )
         viewer_state.selected_board_index = 1
-        self.assertEqual(viewer_state.selected_event_count, first_frame.event_count)
+        self.assertEqual(viewer_state.selected_aggregate_event_id, 200)
         self.assertIsNone(_get_selected_multi_board_frame(viewer_state))
 
     def test_multi_board_history_drops_oldest_events_past_limit(self) -> None:
@@ -351,7 +382,13 @@ class WaveMonitorTests(unittest.TestCase):
             )
             _advance_multi_board_viewer_state(
                 viewer_state,
-                MultiBoardWaveUpdate(board_name="dev1", board_index=0, frame=frame),
+                _make_multi_board_update(
+                    board_name="dev1",
+                    board_index=0,
+                    aggregate_event_id=event_count,
+                    aggregate_timestamp=event_count,
+                    frame=frame,
+                ),
             )
         history = viewer_state.board_histories[0]
         order = viewer_state.board_event_order[0]
@@ -376,16 +413,22 @@ class WaveMonitorTests(unittest.TestCase):
             )
             _advance_multi_board_viewer_state(
                 viewer_state,
-                MultiBoardWaveUpdate(board_name="dev1", board_index=0, frame=frame),
+                _make_multi_board_update(
+                    board_name="dev1",
+                    board_index=0,
+                    aggregate_event_id=event_count,
+                    aggregate_timestamp=event_count,
+                    frame=frame,
+                ),
             )
-        self.assertEqual(viewer_state.selected_event_count, 12)
+        self.assertEqual(viewer_state.selected_aggregate_event_id, 12)
         self.assertTrue(_select_previous_multi_board_event(viewer_state))
-        self.assertEqual(viewer_state.selected_event_count, 11)
+        self.assertEqual(viewer_state.selected_aggregate_event_id, 11)
         self.assertTrue(_select_previous_multi_board_event(viewer_state))
-        self.assertEqual(viewer_state.selected_event_count, 10)
+        self.assertEqual(viewer_state.selected_aggregate_event_id, 10)
         self.assertFalse(_select_previous_multi_board_event(viewer_state))
         self.assertTrue(_select_next_multi_board_event(viewer_state))
-        self.assertEqual(viewer_state.selected_event_count, 11)
+        self.assertEqual(viewer_state.selected_aggregate_event_id, 11)
 
     def test_multi_board_history_navigation_only_allowed_in_stop(self) -> None:
         viewer_state = MultiBoardViewerState(
@@ -411,19 +454,25 @@ class WaveMonitorTests(unittest.TestCase):
             )
             _advance_multi_board_viewer_state(
                 viewer_state,
-                MultiBoardWaveUpdate(board_name="dev1", board_index=0, frame=frame),
+                _make_multi_board_update(
+                    board_name="dev1",
+                    board_index=0,
+                    aggregate_event_id=event_count,
+                    aggregate_timestamp=event_count,
+                    frame=frame,
+                ),
             )
         viewer_state.run_state = WaveMonitorRunState.STOP
-        viewer_state.selected_event_count = 10
-        self.assertEqual(_get_latest_multi_board_event_count(viewer_state), 12)
+        viewer_state.selected_aggregate_event_id = 10
+        self.assertEqual(_get_latest_multi_board_aggregate_event_id(viewer_state), 12)
         self.assertTrue(_jump_to_latest_multi_board_event(viewer_state))
-        self.assertEqual(viewer_state.selected_event_count, 12)
+        self.assertEqual(viewer_state.selected_aggregate_event_id, 12)
 
     def test_multi_board_jump_to_latest_returns_false_without_history(self) -> None:
         viewer_state = MultiBoardViewerState(selected_board_index=0)
-        self.assertIsNone(_get_latest_multi_board_event_count(viewer_state))
+        self.assertIsNone(_get_latest_multi_board_aggregate_event_id(viewer_state))
         self.assertFalse(_jump_to_latest_multi_board_event(viewer_state))
-        self.assertIsNone(viewer_state.selected_event_count)
+        self.assertIsNone(viewer_state.selected_aggregate_event_id)
 
     def test_multi_board_run_mode_switch_to_board_uses_latest_for_target_board(self) -> None:
         viewer_state = MultiBoardViewerState(
@@ -436,6 +485,10 @@ class WaveMonitorTests(unittest.TestCase):
                 MultiBoardWaveUpdate(
                     board_name="dev1",
                     board_index=0,
+                    aggregate_event_id=event_count,
+                    aggregate_timestamp=event_count,
+                    board_event_count=event_count,
+                    board_timestamp=event_count,
                     frame=WaveMonitorFrame(
                         device_name="dev1",
                         event_count=event_count,
@@ -452,6 +505,10 @@ class WaveMonitorTests(unittest.TestCase):
                 MultiBoardWaveUpdate(
                     board_name="dev2",
                     board_index=1,
+                    aggregate_event_id=event_count,
+                    aggregate_timestamp=event_count,
+                    board_event_count=event_count,
+                    board_timestamp=event_count,
                     frame=WaveMonitorFrame(
                         device_name="dev2",
                         event_count=event_count,
@@ -461,10 +518,10 @@ class WaveMonitorTests(unittest.TestCase):
                         channels=[[event_count] * 4 for _ in range(16)],
                     ),
                 ),
-            )
+        )
         viewer_state.selected_board_index = 1
         self.assertTrue(_jump_to_latest_multi_board_event(viewer_state))
-        self.assertEqual(viewer_state.selected_event_count, 21)
+        self.assertEqual(viewer_state.selected_aggregate_event_id, 21)
 
     def test_multi_board_single_armed_waits_for_selected_board_then_stops(self) -> None:
         viewer_state = MultiBoardViewerState(
@@ -474,17 +531,29 @@ class WaveMonitorTests(unittest.TestCase):
         first_frame, next_frame = load_demo_frames()[:2]
         ignored = _advance_multi_board_viewer_state(
             viewer_state,
-            MultiBoardWaveUpdate(board_name="dev1", board_index=0, frame=first_frame),
+            _make_multi_board_update(
+                board_name="dev1",
+                board_index=0,
+                aggregate_event_id=300,
+                aggregate_timestamp=3000,
+                frame=first_frame,
+            ),
         )
         self.assertFalse(ignored.should_render)
         self.assertEqual(ignored.viewer_state.run_state, WaveMonitorRunState.SINGLE_ARMED)
         rendered = _advance_multi_board_viewer_state(
             viewer_state,
-            MultiBoardWaveUpdate(board_name="dev2", board_index=1, frame=next_frame),
+            _make_multi_board_update(
+                board_name="dev2",
+                board_index=1,
+                aggregate_event_id=301,
+                aggregate_timestamp=3010,
+                frame=next_frame,
+            ),
         )
         self.assertTrue(rendered.should_render)
         self.assertEqual(rendered.viewer_state.run_state, WaveMonitorRunState.STOP)
-        self.assertEqual(rendered.viewer_state.selected_event_count, next_frame.event_count)
+        self.assertEqual(rendered.viewer_state.selected_aggregate_event_id, 301)
 
     def test_monitor_multi_demo_command_uses_default_100_events(self) -> None:
         entered_sessions = []
@@ -516,6 +585,25 @@ class WaveMonitorTests(unittest.TestCase):
         service.open_multi_board_demo_wave_session.assert_called_once_with(events=100)
         viewer.assert_called_once()
         self.assertTrue(entered_sessions)
+
+
+def _make_multi_board_update(
+    *,
+    board_name: str,
+    board_index: int,
+    aggregate_event_id: int,
+    aggregate_timestamp: int,
+    frame: WaveMonitorFrame,
+) -> MultiBoardWaveUpdate:
+    return MultiBoardWaveUpdate(
+        board_name=board_name,
+        board_index=board_index,
+        aggregate_event_id=aggregate_event_id,
+        aggregate_timestamp=aggregate_timestamp,
+        board_event_count=frame.event_count,
+        board_timestamp=frame.timestamp,
+        frame=frame,
+    )
 
 
 if __name__ == "__main__":

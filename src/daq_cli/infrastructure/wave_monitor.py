@@ -31,6 +31,10 @@ class WaveMonitorFrame:
 class MultiBoardWaveUpdate:
     board_name: str
     board_index: int
+    aggregate_event_id: int
+    aggregate_timestamp: int
+    board_event_count: int
+    board_timestamp: int
     frame: WaveMonitorFrame
 
 
@@ -228,6 +232,10 @@ class DemoMultiBoardWaveMonitorSource(BaseMultiBoardWaveMonitorSource):
                 yield MultiBoardWaveUpdate(
                     board_name=board_name,
                     board_index=board_index,
+                    aggregate_event_id=event_count,
+                    aggregate_timestamp=event_count * 100,
+                    board_event_count=event_count,
+                    board_timestamp=(event_count * 100) + board_index,
                     frame=self._build_frame(
                         board_name=board_name,
                         board_index=board_index,
