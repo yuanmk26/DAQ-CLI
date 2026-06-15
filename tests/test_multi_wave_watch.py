@@ -13,9 +13,13 @@ from daq_cli.infrastructure.adapters.legacy_multi_capture_runner import (
     _DecodeDrainResult,
     _WatchControlMessage,
     _legacy_frame_to_tcp_sent_packet,
+    _multi_board_watch_backend_main,
+    _publish_multi_board_view_update,
     _MultiBoardWatchPublisher,
     _MultiBoardFrameQueueProxy,
 )
+from daq_cli.infrastructure.wave_monitor import MultiBoardWaveUpdate, WaveMonitorFrame
+from daq_cli.presentation.wave_monitor_viewer import _drain_multi_board_updates
 from daq_cli.infrastructure.tcp_sent_decode import decode_tcp_sent_packet
 
 
@@ -80,6 +84,103 @@ class MultiWaveWatchTests(unittest.TestCase):
         self.assertIs(downstream_queue.get_nowait(), frame)
         sampled = task_queue.get_nowait()
         self.assertEqual(sampled.board_name, "dev1")
+
+    def test_publish_multi_board_view_update_keeps_same_event_updates_for_two_boards(self) -> None:
+        viewer_queue: queue.Queue = queue.Queue(maxsize=16)
+        for board_index, board_name in ((0, "dev1"), (1, "dev2")):
+            _publish_multi_board_view_update(
+                viewer_queue,
+                MultiBoardWaveUpdate(
+                    board_name=board_name,
+                    board_index=board_index,
+                    frame=WaveMonitorFrame(
+                        device_name=board_name,
+                        event_count=123,
+                        timestamp=456,
+                        hit_mask=0,
+                        send_mode=1,
+                        channels=[[board_index] * 4 for _ in range(16)],
+                    ),
+                ),
+            )
+
+        updates = _drain_multi_board_updates(viewer_queue)
+        self.assertEqual(len(updates), 2)
+        self.assertEqual(
+            [(update.board_name, update.frame.event_count) for update in updates],
+            [("dev1", 123), ("dev2", 123)],
+        )
+
+    def test_publish_multi_board_view_update_drops_when_queue_too_small(self) -> None:
+        viewer_queue: queue.Queue = queue.Queue(maxsize=1)
+        for board_index, board_name in ((0, "dev1"), (1, "dev2")):
+            _publish_multi_board_view_update(
+                viewer_queue,
+                MultiBoardWaveUpdate(
+                    board_name=board_name,
+                    board_index=board_index,
+                    frame=WaveMonitorFrame(
+                        device_name=board_name,
+                        event_count=123,
+                        timestamp=456,
+                        hit_mask=0,
+                        send_mode=1,
+                        channels=[[board_index] * 4 for _ in range(16)],
+                    ),
+                ),
+            )
+
+        updates = _drain_multi_board_updates(viewer_queue)
+        self.assertEqual(len(updates), 1)
+        self.assertEqual(updates[0].board_name, "dev2")
+
+    def test_multi_board_watch_backend_uses_multi_board_queue_size(self) -> None:
+        captured_queue_size: dict[str, int] = {}
+
+        class FakeQueue:
+            def __init__(self, maxsize: int) -> None:
+                captured_queue_size["value"] = maxsize
+
+            def put_nowait(self, _item) -> None:
+                return None
+
+            def get_nowait(self):
+                raise queue.Empty
+
+        class FakeStopEvent:
+            def is_set(self) -> bool:
+                return True
+
+            def set(self) -> None:
+                return None
+
+        class FakeThread:
+            def __init__(self, *args, **kwargs) -> None:
+                return None
+
+            def start(self) -> None:
+                return None
+
+            def join(self, timeout: float | None = None) -> None:
+                return None
+
+        task_queue: queue.Queue = queue.Queue()
+        result_queue: queue.Queue = queue.Queue()
+
+        with patch("queue.Queue", FakeQueue):
+            with patch("threading.Event", return_value=FakeStopEvent()):
+                with patch("threading.Thread", FakeThread):
+                    with patch(
+                        "daq_cli.presentation.wave_monitor_viewer.run_multi_board_wave_viewer"
+                    ):
+                        _multi_board_watch_backend_main(
+                            task_queue=task_queue,
+                            result_queue=result_queue,
+                            group_label="two_board",
+                            board_names=["dev1", "dev2"],
+                        )
+
+        self.assertEqual(captured_queue_size["value"], 16)
 
     def test_capture_multi_stops_when_watch_viewer_closes(self) -> None:
         runner = LegacyMultiCaptureRunner("legacy")

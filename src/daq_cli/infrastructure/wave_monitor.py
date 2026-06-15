@@ -13,6 +13,9 @@ from importlib import resources
 
 from daq_cli.domain.device import DeviceConfig
 
+DEFAULT_MULTI_BOARD_VIEWER_QUEUE_MIN_SIZE = 16
+DEFAULT_MULTI_BOARD_VIEWER_QUEUE_PER_BOARD = 8
+
 
 @dataclass(slots=True)
 class WaveMonitorFrame:
@@ -51,6 +54,13 @@ class BaseMultiBoardWaveMonitorSource:
 
     def updates(self, stop_event: threading.Event) -> Iterator[MultiBoardWaveUpdate]:
         raise NotImplementedError
+
+
+def compute_multi_board_viewer_queue_size(board_count: int) -> int:
+    return max(
+        DEFAULT_MULTI_BOARD_VIEWER_QUEUE_MIN_SIZE,
+        max(int(board_count), 1) * DEFAULT_MULTI_BOARD_VIEWER_QUEUE_PER_BOARD,
+    )
 
 
 def load_demo_frames() -> list[WaveMonitorFrame]:

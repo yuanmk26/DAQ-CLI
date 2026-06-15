@@ -12,6 +12,7 @@ from daq_cli.infrastructure.adapters.legacy_board_adapter import LegacyBoardAdap
 from daq_cli.infrastructure.wave_monitor import (
     BaseWaveMonitorSource,
     BaseMultiBoardWaveMonitorSource,
+    compute_multi_board_viewer_queue_size,
     DemoMultiBoardWaveMonitorSource,
     DemoWaveMonitorSource,
     LiveWaveMonitorSource,
@@ -179,7 +180,9 @@ def _make_session(source: BaseWaveMonitorSource) -> WaveMonitorSession:
 def _make_multi_board_session(
     source: BaseMultiBoardWaveMonitorSource,
 ) -> MultiBoardWaveMonitorSession:
-    frame_queue: Queue[object] = Queue(maxsize=1)
+    frame_queue: Queue[object] = Queue(
+        maxsize=compute_multi_board_viewer_queue_size(len(source.board_names))
+    )
     stop_event = threading.Event()
     producer = MultiBoardWaveMonitorProducer(
         source=source,

@@ -586,6 +586,7 @@ Multi-board watcher notes:
 - Board switching locks onto the same `event_count` across boards instead of each board's latest frame
 - If another board does not yet have the selected `event_count`, the title reports that the event is missing on that board
 - The multi-board watcher keeps a short recent history per board so you can step backward and forward through sampled events
+- The multi-board viewer also keeps a small recent update queue so same-event board switching can compare multiple board updates before they are drained into the viewer cache
 - History browsing is only available in `STOP`; `RUN` always tracks the latest event for the selected board
 - `daq monitor multi-demo --events 100` is the quickest offline way to test this behavior without hardware
 

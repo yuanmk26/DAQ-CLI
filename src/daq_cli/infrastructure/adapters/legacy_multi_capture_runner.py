@@ -24,6 +24,7 @@ from daq_cli.infrastructure.multi_board_decode import (
     read_available_tail_events,
 )
 from daq_cli.infrastructure.tcp_sent_decode import decode_tcp_sent_packet
+from daq_cli.infrastructure.wave_monitor import compute_multi_board_viewer_queue_size
 
 
 DEFAULT_MULTI_WATCH_QUEUE_SIZE = 8
@@ -501,7 +502,9 @@ def _multi_board_watch_backend_main(
         run_multi_board_wave_viewer,
     )
 
-    viewer_queue: Queue[object] = Queue(maxsize=1)
+    viewer_queue: Queue[object] = Queue(
+        maxsize=compute_multi_board_viewer_queue_size(len(board_names))
+    )
     stop_event = threading.Event()
 
     def worker() -> None:

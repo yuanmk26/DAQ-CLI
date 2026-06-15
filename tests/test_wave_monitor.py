@@ -9,11 +9,13 @@ import matplotlib.pyplot as plt
 matplotlib.use("Agg")
 
 from daq_cli.cli.app import app  # noqa: E402
+from daq_cli.application.monitor_service import _make_multi_board_session  # noqa: E402
 from daq_cli.infrastructure.wave_monitor import (  # noqa: E402
     DemoMultiBoardWaveMonitorSource,
     MultiBoardWaveUpdate,
     WaveMonitorFrame,
     WaveMonitorError,
+    compute_multi_board_viewer_queue_size,
     load_demo_frames,
     load_repo_replay_sample,
     parse_replay_dump,
@@ -79,6 +81,37 @@ class WaveMonitorTests(unittest.TestCase):
         self.assertEqual(board0_events[0], 1)
         self.assertEqual(board0_events[-1], 100)
         self.assertNotIn(7, board1_events)
+
+    def test_make_multi_board_session_uses_multi_board_queue_size(self) -> None:
+        captured_queue_size: dict[str, int] = {}
+
+        class FakeQueue:
+            def __init__(self, maxsize: int) -> None:
+                captured_queue_size["value"] = maxsize
+
+        class FakeProducer:
+            def __init__(self, source, queue, stop_event) -> None:
+                self._source = source
+                self._queue = queue
+                self._stop_event = stop_event
+
+            def start(self) -> None:
+                return None
+
+        with patch("daq_cli.application.monitor_service.Queue", FakeQueue):
+            with patch(
+                "daq_cli.application.monitor_service.MultiBoardWaveMonitorProducer",
+                FakeProducer,
+            ):
+                session = _make_multi_board_session(
+                    DemoMultiBoardWaveMonitorSource(board_names=["dev1", "dev2"])
+                )
+
+        self.assertEqual(
+            captured_queue_size["value"],
+            compute_multi_board_viewer_queue_size(2),
+        )
+        self.assertEqual(session.board_names, ["dev1", "dev2"])
 
     def test_parse_replay_dump_rejects_empty(self) -> None:
         from pathlib import Path
