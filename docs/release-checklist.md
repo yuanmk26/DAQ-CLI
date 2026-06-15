@@ -2,6 +2,8 @@
 
 This checklist is for a manual GitHub Releases workflow.
 
+For the full step-by-step process, see `docs/publish-release.md`.
+
 ## Before Building
 
 1. Confirm the working tree is clean or that you understand any remaining changes.

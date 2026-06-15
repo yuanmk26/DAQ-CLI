@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 matplotlib.use("Agg")
 
 from daq_cli.infrastructure.wave_monitor import (  # noqa: E402
+    WaveMonitorFrame,
     WaveMonitorError,
     load_demo_frames,
     load_repo_replay_sample,
@@ -19,6 +20,7 @@ from daq_cli.presentation.wave_monitor_viewer import (  # noqa: E402
     WaveMonitorFigure,
     WaveMonitorLoopState,
     WaveMonitorRunState,
+    _compute_channel_ylim,
     _compute_default_figsize,
     _disconnect_default_key_handler,
     _advance_loop_state,
@@ -78,6 +80,42 @@ class WaveMonitorTests(unittest.TestCase):
             title = figure.figure._suptitle.get_text()
             self.assertIn("state=SINGLE-ARMED", title)
             self.assertIn("no frame yet", title)
+        finally:
+            plt.close(figure.figure)
+
+    def test_channel_ylim_uses_data_range_with_padding(self) -> None:
+        ymin, ymax = _compute_channel_ylim([1000, 1001, 1002, 1015, 1001])
+        self.assertLess(ymin, 1000)
+        self.assertGreater(ymax, 1015)
+        self.assertAlmostEqual(ymin, 998.8)
+        self.assertAlmostEqual(ymax, 1016.2)
+
+    def test_channel_ylim_handles_flat_signal(self) -> None:
+        ymin, ymax = _compute_channel_ylim([2048, 2048, 2048])
+        self.assertNotEqual(ymin, ymax)
+        self.assertLess(ymin, 2048)
+        self.assertGreater(ymax, 2048)
+        self.assertAlmostEqual(ymin, 2007.04)
+        self.assertAlmostEqual(ymax, 2088.96)
+
+    def test_figure_update_applies_per_axis_ylim(self) -> None:
+        frame = WaveMonitorFrame(
+            device_name="demo",
+            event_count=1,
+            timestamp=2,
+            hit_mask=0,
+            send_mode=1,
+            channels=[
+                [1000, 1001, 1002, 1015, 1001],
+                [2048, 2048, 2048, 2048, 2048],
+            ]
+            + [[100, 100, 100, 100, 100] for _ in range(14)],
+        )
+        figure = WaveMonitorFigure(source_label="demo")
+        try:
+            figure.update(frame, run_state=WaveMonitorRunState.RUN)
+            self.assertEqual(figure.figure.axes[0].get_ylim(), (998.8, 1016.2))
+            self.assertEqual(figure.figure.axes[1].get_ylim(), (2007.04, 2088.96))
         finally:
             plt.close(figure.figure)
 

@@ -46,16 +46,13 @@ class WaveMonitorFigure:
     def __init__(self, source_label: str, help_text: str | None = None) -> None:
         self._source_label = source_label
         figsize = _compute_default_figsize()
-        self._figure, axes = plt.subplots(
-            4, 4, figsize=figsize, sharex=True, sharey=True
-        )
+        self._figure, axes = plt.subplots(4, 4, figsize=figsize, sharex=True)
         self._axes = list(axes.flatten())
         self._lines = []
         for index, axis in enumerate(self._axes):
             (line,) = axis.plot([], [], color="#5B8FF9", linewidth=1.2, alpha=0.55)
             axis.set_title(f"ch{index}")
             axis.set_xlim(0, 15)
-            axis.set_ylim(0, 4095)
             axis.grid(True, alpha=0.25)
             self._lines.append(line)
         self._figure.supxlabel("fine sample")
@@ -90,6 +87,7 @@ class WaveMonitorFigure:
             line.set_linewidth(1.9 if hit else 1.1)
             line.set_alpha(0.95 if hit else 0.45)
             axis.set_xlim(0, max(max_length - 1, 15))
+            axis.set_ylim(*_compute_channel_ylim(channel))
         self._set_title(frame=frame, run_state=run_state)
         self._figure.canvas.draw_idle()
 
@@ -105,6 +103,7 @@ class WaveMonitorFigure:
             line.set_linewidth(1.9 if hit else 1.1)
             line.set_alpha(0.95 if hit else 0.45)
             axis.set_xlim(0, max(max_length - 1, 15))
+            axis.set_ylim(*_compute_channel_ylim(channel))
         self.set_custom_title(title)
 
     def set_state(
@@ -369,6 +368,17 @@ def _disconnect_default_key_handler(figure) -> None:
     if handler_id is None:
         return
     figure.canvas.mpl_disconnect(handler_id)
+
+
+def _compute_channel_ylim(channel: list[int]) -> tuple[float, float]:
+    min_value = min(channel)
+    max_value = max(channel)
+    span = max_value - min_value
+    if span > 0:
+        padding = max(span * 0.08, 1.0)
+    else:
+        padding = max(abs(max_value) * 0.02, 1.0)
+    return (min_value - padding, max_value + padding)
 
 
 def _compute_default_figsize() -> tuple[float, float]:
