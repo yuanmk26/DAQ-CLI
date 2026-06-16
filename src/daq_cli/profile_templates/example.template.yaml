@@ -33,7 +33,21 @@ defaults:
     events: 1000
     timeout_s: 10.0
     progress_every: 50
-    decode_json: true
+    outputs:
+      raw:
+        enabled: true
+        dir: out/raw
+      json:
+        enabled: true
+        dir: out/json
+      text:
+        enabled: true
+        dir: out/text
+        max_events_per_file: 100
+        waveform_layout: point_rows
+      log:
+        enabled: false
+        dir: out/log
     watch_every: 50
   acquire_multi:
     aggregation_key: timestamp
@@ -41,7 +55,21 @@ defaults:
     event_timeout_ms: 50
     tcp_timeout_s: 1.0
     allow_start_without_ack: true
-    decode_json: true
+    outputs:
+      raw:
+        enabled: true
+        dir: out/multi_raw
+      json:
+        enabled: true
+        dir: out/multi_json
+      text:
+        enabled: true
+        dir: out/multi_text
+        max_events_per_file: 100
+        waveform_layout: point_rows
+      log:
+        enabled: true
+        dir: out/multi_log
     watch_waveforms: true
     watch_every: 100
     stop_on_watch_close: true

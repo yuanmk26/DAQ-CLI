@@ -14,6 +14,11 @@ from daq_cli.application.acquire_service import (
     SingleAcquireProgress,
     SingleAcquireResult,
 )
+from daq_cli.application.output_config import (
+    AcquireOutputsConfig,
+    OutputTargetConfig,
+    TextOutputConfig,
+)
 from daq_cli.cli.app import app
 from daq_cli.infrastructure.adapters.legacy_capture_runner import (
     ADC_LENGTH,
@@ -27,6 +32,7 @@ from daq_cli.infrastructure.adapters.legacy_capture_runner import (
     _frame_total_size,
     _Mode2RawStreamReader,
 )
+from daq_cli.infrastructure.run_name_allocator import allocate_next_run_dir
 
 
 class AcquireSingleMonitoringTests(unittest.TestCase):
@@ -99,6 +105,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
             self.assertIsNone(result.watch_every)
             self.assertEqual(result.watched_frames, 0)
             self.assertIsNotNone(result.run_output_dir)
+            self.assertEqual(result.run_output_dir.name, "acquire_00001")
             self.assertTrue((result.run_output_dir / "raw" / "event_00000.bin").is_file())
             self.assertTrue((result.run_output_dir / "raw" / "event_00001.bin").is_file())
             info_text = (result.run_output_dir / "capture_info.txt").read_text(
@@ -144,6 +151,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
 
             self.assertTrue(result.decode_enabled)
             self.assertIsNotNone(result.decoded_output_dir)
+            self.assertEqual(result.run_output_dir.name, "acquire_00001")
             self.assertEqual(result.decoded_events, 2)
             self.assertEqual(result.decode_errors, 0)
             self.assertFalse(result.watch_enabled)
@@ -155,6 +163,146 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
             self.assertIn("decode_enabled=1", info_text)
             self.assertIn("decoded_events=2", info_text)
             self.assertIn("decode_errors=0", info_text)
+        finally:
+            shutil.rmtree(base_dir, ignore_errors=True)
+
+    def test_parallel_runner_text_output_appends_multiple_events_per_file(self) -> None:
+        packets = [
+            _build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=1),
+            _build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=2),
+        ]
+        runner = LegacySingleCaptureRunner("legacy")
+        base_dir = self._make_workspace_temp_dir()
+        try:
+            with patch.object(
+                runner,
+                "_open_socket",
+                return_value=FakeSocket(packets),
+            ):
+                with patch.object(
+                    runner,
+                    "_start_decode_backend",
+                    return_value=_make_fake_decode_backend(),
+                ):
+                    result = runner.capture_single(
+                        device=SimpleNamespace(name="dev1", ip="192.168.10.10", tcp_port=24),
+                        output_base_dir=base_dir,
+                        events=2,
+                        timeout_s=1.0,
+                        send_mode=1,
+                        text_output_enabled=True,
+                        text_max_events_per_file=10,
+                    )
+
+            self.assertTrue(result.text_output_enabled)
+            self.assertEqual(result.run_output_dir.name, "dev1_00001")
+            self.assertEqual(result.text_output_events, 2)
+            self.assertEqual(result.text_output_files, 1)
+            text_path = result.text_output_dir / "events_00001.txt"
+            self.assertTrue(text_path.is_file())
+            content = text_path.read_text(encoding="utf-8")
+            self.assertIn("===== EVENT 1 =====", content)
+            self.assertIn("===== EVENT 2 =====", content)
+            self.assertEqual(content.count("===== END EVENT"), 2)
+            self.assertIn("waveforms:", content)
+            self.assertNotIn("waveform_samples:", content)
+            self.assertNotIn("ch00:", content)
+            waveform_lines = content.splitlines()
+            header_line = waveform_lines[waveform_lines.index("waveforms:") + 1]
+            first_row = waveform_lines[waveform_lines.index("waveforms:") + 2]
+            self.assertEqual(
+                header_line.split(),
+                [f"ch{channel_index:02d}" for channel_index in range(16)],
+            )
+            self.assertEqual(
+                first_row.split(),
+                [str(channel_index) for channel_index in range(16)],
+            )
+        finally:
+            shutil.rmtree(base_dir, ignore_errors=True)
+
+    def test_parallel_runner_text_output_rolls_over_after_event_limit(self) -> None:
+        packets = [
+            _build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=1),
+            _build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=2),
+        ]
+        runner = LegacySingleCaptureRunner("legacy")
+        base_dir = self._make_workspace_temp_dir()
+        try:
+            with patch.object(
+                runner,
+                "_open_socket",
+                return_value=FakeSocket(packets),
+            ):
+                with patch.object(
+                    runner,
+                    "_start_decode_backend",
+                    return_value=_make_fake_decode_backend(),
+                ):
+                    result = runner.capture_single(
+                        device=SimpleNamespace(name="dev1", ip="192.168.10.10", tcp_port=24),
+                        output_base_dir=base_dir,
+                        events=2,
+                        timeout_s=1.0,
+                        send_mode=1,
+                        text_output_enabled=True,
+                        text_max_events_per_file=1,
+                    )
+
+            self.assertEqual(result.text_output_files, 2)
+            self.assertEqual(result.run_output_dir.name, "dev1_00001")
+            self.assertTrue((result.text_output_dir / "events_00001.txt").is_file())
+            self.assertTrue((result.text_output_dir / "events_00002.txt").is_file())
+        finally:
+            shutil.rmtree(base_dir, ignore_errors=True)
+
+    def test_parallel_runner_supports_custom_output_directories(self) -> None:
+        packets = [_build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=1)]
+        runner = LegacySingleCaptureRunner("legacy")
+        base_dir = self._make_workspace_temp_dir()
+        raw_dir = base_dir / "exports" / "raw"
+        json_dir = base_dir / "exports" / "json"
+        text_dir = base_dir / "exports" / "text"
+        log_dir = base_dir / "exports" / "log"
+        try:
+            with patch.object(
+                runner,
+                "_open_socket",
+                return_value=FakeSocket(packets),
+            ):
+                with patch.object(
+                    runner,
+                    "_start_decode_backend",
+                    return_value=_make_fake_decode_backend(),
+                ):
+                    result = runner.capture_single(
+                        device=SimpleNamespace(name="dev1", ip="192.168.10.10", tcp_port=24),
+                        output_base_dir=base_dir,
+                        events=1,
+                        timeout_s=1.0,
+                        send_mode=1,
+                        outputs=AcquireOutputsConfig(
+                            raw=OutputTargetConfig(enabled=True, dir=raw_dir),
+                            json=OutputTargetConfig(enabled=True, dir=json_dir),
+                            text=TextOutputConfig(
+                                enabled=True,
+                                dir=text_dir,
+                                max_events_per_file=5,
+                                waveform_layout="channel_blocks",
+                            ),
+                            log=OutputTargetConfig(enabled=True, dir=log_dir),
+                        ),
+                    )
+
+            self.assertEqual(result.raw_output_dir, raw_dir / result.run_output_dir.name)
+            self.assertEqual(result.run_output_dir.name, "dev1_00001")
+            self.assertEqual(result.json_output_dir, json_dir / result.run_output_dir.name)
+            self.assertEqual(result.text_output_dir, text_dir / result.run_output_dir.name)
+            self.assertEqual(result.log_output_path, log_dir / result.run_output_dir.name / "capture.log")
+            self.assertTrue((result.raw_output_dir / "event_00000.bin").is_file())
+            self.assertTrue((result.json_output_dir / "event_00000.json").is_file())
+            self.assertTrue((result.text_output_dir / "events_00001.txt").is_file())
+            self.assertTrue(result.log_output_path.is_file())
         finally:
             shutil.rmtree(base_dir, ignore_errors=True)
 
@@ -195,6 +343,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                         )
 
             self.assertEqual(result.captured_events, 1)
+            self.assertEqual(result.run_output_dir.name, "acquire_00001")
             self.assertEqual(result.decoded_events, 0)
             self.assertEqual(result.decode_errors, 1)
             self.assertEqual(result.watched_frames, 0)
@@ -235,6 +384,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                         )
 
             self.assertEqual(result.captured_events, 2)
+            self.assertEqual(result.run_output_dir.name, "acquire_00001")
             self.assertEqual(result.decoded_events, 2)
             self.assertEqual(result.decode_errors, 0)
             self.assertEqual(result.watched_frames, 0)
@@ -273,6 +423,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                     )
 
             self.assertTrue(result.watch_enabled)
+            self.assertEqual(result.run_output_dir.name, "dev1_00001")
             self.assertEqual(result.watch_every, 2)
             self.assertGreaterEqual(result.watched_frames, 1)
             info_text = (result.run_output_dir / "capture_info.txt").read_text(
@@ -311,6 +462,21 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                             timeout_s=1.0,
                             send_mode=2,
                         )
+        finally:
+            shutil.rmtree(base_dir, ignore_errors=True)
+
+    def test_allocate_next_run_dir_uses_incrementing_numeric_suffix(self) -> None:
+        base_dir = self._make_workspace_temp_dir()
+        try:
+            (base_dir / "dev1_00001").mkdir()
+            (base_dir / "dev1_00002").mkdir()
+            (base_dir / "dev1_20260616_120000").mkdir()
+            (base_dir / "other_00099").mkdir()
+
+            allocated = allocate_next_run_dir(base_dir, "dev1")
+
+            self.assertEqual(allocated.name, "dev1_00003")
+            self.assertTrue(allocated.is_dir())
         finally:
             shutil.rmtree(base_dir, ignore_errors=True)
 
@@ -569,7 +735,8 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         kwargs = service.capture_single.call_args.kwargs
         self.assertEqual(kwargs["events"], 25)
         self.assertEqual(kwargs["timeout_s"], 3.5)
-        self.assertTrue(kwargs["decode_json"])
+        self.assertIsInstance(kwargs["outputs"], AcquireOutputsConfig)
+        self.assertTrue(kwargs["outputs"].json.enabled)
         self.assertEqual(kwargs["watch_every"], 5)
         self.assertIn("events=0/25", result.output)
 
@@ -635,7 +802,8 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         self.assertEqual(kwargs["event_timeout_ms"], 80)
         self.assertEqual(kwargs["tcp_timeout_s"], 2.5)
         self.assertTrue(kwargs["allow_start_without_ack"])
-        self.assertTrue(kwargs["decode_json"])
+        self.assertIsInstance(kwargs["outputs"], AcquireOutputsConfig)
+        self.assertTrue(kwargs["outputs"].json.enabled)
         self.assertTrue(kwargs["stop_capture_on_watch_close"])
 
     def test_cli_multi_accepts_keep_running_after_watch_close(self) -> None:
@@ -685,6 +853,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         kwargs = service.capture_multi.call_args.kwargs
         self.assertTrue(kwargs["watch_waveforms"])
         self.assertFalse(kwargs["stop_capture_on_watch_close"])
+        self.assertIsInstance(kwargs["outputs"], AcquireOutputsConfig)
 
     def test_cli_multi_passes_decode_json_flag(self) -> None:
         runner = CliRunner()
@@ -730,9 +899,137 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
 
         self.assertEqual(result.exit_code, 0, result.output)
         kwargs = service.capture_multi.call_args.kwargs
-        self.assertTrue(kwargs["decode_json"])
+        self.assertIsInstance(kwargs["outputs"], AcquireOutputsConfig)
+        self.assertTrue(kwargs["outputs"].json.enabled)
         self.assertIn("decode_enabled", result.output)
         self.assertIn("decoded_complete_events", result.output)
+
+    def test_cli_single_outputs_can_enable_text_without_json(self) -> None:
+        runner = CliRunner()
+        profile = SimpleNamespace(
+            defaults={
+                "acquire_single": {
+                    "outputs": {
+                        "json": {"enabled": False},
+                        "text": {
+                            "enabled": True,
+                            "dir": "txt_out",
+                            "max_events_per_file": 7,
+                            "waveform_layout": "channel_blocks",
+                        },
+                        "raw": {"enabled": True, "dir": "raw_out"},
+                        "log": {"enabled": False},
+                    }
+                }
+            }
+        )
+        result_payload = SingleAcquireResult(
+            device=SimpleNamespace(name="dev1"),
+            source_profile=Path("profiles/example.yaml"),
+            output_base_dir=Path("out/single"),
+            run_output_dir=Path("out/single/20260606_201703"),
+            requested_events=10,
+            captured_events=10,
+            send_mode=1,
+            decode_enabled=False,
+            decoded_output_dir=None,
+            decoded_events=0,
+            decode_errors=0,
+            watch_enabled=False,
+            watch_every=None,
+            watched_frames=0,
+            tcp_timeout_s=10.0,
+            log_output="parallel log output",
+        )
+
+        with patch("daq_cli.cli.acquire.ProfileService") as profile_service_cls:
+            profile_service_cls.return_value.load_profile.return_value = profile
+            with patch("daq_cli.cli.acquire.AcquireService") as service_cls:
+                service = service_cls.return_value
+                service.capture_single.return_value = result_payload
+                result = runner.invoke(
+                    app,
+                    [
+                        "acquire",
+                        "single",
+                        "dev1",
+                        "--profile",
+                        "profiles/example.yaml",
+                    ],
+                )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        outputs = service.capture_single.call_args.kwargs["outputs"]
+        self.assertFalse(outputs.json.enabled)
+        self.assertTrue(outputs.text.enabled)
+        self.assertEqual(outputs.text.dir, Path("txt_out"))
+        self.assertEqual(outputs.text.max_events_per_file, 7)
+        self.assertEqual(outputs.text.waveform_layout, "channel_blocks")
+        self.assertTrue(outputs.raw.enabled)
+        self.assertEqual(outputs.raw.dir, Path("raw_out"))
+
+    def test_cli_multi_raw_only_does_not_disable_text_output(self) -> None:
+        runner = CliRunner()
+        profile = SimpleNamespace(
+            defaults={
+                "acquire_multi": {
+                    "outputs": {
+                        "json": {"enabled": True},
+                        "text": {"enabled": True, "dir": "text_out"},
+                        "log": {"enabled": True, "dir": "log_out"},
+                    }
+                }
+            }
+        )
+        result_payload = SimpleNamespace(
+            group=SimpleNamespace(name="two_board"),
+            devices=[SimpleNamespace(name="dev1"), SimpleNamespace(name="dev2")],
+            source_profile=Path("profiles/example.yaml"),
+            output_base_dir=Path("out/multi"),
+            run_output_dir=Path("out/multi/two_board_20260607_220846"),
+            aggregation_key="timestamp",
+            timestamp_match_window_ticks=10,
+            tcp_timeout_s=1.0,
+            allow_start_without_ack=True,
+            decode_enabled=False,
+            decoded_output_dir=None,
+            decoded_complete_events=0,
+            decoded_partial_events=0,
+            decode_errors=0,
+            watch_waveforms=False,
+            watch_every=None,
+            watched_frames=0,
+            stop_capture_on_watch_close=True,
+            config_path=Path("out/multi/.daq_cli_tmp/multi_board_acquire.config.json"),
+            meta_path=Path("out/multi/two_board_20260607_220846/run_meta.json"),
+            log_path=Path("out/multi/two_board_20260607_220846/log.txt"),
+            status="ok",
+        )
+
+        with patch("daq_cli.cli.acquire.ProfileService") as profile_service_cls:
+            profile_service_cls.return_value.load_profile.return_value = profile
+            with patch("daq_cli.cli.acquire.AcquireService") as service_cls:
+                service = service_cls.return_value
+                service.capture_multi.return_value = result_payload
+                result = runner.invoke(
+                    app,
+                    [
+                        "acquire",
+                        "multi",
+                        "two_board",
+                        "--raw-only",
+                        "--profile",
+                        "profiles/example.yaml",
+                    ],
+                )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        outputs = service.capture_multi.call_args.kwargs["outputs"]
+        self.assertFalse(outputs.json.enabled)
+        self.assertTrue(outputs.text.enabled)
+        self.assertEqual(outputs.text.dir, Path("text_out"))
+        self.assertTrue(outputs.log.enabled)
+        self.assertEqual(outputs.log.dir, Path("log_out"))
 
     def test_acquire_service_multi_uses_runner_decode_results(self) -> None:
         profile = SimpleNamespace(
@@ -925,9 +1222,12 @@ def _make_fake_decode_backend(maxsize: int = 128, slow: bool = False) -> DecodeB
 
     if slow:
         def run_slow_worker() -> None:
+            writers: dict[str, object] = {}
             while True:
                 item = task_queue.get()
                 if item is None:
+                    for writer in writers.values():
+                        writer.close()
                     return
                 try:
                     from daq_cli.infrastructure.adapters.legacy_capture_runner import (
@@ -941,13 +1241,42 @@ def _make_fake_decode_backend(maxsize: int = 128, slow: bool = False) -> DecodeB
                         expected_send_mode=item.expected_send_mode,
                         adc_length=item.adc_length,
                     )
-                    write_decoded_event_json(event, item.output_path)
-                    result_queue.put(DecodeWorkerResult(success=True))
+                    if item.json_output_path is not None:
+                        write_decoded_event_json(event, item.json_output_path)
+                    from daq_cli.infrastructure.text_event_writer import (
+                        SegmentedTextEventWriter,
+                        format_single_event_text,
+                    )
+
+                    text_written = 0
+                    if item.text_output_dir is not None:
+                        writer_key = str(item.text_output_dir)
+                        writer = writers.get(writer_key)
+                        if writer is None:
+                            writer = SegmentedTextEventWriter(
+                                item.text_output_dir,
+                                item.text_max_events_per_file,
+                            )
+                            writers[writer_key] = writer
+                        writer.append_event(
+                            format_single_event_text(
+                                event,
+                                device_name=item.device_name,
+                                board_ip=item.board_ip,
+                            )
+                        )
+                        text_written = 1
+                    result_queue.put(
+                        DecodeWorkerResult(
+                            success=True,
+                            json_written=1 if item.json_output_path is not None else 0,
+                            text_written=text_written,
+                        )
+                    )
                 except Exception as exc:
                     from daq_cli.infrastructure.adapters.legacy_capture_runner import (
                         DecodeWorkerResult,
                     )
-
                     result_queue.put(
                         DecodeWorkerResult(success=False, error_message=str(exc))
                     )

@@ -104,6 +104,31 @@ daq acquire multi two_board --aggregation-key event_count --allow-start-without-
 daq acquire multi two_board --decode-json --profile profiles/example.yaml
 ```
 
+Configure capture outputs in the profile with independent `raw`, `json`, `text`,
+and `log` switches and directories:
+
+```yaml
+defaults:
+  acquire_single:
+    outputs:
+      raw:
+        enabled: true
+        dir: out/raw
+      json:
+        enabled: false
+      text:
+        enabled: true
+        dir: out/text
+        max_events_per_file: 1000
+        waveform_layout: channel_blocks
+      log:
+        enabled: true
+        dir: out/log
+```
+
+With this layout you can, for example, disable JSON while still keeping TXT
+event dumps enabled.
+
 Preview or watch waveforms:
 
 ```bash

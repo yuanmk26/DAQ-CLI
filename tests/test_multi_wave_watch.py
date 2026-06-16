@@ -1,10 +1,18 @@
 from pathlib import Path
+import shutil
 from types import SimpleNamespace
 import queue
 import threading
 import unittest
+import uuid
 from unittest.mock import patch
 
+import daq_cli.infrastructure.adapters.legacy_multi_capture_runner as legacy_multi_capture_runner_module
+from daq_cli.application.output_config import (
+    AcquireOutputsConfig,
+    OutputTargetConfig,
+    TextOutputConfig,
+)
 from daq_cli.infrastructure.adapters.legacy_multi_capture_runner import (
     DEFAULT_MULTI_WATCH_QUEUE_SIZE,
     LegacyMultiCaptureConfig,
@@ -22,6 +30,7 @@ from daq_cli.infrastructure.adapters.legacy_multi_capture_runner import (
 from daq_cli.infrastructure.wave_monitor import MultiBoardWaveUpdate, WaveMonitorFrame
 from daq_cli.presentation.wave_monitor_viewer import _drain_multi_board_updates
 from daq_cli.infrastructure.tcp_sent_decode import decode_tcp_sent_packet
+from daq_cli.infrastructure.run_name_allocator import allocate_next_run_dir
 
 
 ADC_LENGTH = 64
@@ -256,12 +265,17 @@ class MultiWaveWatchTests(unittest.TestCase):
         ):
             with patch.object(runner, "_start_multi_watch_backend", return_value=watch_runtime):
                 with patch.object(runner, "_write_temp_config", return_value=Path("out/multi/.daq_cli_tmp/test.json")):
-                    with patch.object(runner, "_read_run_dir", return_value=None):
-                        with patch.object(runner, "_read_status", return_value="stopped"):
+                    with patch.object(runner, "_read_status", return_value="stopped"):
+                        with patch.object(
+                            legacy_multi_capture_runner_module,
+                            "allocate_next_run_dir",
+                            return_value=Path("out/multi/two_board_00001"),
+                        ):
                             result = runner.capture_multi(config)
 
         self.assertTrue(stop_called["value"])
         self.assertEqual(result.status, "stopped")
+        self.assertEqual(result.run_output_dir, Path("out/multi/two_board_00001"))
         self.assertTrue(result.stop_capture_on_watch_close)
         self.assertIn(
             ("INFO", "waveform watch closed; stopping acquisition"),
@@ -308,7 +322,7 @@ class MultiWaveWatchTests(unittest.TestCase):
             task_queue=queue.Queue(),
             result_queue=queue.Queue(),
             process=_FakeProcess(alive=False),
-            output_dir=Path("out/multi/two_board_20260607_220846/decoded"),
+            output_dir=Path("out/multi/two_board_00001/decoded"),
         )
 
         with patch(
@@ -320,15 +334,12 @@ class MultiWaveWatchTests(unittest.TestCase):
                 "_write_temp_config",
                 return_value=Path("out/multi/.daq_cli_tmp/test.json"),
             ):
-                with patch.object(
-                    runner,
-                    "_read_run_dir",
-                    side_effect=[
-                        Path("out/multi/two_board_20260607_220846"),
-                        Path("out/multi/two_board_20260607_220846"),
-                    ],
-                ):
-                    with patch.object(runner, "_read_status", return_value="ok"):
+                with patch.object(runner, "_read_status", return_value="ok"):
+                    with patch.object(
+                        legacy_multi_capture_runner_module,
+                        "allocate_next_run_dir",
+                        return_value=Path("out/multi/two_board_00001"),
+                    ):
                         with patch.object(
                             runner,
                             "_start_multi_decode_backend",
@@ -348,9 +359,136 @@ class MultiWaveWatchTests(unittest.TestCase):
         self.assertTrue(start_decode.called)
         self.assertTrue(stop_decode.called)
         self.assertTrue(result.decode_enabled)
+        self.assertEqual(result.run_output_dir, Path("out/multi/two_board_00001"))
         self.assertEqual(result.decoded_complete_events, 9)
         self.assertEqual(result.decoded_partial_events, 2)
         self.assertEqual(result.decode_errors, 0)
+
+    def test_capture_multi_moves_outputs_to_configured_directories(self) -> None:
+        runner = LegacyMultiCaptureRunner("legacy")
+        base_dir = Path("tmp_test_outputs") / "multi_outputs_case"
+        run_dir = base_dir / "out" / "two_board_00001"
+        raw_dir = base_dir / "exports" / "raw"
+        json_dir = base_dir / "exports" / "json"
+        text_dir = base_dir / "exports" / "text"
+        log_dir = base_dir / "exports" / "log"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "complete_events.dat").write_bytes(b"complete")
+        (run_dir / "partial_events.dat").write_bytes(b"partial")
+        (run_dir / "run_meta.json").write_text('{"status":"ok"}\n', encoding="utf-8")
+        (run_dir / "log.txt").write_text("capture log\n", encoding="utf-8")
+
+        class FakeApp:
+            def __init__(self) -> None:
+                self.stop_event = threading.Event()
+                self.receivers = []
+                self.logger = SimpleNamespace(log=lambda *_args: None)
+
+            def start(self) -> None:
+                self.stop_event.set()
+
+            def stop(self) -> None:
+                self.stop_event.set()
+
+        fake_module = SimpleNamespace(
+            AppConfig=SimpleNamespace(from_json_file=lambda _path: SimpleNamespace()),
+            AcquisitionApp=lambda _cfg, _path: FakeApp(),
+        )
+        config = LegacyMultiCaptureConfig(
+            run_name_prefix="two_board",
+            output_base_dir=base_dir / "out",
+            tcm_ip="192.168.10.16",
+            tcm_rbcp_port=4660,
+            adc_length=64,
+            aggregation_key="timestamp",
+            timestamp_match_window_ticks=10,
+            event_timeout_ms=50,
+            tcp_timeout_s=1.0,
+            allow_start_without_ack=True,
+            boards=[
+                SimpleNamespace(name="dev1", ip="192.168.10.10", tcp_port=24, board_id=0),
+                SimpleNamespace(name="dev2", ip="192.168.10.11", tcp_port=24, board_id=1),
+            ],
+            outputs=AcquireOutputsConfig(
+                raw=OutputTargetConfig(enabled=True, dir=raw_dir),
+                json=OutputTargetConfig(enabled=True, dir=json_dir),
+                text=TextOutputConfig(
+                    enabled=True,
+                    dir=text_dir,
+                    max_events_per_file=10,
+                    waveform_layout="channel_blocks",
+                ),
+                log=OutputTargetConfig(enabled=True, dir=log_dir),
+            ),
+        )
+        decode_runtime = MultiBoardDecodeRuntime(
+            task_queue=queue.Queue(),
+            result_queue=queue.Queue(),
+            process=_FakeProcess(alive=False),
+            output_dir=json_dir / run_dir.name,
+            text_output_dir=text_dir / run_dir.name,
+        )
+
+        try:
+            with patch(
+                "daq_cli.infrastructure.adapters.legacy_multi_capture_runner.importlib.import_module",
+                return_value=fake_module,
+            ):
+                with patch.object(
+                    runner,
+                    "_write_temp_config",
+                    return_value=base_dir / "out" / ".daq_cli_tmp" / "test.json",
+                ):
+                    with patch.object(
+                        legacy_multi_capture_runner_module,
+                        "allocate_next_run_dir",
+                        return_value=run_dir,
+                    ):
+                        with patch.object(
+                            runner,
+                            "_start_multi_decode_backend",
+                            return_value=decode_runtime,
+                        ):
+                            with patch.object(
+                                runner,
+                                "_stop_multi_decode_backend",
+                                return_value=_DecodeDrainResult(
+                                    decoded_complete_events=3,
+                                    decoded_partial_events=1,
+                                    decode_errors=0,
+                                    text_output_complete_events=3,
+                                    text_output_partial_events=1,
+                                    text_output_files=2,
+                                ),
+                            ):
+                                result = runner.capture_multi(config)
+
+            self.assertEqual(result.raw_output_dir, raw_dir / run_dir.name)
+            self.assertEqual(result.json_output_dir, json_dir / run_dir.name)
+            self.assertEqual(result.text_output_dir, text_dir / run_dir.name)
+            self.assertEqual(result.log_output_dir, log_dir / run_dir.name)
+            self.assertTrue((result.raw_output_dir / "complete_events.dat").is_file())
+            self.assertTrue((result.raw_output_dir / "partial_events.dat").is_file())
+            self.assertTrue((result.meta_path).is_file())
+            self.assertTrue((result.log_path).is_file())
+            self.assertEqual(result.log_path, log_dir / run_dir.name / "log.txt")
+        finally:
+            shutil.rmtree(base_dir, ignore_errors=True)
+
+    def test_allocate_next_run_dir_uses_group_prefix_and_ignores_timestamp_dirs(self) -> None:
+        base_dir = Path("tmp_test_outputs") / "multi_run_allocator" / uuid.uuid4().hex
+        try:
+            base_dir.mkdir(parents=True, exist_ok=True)
+            (base_dir / "two_board_00007").mkdir()
+            (base_dir / "two_board_20260616_120000").mkdir()
+            (base_dir / "another_00001").mkdir()
+
+            allocated = allocate_next_run_dir(base_dir, "two_board")
+
+            self.assertEqual(allocated.name, "two_board_00008")
+            self.assertTrue(allocated.is_dir())
+        finally:
+            shutil.rmtree(base_dir, ignore_errors=True)
 
     def test_watch_publisher_assigns_same_aggregate_id_for_same_event_count(self) -> None:
         task_queue: queue.Queue = queue.Queue(maxsize=8)

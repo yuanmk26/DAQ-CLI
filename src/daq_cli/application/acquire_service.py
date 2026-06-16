@@ -3,6 +3,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from daq_cli.application.output_config import (
+    AcquireOutputsConfig,
+    OutputTargetConfig,
+    TextOutputConfig,
+)
 from daq_cli.application.profile_service import ProfileService
 from daq_cli.domain.device import DeviceConfig
 from daq_cli.domain.group import GroupConfig
@@ -35,6 +40,14 @@ class SingleAcquireResult:
     watched_frames: int
     tcp_timeout_s: float
     log_output: str
+    raw_output_dir: Path | None = None
+    json_output_enabled: bool = False
+    json_output_dir: Path | None = None
+    log_output_path: Path | None = None
+    text_output_enabled: bool = False
+    text_output_dir: Path | None = None
+    text_output_events: int = 0
+    text_output_files: int = 0
 
 
 @dataclass(slots=True)
@@ -71,6 +84,15 @@ class MultiAcquireResult:
     meta_path: Path | None
     log_path: Path | None
     status: str | None
+    raw_output_dir: Path | None = None
+    json_output_enabled: bool = False
+    json_output_dir: Path | None = None
+    log_output_dir: Path | None = None
+    text_output_enabled: bool = False
+    text_output_dir: Path | None = None
+    text_output_complete_events: int = 0
+    text_output_partial_events: int = 0
+    text_output_files: int = 0
 
 
 class AcquireService:
@@ -86,8 +108,13 @@ class AcquireService:
         events: int,
         timeout_s: float,
         output_base_dir: Path | None = None,
+        outputs: AcquireOutputsConfig | None = None,
         decode_json: bool = False,
         decoded_output_dir: Path | None = None,
+        text_output_enabled: bool = False,
+        text_output_dir: Path | None = None,
+        text_max_events_per_file: int = 100,
+        text_waveform_layout: str = "channel_blocks",
         watch_every: int | None = None,
         progress_callback: Callable[[SingleAcquireProgress], None] | None = None,
     ) -> SingleAcquireResult:
@@ -102,6 +129,17 @@ class AcquireService:
 
         base_dir = output_base_dir or (
             self._default_output_base_dir(profile.path, profile) / "single"
+        )
+        resolved_outputs = outputs or AcquireOutputsConfig(
+            raw=OutputTargetConfig(enabled=True),
+            json=OutputTargetConfig(enabled=decode_json, dir=decoded_output_dir),
+            text=TextOutputConfig(
+                enabled=text_output_enabled,
+                dir=text_output_dir,
+                max_events_per_file=text_max_events_per_file,
+                waveform_layout=text_waveform_layout,
+            ),
+            log=OutputTargetConfig(enabled=False),
         )
         board_adapter = LegacyBoardAdapter()
         tcp_config = board_adapter.read_tcp_mode2_config(device)
@@ -154,8 +192,13 @@ class AcquireService:
             events=events,
             timeout_s=timeout_s,
             send_mode=tcp_config.send_mode,
+            outputs=resolved_outputs,
             decode_json=decode_json,
             decoded_output_dir=decoded_output_dir,
+            text_output_enabled=text_output_enabled,
+            text_output_dir=text_output_dir,
+            text_max_events_per_file=text_max_events_per_file,
+            text_waveform_layout=text_waveform_layout,
             watch_every=watch_every,
             progress_callback=on_progress,
         )
@@ -167,15 +210,29 @@ class AcquireService:
             requested_events=events,
             captured_events=raw_result.captured_events,
             send_mode=raw_result.send_mode,
-            decode_enabled=raw_result.decode_enabled,
-            decoded_output_dir=raw_result.decoded_output_dir,
+            decode_enabled=getattr(
+                raw_result, "json_output_enabled", raw_result.decode_enabled
+            ),
+            decoded_output_dir=getattr(
+                raw_result, "json_output_dir", raw_result.decoded_output_dir
+            ),
             decoded_events=raw_result.decoded_events,
             decode_errors=raw_result.decode_errors,
+            raw_output_dir=getattr(raw_result, "raw_output_dir", None),
+            json_output_enabled=getattr(
+                raw_result, "json_output_enabled", raw_result.decode_enabled
+            ),
+            json_output_dir=getattr(raw_result, "json_output_dir", raw_result.decoded_output_dir),
+            log_output_path=getattr(raw_result, "log_output_path", None),
             watch_enabled=raw_result.watch_enabled,
             watch_every=raw_result.watch_every,
             watched_frames=raw_result.watched_frames,
             tcp_timeout_s=timeout_s,
             log_output=raw_result.log_output,
+            text_output_enabled=getattr(raw_result, "text_output_enabled", False),
+            text_output_dir=getattr(raw_result, "text_output_dir", None),
+            text_output_events=getattr(raw_result, "text_output_events", 0),
+            text_output_files=getattr(raw_result, "text_output_files", 0),
         )
 
     def capture_multi(
@@ -183,12 +240,17 @@ class AcquireService:
         group_name: str,
         profile_path: Path | str,
         output_base_dir: Path | None = None,
+        outputs: AcquireOutputsConfig | None = None,
         aggregation_key: str = "timestamp",
         timestamp_match_window_ticks: int = 10,
         event_timeout_ms: int = 50,
         tcp_timeout_s: float = 1.0,
         allow_start_without_ack: bool = False,
         decode_json: bool = False,
+        text_output_enabled: bool = False,
+        text_output_dir: Path | None = None,
+        text_max_events_per_file: int = 100,
+        text_waveform_layout: str = "channel_blocks",
         watch_waveforms: bool = False,
         watch_every: int | None = None,
         stop_capture_on_watch_close: bool = True,
@@ -217,6 +279,17 @@ class AcquireService:
         base_dir = output_base_dir or (
             self._default_output_base_dir(profile.path, profile) / "multi"
         )
+        resolved_outputs = outputs or AcquireOutputsConfig(
+            raw=OutputTargetConfig(enabled=True),
+            json=OutputTargetConfig(enabled=decode_json),
+            text=TextOutputConfig(
+                enabled=text_output_enabled,
+                dir=text_output_dir,
+                max_events_per_file=text_max_events_per_file,
+                waveform_layout=text_waveform_layout,
+            ),
+            log=OutputTargetConfig(enabled=True),
+        )
         if watch_waveforms:
             board_adapter = LegacyBoardAdapter()
             unsupported = []
@@ -243,7 +316,12 @@ class AcquireService:
                 tcp_timeout_s=tcp_timeout_s,
                 allow_start_without_ack=allow_start_without_ack,
                 boards=devices,
+                outputs=resolved_outputs,
                 decode_json=decode_json,
+                text_output_enabled=text_output_enabled,
+                text_output_dir=text_output_dir,
+                text_max_events_per_file=text_max_events_per_file,
+                text_waveform_layout=text_waveform_layout,
                 watch_waveforms=watch_waveforms,
                 watch_every=watch_every,
                 stop_capture_on_watch_close=stop_capture_on_watch_close,
@@ -259,11 +337,21 @@ class AcquireService:
             timestamp_match_window_ticks=timestamp_match_window_ticks,
             tcp_timeout_s=tcp_timeout_s,
             allow_start_without_ack=allow_start_without_ack,
-            decode_enabled=raw_result.decode_enabled,
-            decoded_output_dir=raw_result.decoded_output_dir,
+            decode_enabled=getattr(
+                raw_result, "json_output_enabled", raw_result.decode_enabled
+            ),
+            decoded_output_dir=getattr(
+                raw_result, "json_output_dir", raw_result.decoded_output_dir
+            ),
             decoded_complete_events=raw_result.decoded_complete_events,
             decoded_partial_events=raw_result.decoded_partial_events,
             decode_errors=raw_result.decode_errors,
+            raw_output_dir=getattr(raw_result, "raw_output_dir", None),
+            json_output_enabled=getattr(
+                raw_result, "json_output_enabled", raw_result.decode_enabled
+            ),
+            json_output_dir=getattr(raw_result, "json_output_dir", raw_result.decoded_output_dir),
+            log_output_dir=getattr(raw_result, "log_output_dir", None),
             watch_waveforms=raw_result.watch_waveforms,
             watch_every=raw_result.watch_every,
             watched_frames=raw_result.watched_frames,
@@ -272,6 +360,15 @@ class AcquireService:
             meta_path=raw_result.meta_path,
             log_path=raw_result.log_path,
             status=raw_result.status,
+            text_output_enabled=getattr(raw_result, "text_output_enabled", False),
+            text_output_dir=getattr(raw_result, "text_output_dir", None),
+            text_output_complete_events=getattr(
+                raw_result, "text_output_complete_events", 0
+            ),
+            text_output_partial_events=getattr(
+                raw_result, "text_output_partial_events", 0
+            ),
+            text_output_files=getattr(raw_result, "text_output_files", 0),
         )
 
     def _default_output_base_dir(self, profile_path: Path, profile) -> Path:

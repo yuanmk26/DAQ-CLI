@@ -89,6 +89,15 @@ def print_single_acquire_result(result: SingleAcquireResult) -> None:
     table.add_row("captured_events", str(result.captured_events or "-"))
     table.add_row("send_mode", str(result.send_mode))
     table.add_row("decode_enabled", str(result.decode_enabled))
+    table.add_row("raw_output_dir", str(getattr(result, "raw_output_dir", None) or "-"))
+    table.add_row(
+        "json_output_enabled",
+        str(getattr(result, "json_output_enabled", result.decode_enabled)),
+    )
+    table.add_row(
+        "json_output_dir",
+        str(getattr(result, "json_output_dir", result.decoded_output_dir) or "-"),
+    )
     table.add_row(
         "decoded_output_dir",
         str(result.decoded_output_dir or "-"),
@@ -98,6 +107,14 @@ def print_single_acquire_result(result: SingleAcquireResult) -> None:
         "-" if result.decoded_events is None else str(result.decoded_events),
     )
     table.add_row("decode_errors", str(result.decode_errors))
+    table.add_row(
+        "log_output_path",
+        str(getattr(result, "log_output_path", None) or "-"),
+    )
+    table.add_row("text_output_enabled", str(getattr(result, "text_output_enabled", False)))
+    table.add_row("text_output_dir", str(getattr(result, "text_output_dir", None) or "-"))
+    table.add_row("text_output_events", str(getattr(result, "text_output_events", 0)))
+    table.add_row("text_output_files", str(getattr(result, "text_output_files", 0)))
     table.add_row("watch_enabled", str(result.watch_enabled))
     table.add_row(
         "watch_every",
@@ -128,10 +145,30 @@ def print_multi_acquire_result(result: MultiAcquireResult) -> None:
     table.add_row("timeout_s", f"{result.tcp_timeout_s}")
     table.add_row("allow_start_without_ack", str(result.allow_start_without_ack))
     table.add_row("decode_enabled", str(result.decode_enabled))
+    table.add_row("raw_output_dir", str(getattr(result, "raw_output_dir", None) or "-"))
+    table.add_row(
+        "json_output_enabled",
+        str(getattr(result, "json_output_enabled", result.decode_enabled)),
+    )
+    table.add_row(
+        "json_output_dir",
+        str(getattr(result, "json_output_dir", result.decoded_output_dir) or "-"),
+    )
     table.add_row("decoded_output_dir", str(result.decoded_output_dir or "-"))
     table.add_row("decoded_complete_events", str(result.decoded_complete_events))
     table.add_row("decoded_partial_events", str(result.decoded_partial_events))
     table.add_row("decode_errors", str(result.decode_errors))
+    table.add_row("text_output_enabled", str(getattr(result, "text_output_enabled", False)))
+    table.add_row("text_output_dir", str(getattr(result, "text_output_dir", None) or "-"))
+    table.add_row(
+        "text_output_complete_events",
+        str(getattr(result, "text_output_complete_events", 0)),
+    )
+    table.add_row(
+        "text_output_partial_events",
+        str(getattr(result, "text_output_partial_events", 0)),
+    )
+    table.add_row("text_output_files", str(getattr(result, "text_output_files", 0)))
     table.add_row("watch_waveforms", str(result.watch_waveforms))
     table.add_row(
         "watch_every",
@@ -148,6 +185,7 @@ def print_multi_acquire_result(result: MultiAcquireResult) -> None:
     table.add_row("config_path", str(result.config_path))
     table.add_row("meta_path", str(result.meta_path or "-"))
     table.add_row("log_path", str(result.log_path or "-"))
+    table.add_row("log_output_dir", str(getattr(result, "log_output_dir", None) or "-"))
     table.add_row("profile", str(result.source_profile))
     console.print(table)
 

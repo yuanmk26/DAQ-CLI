@@ -133,6 +133,7 @@ class BoardConfig:
 @dataclass
 class AppConfig:
     run_name_prefix: str
+    run_name: Optional[str]
     output_base_dir: str
     tcm_ip: str
     tcm_rbcp_port: int
@@ -180,6 +181,11 @@ class AppConfig:
 
         return cls(
             run_name_prefix=str(raw.get("run_name_prefix", "run")),
+            run_name=(
+                str(raw["run_name"])
+                if raw.get("run_name") not in (None, "")
+                else None
+            ),
             output_base_dir=str(raw.get("output_base_dir", os.path.join("out", "multi_board_acquire"))),
             tcm_ip=str(raw["tcm"]["ip"]),
             tcm_rbcp_port=int(raw["tcm"].get("rbcp_port", 4660)),
@@ -1109,7 +1115,12 @@ class AcquisitionApp:
 
     def _make_run_dir(self) -> str:
         ensure_dir(self.config.output_base_dir)
-        run_name = "%s_%s" % (self.config.run_name_prefix, time.strftime("%Y%m%d_%H%M%S", time.localtime()))
+        run_name = self.config.run_name
+        if not run_name:
+            run_name = "%s_%s" % (
+                self.config.run_name_prefix,
+                time.strftime("%Y%m%d_%H%M%S", time.localtime()),
+            )
         run_dir = os.path.join(self.config.output_base_dir, run_name)
         ensure_dir(run_dir)
         return run_dir

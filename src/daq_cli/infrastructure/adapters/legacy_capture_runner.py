@@ -1,20 +1,30 @@
 from __future__ import annotations
 
-import datetime
 import multiprocessing
 import queue
+import shutil
 import socket
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Any
 
+from daq_cli.application.output_config import (
+    AcquireOutputsConfig,
+    OutputTargetConfig,
+    TextOutputConfig,
+)
 from daq_cli.domain.device import DeviceConfig
 from daq_cli.infrastructure.adapters.legacy_runtime import bundled_legacy_script_dir
+from daq_cli.infrastructure.run_name_allocator import allocate_next_run_dir
 from daq_cli.infrastructure.tcp_sent_decode import (
     DecodedTcpSentEvent,
     decode_tcp_sent_file,
     write_decoded_event_json,
+)
+from daq_cli.infrastructure.text_event_writer import (
+    SegmentedTextEventWriter,
+    format_single_event_text,
 )
 from daq_cli.infrastructure.tcp_sent_protocol import (
     ADC_LENGTH,
@@ -44,6 +54,14 @@ class LegacySingleCaptureResult:
     watch_every: int | None
     watched_frames: int
     log_output: str
+    raw_output_dir: Path | None = None
+    json_output_enabled: bool = False
+    json_output_dir: Path | None = None
+    log_output_path: Path | None = None
+    text_output_enabled: bool = False
+    text_output_dir: Path | None = None
+    text_output_events: int = 0
+    text_output_files: int = 0
 
 
 @dataclass(slots=True)
@@ -64,15 +82,22 @@ class RawCapturePacket:
 @dataclass(slots=True)
 class DecodeWorkItem:
     raw_event_path: Path
-    output_path: Path
+    json_output_path: Path | None
     expected_send_mode: int
     adc_length: int
+    text_output_dir: Path | None = None
+    text_max_events_per_file: int = 100
+    device_name: str = "acquire"
+    board_ip: str = ""
+    waveform_layout: str = "channel_blocks"
 
 
 @dataclass(slots=True)
 class DecodeWorkerResult:
     success: bool
     error_message: str | None = None
+    json_written: int = 0
+    text_written: int = 0
 
 
 @dataclass(slots=True)
@@ -97,6 +122,8 @@ class ParallelCaptureStats:
     decode_submitted: int = 0
     decoded_events: int = 0
     decode_errors: int = 0
+    text_enabled: bool = False
+    text_events: int = 0
     watch_enabled: bool = False
     watch_every: int | None = None
     watched_frames: int = 0
@@ -131,21 +158,66 @@ class LegacySingleCaptureRunner:
         events: int,
         timeout_s: float,
         send_mode: int,
+        outputs: AcquireOutputsConfig | None = None,
         decode_json: bool = False,
         decoded_output_dir: Path | None = None,
+        text_output_enabled: bool = False,
+        text_output_dir: Path | None = None,
+        text_max_events_per_file: int = 100,
+        text_waveform_layout: str = "channel_blocks",
         watch_every: int | None = None,
         progress_callback: Callable[[LegacySingleCaptureProgress], None] | None = None,
     ) -> LegacySingleCaptureResult:
+        resolved_outputs = outputs or AcquireOutputsConfig(
+            raw=OutputTargetConfig(enabled=True),
+            json=OutputTargetConfig(enabled=decode_json, dir=decoded_output_dir),
+            text=TextOutputConfig(
+                enabled=text_output_enabled,
+                dir=text_output_dir,
+                max_events_per_file=text_max_events_per_file,
+                waveform_layout=text_waveform_layout,
+            ),
+            log=OutputTargetConfig(enabled=False),
+        )
         output_base_dir = Path(output_base_dir)
         output_base_dir.mkdir(parents=True, exist_ok=True)
-        run_output_dir = self._make_output_dir(output_base_dir)
-        raw_dir = run_output_dir / "raw"
-        raw_dir.mkdir(parents=True, exist_ok=True)
-        resolved_decoded_output_dir = (
-            Path(decoded_output_dir) if decoded_output_dir is not None else run_output_dir / "decoded"
+        run_output_dir = self._make_output_dir(
+            output_base_dir,
+            prefix=str(getattr(device, "name", "acquire")),
         )
-        if decode_json:
+        work_raw_dir = run_output_dir / "raw"
+        work_raw_dir.mkdir(parents=True, exist_ok=True)
+        resolved_raw_output_dir = self._resolve_run_output_dir(
+            run_output_dir=run_output_dir,
+            configured_dir=resolved_outputs.raw.dir,
+            default_leaf="raw",
+        ) if resolved_outputs.raw.enabled else None
+        resolved_decoded_output_dir = self._resolve_run_output_dir(
+            run_output_dir=run_output_dir,
+            configured_dir=resolved_outputs.json.dir,
+            default_leaf="decoded",
+        ) if resolved_outputs.json.enabled else None
+        if resolved_decoded_output_dir is not None:
             resolved_decoded_output_dir.mkdir(parents=True, exist_ok=True)
+        resolved_text_output_dir = self._resolve_run_output_dir(
+            run_output_dir=run_output_dir,
+            configured_dir=resolved_outputs.text.dir,
+            default_leaf="text",
+        ) if resolved_outputs.text.enabled else None
+        if resolved_text_output_dir is not None:
+            resolved_text_output_dir.mkdir(parents=True, exist_ok=True)
+        resolved_log_output_dir = self._resolve_run_output_dir(
+            run_output_dir=run_output_dir,
+            configured_dir=resolved_outputs.log.dir,
+            default_leaf="logs",
+        ) if resolved_outputs.log.enabled else None
+        if resolved_log_output_dir is not None:
+            resolved_log_output_dir.mkdir(parents=True, exist_ok=True)
+        resolved_log_output_path = (
+            resolved_log_output_dir / "capture.log"
+            if resolved_log_output_dir is not None
+            else None
+        )
 
         packet_queue: queue.Queue[RawCapturePacket | None] = queue.Queue(
             maxsize=DEFAULT_PACKET_QUEUE_SIZE
@@ -154,7 +226,8 @@ class LegacySingleCaptureRunner:
         stop_event = threading.Event()
         stats = ParallelCaptureStats(
             requested_events=events,
-            decode_enabled=decode_json,
+            decode_enabled=resolved_outputs.json.enabled,
+            text_enabled=resolved_outputs.text.enabled,
             watch_enabled=watch_every is not None,
             watch_every=watch_every,
         )
@@ -164,13 +237,22 @@ class LegacySingleCaptureRunner:
             f"Capture send_mode: {send_mode}",
             f"Capture directory: {run_output_dir}",
         ]
-        if decode_json:
+        if resolved_outputs.json.enabled and resolved_decoded_output_dir is not None:
             log_lines.append(f"Decoded output directory: {resolved_decoded_output_dir}")
+        if resolved_outputs.text.enabled and resolved_text_output_dir is not None:
+            log_lines.append(f"Text output directory: {resolved_text_output_dir}")
+            log_lines.append(
+                f"Text max events/file: {max(int(resolved_outputs.text.max_events_per_file), 1)}"
+            )
+        if resolved_outputs.raw.enabled and resolved_raw_output_dir is not None:
+            log_lines.append(f"Raw output directory: {resolved_raw_output_dir}")
+        if resolved_log_output_path is not None:
+            log_lines.append(f"Log output path: {resolved_log_output_path}")
         if watch_every is not None:
             log_lines.append(f"Wave watch every: {watch_every}")
         decode_backend = (
             self._start_decode_backend()
-            if decode_json
+            if resolved_outputs.json.enabled or resolved_outputs.text.enabled
             else None
         )
         watch_backend = (
@@ -198,14 +280,20 @@ class LegacySingleCaptureRunner:
             name="single_capture_writer",
             daemon=True,
             args=(
-                raw_dir,
+                work_raw_dir,
                 run_output_dir,
                 packet_queue,
                 stop_event,
                 exception_queue,
                 stats,
-                decode_json,
+                resolved_outputs.json.enabled,
                 resolved_decoded_output_dir,
+                resolved_outputs.text.enabled,
+                resolved_text_output_dir,
+                max(int(resolved_outputs.text.max_events_per_file), 1),
+                resolved_outputs.text.waveform_layout,
+                getattr(device, "name", "acquire"),
+                str(getattr(device, "ip", "")),
                 send_mode,
                 decode_backend.task_queue if decode_backend is not None else None,
                 deferred_decode_tasks,
@@ -246,6 +334,12 @@ class LegacySingleCaptureRunner:
             )
         sock.close()
 
+        self._finalize_raw_output(
+            work_raw_dir=work_raw_dir,
+            target_raw_dir=resolved_raw_output_dir,
+            raw_enabled=resolved_outputs.raw.enabled,
+        )
+
         first_error = self._pop_first_exception(exception_queue)
         self._write_capture_info(
             run_output_dir=run_output_dir,
@@ -255,20 +349,29 @@ class LegacySingleCaptureRunner:
             send_mode=send_mode,
             queue_maxsize=DEFAULT_PACKET_QUEUE_SIZE,
             writer_errors=stats.writer_errors,
-            decode_enabled=decode_json,
+            decode_enabled=resolved_outputs.json.enabled,
             decoded_events=stats.decoded_events,
             decode_errors=stats.decode_errors,
+            text_enabled=resolved_outputs.text.enabled,
+            text_events=stats.text_events,
             watch_enabled=watch_every is not None,
             watch_every=watch_every,
             watched_frames=stats.watched_frames,
         )
         log_lines.append(f"Captured events: {stats.captured_events}")
-        if decode_json:
+        if resolved_outputs.json.enabled:
             log_lines.append(f"Decoded events: {stats.decoded_events}")
             log_lines.append(f"Decode errors: {stats.decode_errors}")
+        if resolved_outputs.text.enabled and resolved_text_output_dir is not None:
+            log_lines.append(f"Text events: {stats.text_events}")
+            log_lines.append(
+                f"Text files: {len(list(resolved_text_output_dir.glob('events_*.txt')))}"
+            )
         if watch_every is not None:
             log_lines.append(f"Watched frames: {stats.watched_frames}")
         log_output = "\n".join(log_lines) + "\n"
+        if resolved_log_output_path is not None:
+            resolved_log_output_path.write_text(log_output, encoding="utf-8")
 
         if first_error is not None:
             raise first_error
@@ -277,10 +380,22 @@ class LegacySingleCaptureRunner:
             run_output_dir=run_output_dir,
             captured_events=stats.captured_events,
             send_mode=send_mode,
-            decode_enabled=decode_json,
-            decoded_output_dir=resolved_decoded_output_dir if decode_json else None,
+            decode_enabled=resolved_outputs.json.enabled,
+            decoded_output_dir=resolved_decoded_output_dir,
             decoded_events=stats.decoded_events,
             decode_errors=stats.decode_errors,
+            raw_output_dir=resolved_raw_output_dir,
+            json_output_enabled=resolved_outputs.json.enabled,
+            json_output_dir=resolved_decoded_output_dir,
+            log_output_path=resolved_log_output_path,
+            text_output_enabled=resolved_outputs.text.enabled,
+            text_output_dir=resolved_text_output_dir,
+            text_output_events=stats.text_events,
+            text_output_files=(
+                len(list(resolved_text_output_dir.glob("events_*.txt")))
+                if resolved_outputs.text.enabled and resolved_text_output_dir is not None
+                else 0
+            ),
             watch_enabled=watch_every is not None,
             watch_every=watch_every,
             watched_frames=stats.watched_frames,
@@ -330,7 +445,13 @@ class LegacySingleCaptureRunner:
         exception_queue: queue.Queue[BaseException],
         stats: ParallelCaptureStats,
         decode_json: bool,
-        decoded_output_dir: Path,
+        decoded_output_dir: Path | None,
+        text_output_enabled: bool,
+        text_output_dir: Path | None,
+        text_max_events_per_file: int,
+        text_waveform_layout: str,
+        device_name: str,
+        board_ip: str,
         send_mode: int,
         decode_task_queue: Any,
         deferred_decode_tasks: list[DecodeWorkItem],
@@ -345,12 +466,21 @@ class LegacySingleCaptureRunner:
                     return
                 raw_event_path = self._write_packet_file(raw_dir=raw_dir, packet=item)
                 stats.captured_events += 1
-                if decode_json:
+                if decode_json or text_output_enabled:
                     decode_item = DecodeWorkItem(
                         raw_event_path=raw_event_path,
-                        output_path=decoded_output_dir / f"{raw_event_path.stem}.json",
+                        json_output_path=(
+                            decoded_output_dir / f"{raw_event_path.stem}.json"
+                            if decode_json
+                            else None
+                        ),
                         expected_send_mode=send_mode,
                         adc_length=ADC_LENGTH,
+                        text_output_dir=text_output_dir if text_output_enabled else None,
+                        text_max_events_per_file=text_max_events_per_file,
+                        device_name=device_name,
+                        board_ip=board_ip,
+                        waveform_layout=text_waveform_layout,
                     )
                     if not self._try_publish_decode_item(
                         task_queue=decode_task_queue,
@@ -495,7 +625,8 @@ class LegacySingleCaptureRunner:
             except queue.Empty:
                 return
             if result.success:
-                stats.decoded_events += 1
+                stats.decoded_events += int(getattr(result, "json_written", 0))
+                stats.text_events += int(getattr(result, "text_written", 0))
             else:
                 stats.decode_errors += 1
 
@@ -588,11 +719,36 @@ class LegacySingleCaptureRunner:
         sock.connect((device.ip, device.tcp_port))
         return sock
 
-    def _make_output_dir(self, base_dir: Path) -> Path:
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = base_dir / timestamp
-        path.mkdir(parents=True, exist_ok=True)
-        return path
+    def _make_output_dir(self, base_dir: Path, prefix: str) -> Path:
+        return allocate_next_run_dir(base_dir, prefix)
+
+    def _resolve_run_output_dir(
+        self,
+        *,
+        run_output_dir: Path,
+        configured_dir: Path | None,
+        default_leaf: str,
+    ) -> Path:
+        if configured_dir is None:
+            return run_output_dir / default_leaf
+        return Path(configured_dir) / run_output_dir.name
+
+    def _finalize_raw_output(
+        self,
+        *,
+        work_raw_dir: Path,
+        target_raw_dir: Path | None,
+        raw_enabled: bool,
+    ) -> None:
+        if raw_enabled and target_raw_dir is not None:
+            target_raw_dir.mkdir(parents=True, exist_ok=True)
+            if target_raw_dir != work_raw_dir:
+                for source_path in work_raw_dir.glob("*"):
+                    shutil.copy2(source_path, target_raw_dir / source_path.name)
+            return
+        for source_path in work_raw_dir.glob("*"):
+            source_path.unlink()
+        work_raw_dir.rmdir()
 
     def _write_capture_info(
         self,
@@ -606,6 +762,8 @@ class LegacySingleCaptureRunner:
         decode_enabled: bool,
         decoded_events: int,
         decode_errors: int,
+        text_enabled: bool,
+        text_events: int,
         watch_enabled: bool,
         watch_every: int | None,
         watched_frames: int,
@@ -626,6 +784,8 @@ class LegacySingleCaptureRunner:
                     f"decode_enabled={1 if decode_enabled else 0}",
                     f"decoded_events={decoded_events}",
                     f"decode_errors={decode_errors}",
+                    f"text_output_enabled={1 if text_enabled else 0}",
+                    f"text_output_events={text_events}",
                     f"watch_enabled={1 if watch_enabled else 0}",
                     f"watch_every={watch_every if watch_every is not None else 0}",
                     f"watched_frames={watched_frames}",
@@ -732,22 +892,54 @@ def _u16_be(data: bytes, offset: int) -> int:
 
 
 def _decode_worker_main(task_queue: Any, result_queue: Any) -> None:
-    while True:
-        item = task_queue.get()
-        if item is None:
-            return
-        try:
-            event = decode_tcp_sent_file(
-                item.raw_event_path,
-                expected_send_mode=item.expected_send_mode,
-                adc_length=item.adc_length,
-            )
-            write_decoded_event_json(event, item.output_path)
-            result_queue.put(DecodeWorkerResult(success=True))
-        except Exception as exc:
-            result_queue.put(
-                DecodeWorkerResult(success=False, error_message=str(exc))
-            )
+    text_writers: dict[str, SegmentedTextEventWriter] = {}
+    try:
+        while True:
+            item = task_queue.get()
+            if item is None:
+                return
+            try:
+                event = decode_tcp_sent_file(
+                    item.raw_event_path,
+                    expected_send_mode=item.expected_send_mode,
+                    adc_length=item.adc_length,
+                )
+                json_written = 0
+                text_written = 0
+                if item.json_output_path is not None:
+                    write_decoded_event_json(event, item.json_output_path)
+                    json_written = 1
+                if item.text_output_dir is not None:
+                    writer_key = str(item.text_output_dir)
+                    writer = text_writers.get(writer_key)
+                    if writer is None:
+                        writer = SegmentedTextEventWriter(
+                            output_dir=item.text_output_dir,
+                            max_events_per_file=item.text_max_events_per_file,
+                        )
+                        text_writers[writer_key] = writer
+                    writer.append_event(
+                        format_single_event_text(
+                            event,
+                            device_name=item.device_name,
+                            board_ip=item.board_ip,
+                        )
+                    )
+                    text_written = 1
+                result_queue.put(
+                    DecodeWorkerResult(
+                        success=True,
+                        json_written=json_written,
+                        text_written=text_written,
+                    )
+                )
+            except Exception as exc:
+                result_queue.put(
+                    DecodeWorkerResult(success=False, error_message=str(exc))
+                )
+    finally:
+        for writer in text_writers.values():
+            writer.close()
 
 
 def _watch_worker_main(

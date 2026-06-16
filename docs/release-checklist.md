@@ -8,7 +8,7 @@ For the full step-by-step process, see `docs/publish-release.md`.
 
 1. Confirm the working tree is clean or that you understand any remaining changes.
 2. Update the version in `pyproject.toml`.
-3. Review `README.md`, `docs/install-on-new-pc.md`, and `profiles/example.template.yaml`.
+3. Review `README.md`, `docs/install-on-new-pc.md`, `docs/usage.md`, `profiles/example.yaml`, and `profiles/example.template.yaml`.
 4. Make sure the release does not depend on private local paths or lab-only configuration.
 
 ## Validation
@@ -19,6 +19,14 @@ For the full step-by-step process, see `docs/publish-release.md`.
 ```powershell
 daq --help
 ```
+
+3. Generate a fresh example profile and confirm the new output config is present:
+
+```powershell
+daq profile init .\release-check.yaml
+```
+
+4. If the release changes acquisition outputs, run a short smoke test and verify `raw/json/text/log` land in the expected directories.
 
 ## Build
 
@@ -64,4 +72,5 @@ Install:
 Configuration:
 - Run daq profile init to generate a profile file
 - Update device IPs and TCM IP on each PC
+- Adjust outputs.raw/json/text/log for the local storage layout if needed
 ```

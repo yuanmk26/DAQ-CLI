@@ -4,17 +4,24 @@ import importlib
 import json
 import multiprocessing
 import queue
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from daq_cli.application.output_config import (
+    AcquireOutputsConfig,
+    OutputTargetConfig,
+    TextOutputConfig,
+)
 from daq_cli.domain.device import DeviceConfig
 from daq_cli.infrastructure.adapters.legacy_runtime import (
     bundled_legacy_script_dir,
     clear_legacy_modules,
     temporary_sys_path,
 )
+from daq_cli.infrastructure.run_name_allocator import allocate_next_run_dir
 from daq_cli.infrastructure.multi_board_decode import (
     MultiBoardDecodeError,
     MultiBoardTailReadState,
@@ -22,6 +29,10 @@ from daq_cli.infrastructure.multi_board_decode import (
     event_to_json_dict,
     load_multi_run_metadata,
     read_available_tail_events,
+)
+from daq_cli.infrastructure.text_event_writer import (
+    SegmentedTextEventWriter,
+    format_multi_event_text,
 )
 from daq_cli.infrastructure.tcp_sent_decode import decode_tcp_sent_packet
 from daq_cli.infrastructure.wave_monitor import compute_multi_board_viewer_queue_size
@@ -45,7 +56,12 @@ class LegacyMultiCaptureConfig:
     tcp_timeout_s: float
     allow_start_without_ack: bool
     boards: list[DeviceConfig]
+    outputs: AcquireOutputsConfig | None = None
     decode_json: bool = False
+    text_output_enabled: bool = False
+    text_output_dir: Path | None = None
+    text_max_events_per_file: int = 100
+    text_waveform_layout: str = "channel_blocks"
     watch_waveforms: bool = False
     watch_every: int | None = None
     stop_capture_on_watch_close: bool = True
@@ -67,6 +83,15 @@ class LegacyMultiCaptureResult:
     watch_every: int | None
     watched_frames: int
     stop_capture_on_watch_close: bool
+    raw_output_dir: Path | None = None
+    json_output_enabled: bool = False
+    json_output_dir: Path | None = None
+    log_output_dir: Path | None = None
+    text_output_enabled: bool = False
+    text_output_dir: Path | None = None
+    text_output_complete_events: int = 0
+    text_output_partial_events: int = 0
+    text_output_files: int = 0
 
 
 @dataclass(slots=True)
@@ -100,7 +125,8 @@ class MultiBoardDecodeRuntime:
     task_queue: Any
     result_queue: Any
     process: multiprocessing.Process
-    output_dir: Path
+    output_dir: Path | None
+    text_output_dir: Path | None = None
 
 
 @dataclass(slots=True)
@@ -114,6 +140,9 @@ class _DecodeDrainResult:
     decoded_complete_events: int = 0
     decoded_partial_events: int = 0
     decode_errors: int = 0
+    text_output_complete_events: int = 0
+    text_output_partial_events: int = 0
+    text_output_files: int = 0
 
 
 class _MultiBoardFrameQueueProxy:
@@ -267,20 +296,40 @@ class LegacyMultiCaptureRunner:
         self,
         config: LegacyMultiCaptureConfig,
     ) -> LegacyMultiCaptureResult:
-        payload = self._build_payload(config)
+        run_output_dir = allocate_next_run_dir(
+            config.output_base_dir,
+            config.run_name_prefix,
+        )
+        resolved_outputs = config.outputs or AcquireOutputsConfig(
+            raw=OutputTargetConfig(enabled=True),
+            json=OutputTargetConfig(enabled=config.decode_json),
+            text=TextOutputConfig(
+                enabled=config.text_output_enabled,
+                dir=config.text_output_dir,
+                max_events_per_file=config.text_max_events_per_file,
+                waveform_layout=config.text_waveform_layout,
+            ),
+            log=OutputTargetConfig(enabled=True),
+        )
+        payload = self._build_payload(config, run_output_dir=run_output_dir)
         config_path = self._write_temp_config(payload)
         watched_frames = 0
         decoded_output_dir: Path | None = None
+        text_output_dir: Path | None = None
+        raw_output_dir: Path | None = None
+        log_output_dir: Path | None = None
         decoded_complete_events = 0
         decoded_partial_events = 0
         decode_errors = 0
+        text_output_complete_events = 0
+        text_output_partial_events = 0
+        text_output_files = 0
 
         with temporary_sys_path(self._script_dir):
             clear_legacy_modules()
             module = importlib.import_module("multi_board_acquire")
             app_config = module.AppConfig.from_json_file(str(config_path))
             app = module.AcquisitionApp(app_config, str(config_path))
-            run_output_dir: Path | None = None
             decode_runtime: MultiBoardDecodeRuntime | None = None
             watch_runtime = (
                 self._start_multi_watch_backend(config)
@@ -292,15 +341,16 @@ class LegacyMultiCaptureRunner:
             try:
                 app.start()
                 while not app.stop_event.is_set():
-                    if run_output_dir is None:
-                        run_output_dir = self._read_run_dir(config_path)
                     if (
-                        config.decode_json
+                        (resolved_outputs.json.enabled or resolved_outputs.text.enabled)
                         and decode_runtime is None
-                        and run_output_dir is not None
                     ):
-                        decode_runtime = self._start_multi_decode_backend(run_output_dir)
+                        decode_runtime = self._start_multi_decode_backend(
+                            run_output_dir,
+                            outputs=resolved_outputs,
+                        )
                         decoded_output_dir = decode_runtime.output_dir
+                        text_output_dir = decode_runtime.text_output_dir
                     if watch_runtime is not None:
                         watch_drain = self._drain_watch_results(watch_runtime.result_queue)
                         watched_frames += watch_drain.watched_frames
@@ -324,15 +374,16 @@ class LegacyMultiCaptureRunner:
                 app.stop_event.set()
             finally:
                 app.stop()
-                if run_output_dir is None:
-                    run_output_dir = self._read_run_dir(config_path)
                 if (
-                    config.decode_json
+                    (resolved_outputs.json.enabled or resolved_outputs.text.enabled)
                     and decode_runtime is None
-                    and run_output_dir is not None
                 ):
-                    decode_runtime = self._start_multi_decode_backend(run_output_dir)
+                    decode_runtime = self._start_multi_decode_backend(
+                        run_output_dir,
+                        outputs=resolved_outputs,
+                    )
                     decoded_output_dir = decode_runtime.output_dir
+                    text_output_dir = decode_runtime.text_output_dir
                 if watch_runtime is not None:
                     watched_frames += self._stop_multi_watch_backend(watch_runtime)
                 if decode_runtime is not None:
@@ -340,33 +391,59 @@ class LegacyMultiCaptureRunner:
                     decoded_complete_events += decode_drain.decoded_complete_events
                     decoded_partial_events += decode_drain.decoded_partial_events
                     decode_errors += decode_drain.decode_errors
-                elif config.decode_json:
+                    text_output_complete_events += decode_drain.text_output_complete_events
+                    text_output_partial_events += decode_drain.text_output_partial_events
+                    text_output_files += decode_drain.text_output_files
+                elif resolved_outputs.json.enabled or resolved_outputs.text.enabled:
                     decode_errors += 1
 
-        run_output_dir = self._read_run_dir(config_path)
         meta_path = run_output_dir / "run_meta.json" if run_output_dir else None
         log_path = run_output_dir / "log.txt" if run_output_dir else None
         status = self._read_status(meta_path)
+        if run_output_dir is not None:
+            raw_output_dir, meta_path = self._finalize_multi_raw_outputs(
+                run_output_dir=run_output_dir,
+                outputs=resolved_outputs,
+            )
+            log_output_dir, log_path = self._finalize_multi_log_output(
+                run_output_dir=run_output_dir,
+                outputs=resolved_outputs,
+            )
         return LegacyMultiCaptureResult(
             config_path=config_path,
             run_output_dir=run_output_dir,
             status=status,
             log_path=log_path if log_path and log_path.is_file() else None,
             meta_path=meta_path if meta_path and meta_path.is_file() else None,
-            decode_enabled=config.decode_json,
+            decode_enabled=resolved_outputs.json.enabled,
             decoded_output_dir=decoded_output_dir,
             decoded_complete_events=decoded_complete_events,
             decoded_partial_events=decoded_partial_events,
             decode_errors=decode_errors,
+            raw_output_dir=raw_output_dir,
+            json_output_enabled=resolved_outputs.json.enabled,
+            json_output_dir=decoded_output_dir,
+            log_output_dir=log_output_dir,
             watch_waveforms=config.watch_waveforms,
             watch_every=config.watch_every,
             watched_frames=watched_frames,
             stop_capture_on_watch_close=config.stop_capture_on_watch_close,
+            text_output_enabled=resolved_outputs.text.enabled,
+            text_output_dir=text_output_dir,
+            text_output_complete_events=text_output_complete_events,
+            text_output_partial_events=text_output_partial_events,
+            text_output_files=text_output_files,
         )
 
-    def _build_payload(self, config: LegacyMultiCaptureConfig) -> dict[str, object]:
+    def _build_payload(
+        self,
+        config: LegacyMultiCaptureConfig,
+        *,
+        run_output_dir: Path,
+    ) -> dict[str, object]:
         return {
             "run_name_prefix": config.run_name_prefix,
+            "run_name": run_output_dir.name,
             "output_base_dir": str(config.output_base_dir),
             "adc_length": config.adc_length,
             "aggregation_key": config.aggregation_key,
@@ -423,15 +500,36 @@ class LegacyMultiCaptureRunner:
     def _start_multi_decode_backend(
         self,
         run_output_dir: Path,
+        *,
+        outputs: AcquireOutputsConfig,
     ) -> MultiBoardDecodeRuntime:
         context = multiprocessing.get_context("spawn")
         task_queue = context.Queue(maxsize=2)
         result_queue = context.Queue(maxsize=1)
-        output_dir = run_output_dir / "decoded"
+        output_dir = self._resolve_run_output_dir(
+            run_output_dir=run_output_dir,
+            configured_dir=outputs.json.dir,
+            default_leaf="decoded",
+        ) if outputs.json.enabled else None
+        resolved_text_output_dir = self._resolve_run_output_dir(
+            run_output_dir=run_output_dir,
+            configured_dir=outputs.text.dir,
+            default_leaf="text",
+        ) if outputs.text.enabled else None
         process = context.Process(
             target=_multi_board_decode_backend_main,
             name="multi_board_decode",
-            args=(task_queue, result_queue, str(run_output_dir), str(output_dir)),
+            args=(
+                task_queue,
+                result_queue,
+                str(run_output_dir),
+                str(output_dir) if output_dir is not None else "",
+                outputs.json.enabled,
+                str(resolved_text_output_dir) if resolved_text_output_dir is not None else "",
+                outputs.text.enabled,
+                max(int(outputs.text.max_events_per_file), 1),
+                outputs.text.waveform_layout,
+            ),
         )
         process.start()
         return MultiBoardDecodeRuntime(
@@ -439,6 +537,7 @@ class LegacyMultiCaptureRunner:
             result_queue=result_queue,
             process=process,
             output_dir=output_dir,
+            text_output_dir=resolved_text_output_dir,
         )
 
     def _attach_multi_watch_proxy(
@@ -543,6 +642,78 @@ class LegacyMultiCaptureRunner:
                 getattr(result, "decoded_partial_events", 0)
             )
             drained.decode_errors += int(getattr(result, "decode_errors", 0))
+            drained.text_output_complete_events += int(
+                getattr(result, "text_output_complete_events", 0)
+            )
+            drained.text_output_partial_events += int(
+                getattr(result, "text_output_partial_events", 0)
+            )
+            drained.text_output_files += int(getattr(result, "text_output_files", 0))
+
+    def _resolve_run_output_dir(
+        self,
+        *,
+        run_output_dir: Path,
+        configured_dir: Path | None,
+        default_leaf: str,
+    ) -> Path:
+        if configured_dir is None:
+            return run_output_dir / default_leaf
+        return Path(configured_dir) / run_output_dir.name
+
+    def _finalize_multi_raw_outputs(
+        self,
+        *,
+        run_output_dir: Path,
+        outputs: AcquireOutputsConfig,
+    ) -> tuple[Path | None, Path | None]:
+        meta_path = run_output_dir / "run_meta.json"
+        raw_files = [
+            run_output_dir / "complete_events.dat",
+            run_output_dir / "partial_events.dat",
+        ]
+        if not outputs.raw.enabled:
+            for raw_file in raw_files:
+                if raw_file.exists():
+                    raw_file.unlink()
+            return None, meta_path if meta_path.exists() else None
+
+        raw_output_dir = self._resolve_run_output_dir(
+            run_output_dir=run_output_dir,
+            configured_dir=outputs.raw.dir,
+            default_leaf="raw",
+        )
+        raw_output_dir.mkdir(parents=True, exist_ok=True)
+        for source_path in [*raw_files, meta_path]:
+            if source_path.exists():
+                shutil.copy2(
+                    source_path,
+                    raw_output_dir / source_path.name,
+                )
+        return raw_output_dir, raw_output_dir / "run_meta.json"
+
+    def _finalize_multi_log_output(
+        self,
+        *,
+        run_output_dir: Path,
+        outputs: AcquireOutputsConfig,
+    ) -> tuple[Path | None, Path | None]:
+        source_log_path = run_output_dir / "log.txt"
+        if not source_log_path.exists():
+            return None, None
+        if not outputs.log.enabled:
+            source_log_path.unlink()
+            return None, None
+        log_output_dir = self._resolve_run_output_dir(
+            run_output_dir=run_output_dir,
+            configured_dir=outputs.log.dir,
+            default_leaf="logs",
+        )
+        log_output_dir.mkdir(parents=True, exist_ok=True)
+        target_log_path = log_output_dir / "log.txt"
+        if target_log_path != source_log_path:
+            shutil.copy2(source_log_path, target_log_path)
+        return log_output_dir, target_log_path
 
     def _write_temp_config(self, payload: dict[str, object]) -> Path:
         output_base_dir = Path(str(payload["output_base_dir"]))
@@ -558,6 +729,11 @@ class LegacyMultiCaptureRunner:
     def _read_run_dir(self, config_path: Path) -> Path | None:
         raw = json.loads(config_path.read_text(encoding="utf-8"))
         output_base_dir = Path(str(raw["output_base_dir"]))
+        run_name = raw.get("run_name")
+        if run_name not in (None, ""):
+            candidate = output_base_dir / str(run_name)
+            if candidate.is_dir():
+                return candidate
         run_prefix = str(raw["run_name_prefix"])
         if not output_base_dir.is_dir():
             return None
@@ -689,6 +865,9 @@ class _DecodeSummary:
     decoded_complete_events: int
     decoded_partial_events: int
     decode_errors: int
+    text_output_complete_events: int = 0
+    text_output_partial_events: int = 0
+    text_output_files: int = 0
 
 
 def _publish_multi_board_view_update(frame_queue: Any, update: Any) -> None:
@@ -708,17 +887,43 @@ def _multi_board_decode_backend_main(
     result_queue: Any,
     run_output_dir: str,
     decoded_output_dir: str,
+    decode_json: bool,
+    text_output_dir: str,
+    text_output_enabled: bool,
+    text_max_events_per_file: int,
+    text_waveform_layout: str,
 ) -> None:
     run_dir = Path(run_output_dir)
-    output_dir = Path(decoded_output_dir)
-    complete_output_dir = output_dir / "complete"
-    partial_output_dir = output_dir / "partial"
-    complete_output_dir.mkdir(parents=True, exist_ok=True)
-    partial_output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = Path(decoded_output_dir) if decoded_output_dir else None
+    complete_output_dir = output_dir / "complete" if output_dir is not None else None
+    partial_output_dir = output_dir / "partial" if output_dir is not None else None
+    if complete_output_dir is not None:
+        complete_output_dir.mkdir(parents=True, exist_ok=True)
+    if partial_output_dir is not None:
+        partial_output_dir.mkdir(parents=True, exist_ok=True)
+    resolved_text_output_dir = Path(text_output_dir) if text_output_dir else None
+    complete_text_writer = (
+        SegmentedTextEventWriter(
+            output_dir=resolved_text_output_dir / "complete",
+            max_events_per_file=text_max_events_per_file,
+        )
+        if text_output_enabled and resolved_text_output_dir is not None
+        else None
+    )
+    partial_text_writer = (
+        SegmentedTextEventWriter(
+            output_dir=resolved_text_output_dir / "partial",
+            max_events_per_file=text_max_events_per_file,
+        )
+        if text_output_enabled and resolved_text_output_dir is not None
+        else None
+    )
 
     decode_errors = 0
     decoded_complete_events = 0
     decoded_partial_events = 0
+    text_output_complete_events = 0
+    text_output_partial_events = 0
     capture_finished = False
     board_context: dict[int, dict[str, object]] | None = None
     aggregation_key = "unknown"
@@ -758,17 +963,21 @@ def _multi_board_decode_backend_main(
                 )
                 complete_state = complete_batch.state
                 for event in complete_batch.events:
-                    output_path = complete_output_dir / f"event_{event.aggregate_seq:05d}.json"
                     payload = event_to_json_dict(
                         event=event,
                         aggregation_key=aggregation_key,
                         board_context=board_context,
                     )
-                    output_path.write_text(
-                        json.dumps(payload, indent=2),
-                        encoding="utf-8",
-                    )
-                    decoded_complete_events += 1
+                    if complete_output_dir is not None and decode_json:
+                        output_path = complete_output_dir / f"event_{event.aggregate_seq:05d}.json"
+                        output_path.write_text(
+                            json.dumps(payload, indent=2),
+                            encoding="utf-8",
+                        )
+                        decoded_complete_events += 1
+                    if complete_text_writer is not None:
+                        complete_text_writer.append_event(format_multi_event_text(payload))
+                        text_output_complete_events += 1
                     made_progress = True
 
                 partial_batch = read_available_tail_events(
@@ -778,17 +987,21 @@ def _multi_board_decode_backend_main(
                 )
                 partial_state = partial_batch.state
                 for event in partial_batch.events:
-                    output_path = partial_output_dir / f"event_{event.aggregate_seq:05d}.json"
                     payload = event_to_json_dict(
                         event=event,
                         aggregation_key=aggregation_key,
                         board_context=board_context,
                     )
-                    output_path.write_text(
-                        json.dumps(payload, indent=2),
-                        encoding="utf-8",
-                    )
-                    decoded_partial_events += 1
+                    if partial_output_dir is not None and decode_json:
+                        output_path = partial_output_dir / f"event_{event.aggregate_seq:05d}.json"
+                        output_path.write_text(
+                            json.dumps(payload, indent=2),
+                            encoding="utf-8",
+                        )
+                        decoded_partial_events += 1
+                    if partial_text_writer is not None:
+                        partial_text_writer.append_event(format_multi_event_text(payload))
+                        text_output_partial_events += 1
                     made_progress = True
             except MultiBoardDecodeError:
                 decode_errors += 1
@@ -802,12 +1015,22 @@ def _multi_board_decode_backend_main(
             if not made_progress:
                 time.sleep(0.05)
     finally:
+        if complete_text_writer is not None:
+            complete_text_writer.close()
+        if partial_text_writer is not None:
+            partial_text_writer.close()
         try:
             result_queue.put(
                 _DecodeSummary(
                     decoded_complete_events=decoded_complete_events,
                     decoded_partial_events=decoded_partial_events,
                     decode_errors=decode_errors,
+                    text_output_complete_events=text_output_complete_events,
+                    text_output_partial_events=text_output_partial_events,
+                    text_output_files=(
+                        (complete_text_writer.stats.files_created if complete_text_writer is not None else 0)
+                        + (partial_text_writer.stats.files_created if partial_text_writer is not None else 0)
+                    ),
                 )
             )
         except Exception:

@@ -29,7 +29,9 @@ Before building a release:
    - `README.md`
    - `docs/usage.md`
    - `docs/install-on-new-pc.md`
+   - `profiles/example.yaml`
    - `profiles/example.template.yaml`
+   - `src/daq_cli/profile_templates/example.template.yaml`
 4. Confirm the release does not depend on lab-private paths, machine-local files, or uncommitted generated data.
 
 Recommended quick checks:
@@ -105,6 +107,13 @@ daq --help
 
 If you want a stronger end-to-end check, follow `docs/install-on-new-pc.md` on a clean machine or clean virtual environment.
 
+Recommended functional check before upload:
+
+1. Generate a fresh machine-local profile with `daq profile init`.
+2. Confirm the generated YAML documents the `outputs.raw/json/text/log` layout.
+3. Run one short single-board capture and verify the expected output directories are created.
+4. If this release includes text output support, verify a TXT file is produced when `outputs.text.enabled: true`.
+
 ## 6. Publish On GitHub Releases
 
 Use the repository's GitHub Releases page and create a new release manually.
@@ -128,6 +137,7 @@ Suggested release notes template:
 ```text
 Highlights:
 - <short summary of the most important changes>
+- <mention any output layout changes such as txt/json/log/raw directory control>
 
 Install:
 - Download the offline release zip from this release

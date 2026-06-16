@@ -285,17 +285,40 @@ defaults:
     events: 1000
     timeout_s: 10.0
     progress_every: 50
-    decode_json: false
     watch_every: null
+    outputs:
+      raw:
+        enabled: true
+      json:
+        enabled: false
+      text:
+        enabled: true
+        dir: out/text
+        max_events_per_file: 1000
+        waveform_layout: point_rows
+      log:
+        enabled: false
   acquire_multi:
     aggregation_key: timestamp
     timestamp_match_window_ticks: 10
     event_timeout_ms: 50
     tcp_timeout_s: 1.0
-    decode_json: false
     allow_start_without_ack: true
     watch_waveforms: false
     watch_every: 100
+    outputs:
+      raw:
+        enabled: true
+      json:
+        enabled: false
+      text:
+        enabled: true
+        dir: out/multi_text
+        max_events_per_file: 1000
+        waveform_layout: point_rows
+      log:
+        enabled: true
+        dir: out/logs
 ```
 
 When these keys are present, `daq acquire single dev1 --profile profiles/example.yaml` and `daq acquire multi two_board --profile profiles/example.yaml` will use them automatically, and any explicit CLI option still overrides the profile value.
@@ -309,6 +332,16 @@ Useful options:
 - `--decoded-output-dir`: choose where online decoded JSON files are written
 - `--watch-every`: show a low-rate waveform watch window using every Nth captured event
 - `--progress-every`: print one live progress line every N captured events
+
+Profile-driven output routing:
+
+- `outputs.raw.enabled/dir`: control raw packet file output
+- `outputs.json.enabled/dir`: control decoded JSON output
+- `outputs.text.enabled/dir`: control TXT event output
+- `outputs.text.max_events_per_file`: roll TXT files after N events
+- `outputs.text.waveform_layout`: recommends `point_rows`; legacy `channel_blocks` values remain accepted and render with the same point-row output
+- `outputs.log.enabled/dir`: control capture log file output
+- `--decode-json` and `--raw-only` only toggle JSON output; they do not disable TXT output
 
 Examples:
 
@@ -328,20 +361,22 @@ Current behavior:
 - Current single-board capture supports firmware `send_mode` 0, 1, 2, and 3
 - A timestamped run directory is created under the selected output base directory
 - Raw event files are written by the native runner in the same per-event format as before
-- `--decode-json` adds a separate online decode pipeline that writes `decoded/event_XXXXX.json`
+- `--decode-json` adds a separate online decode pipeline that writes JSON when `outputs.json.enabled` is on
 - The online decode pipeline is best-effort and does not take priority over raw capture throughput
 - `--watch-every N` opens a waveform watch viewer and refreshes it with every Nth captured event
 - The watch viewer is a best-effort sampling path that always yields to raw capture throughput
 - A line-by-line live monitor shows progress, event rate, latest `hit_mask`, packet bytes, and output directory during capture
 - `--progress-every N` throttles those live progress lines while still forcing the final `events=N/N` line
-- `defaults.acquire_single` in the profile can provide default values for `events`, `timeout_s`, `output_dir`, `decode_json`, `decoded_output_dir`, `watch_every`, and `progress_every`
+- `defaults.acquire_single` in the profile can provide default values for `events`, `timeout_s`, `output_dir`, `watch_every`, `progress_every`, and `outputs.*`
 - A summary table is printed after the run
 - A final native capture summary is also shown
 
 Typical output data includes:
 
 - Event binary files
-- Optional decoded JSON files under `decoded/`
+- Optional decoded JSON files under the configured JSON output directory
+- Optional TXT files such as `events_00001.txt` under the configured text output directory
+- Optional capture log file under the configured log output directory
 - `capture_info.txt`
 
 ## 10. Offline Decode
@@ -504,13 +539,12 @@ Current behavior:
 - The selected group devices and TCM endpoint are taken from the profile
 - The legacy script still performs the actual TCM align, TCP receive, packet
   parse, aggregation, and run-file writing
-- `--decode-json` performs a follow-up offline decode of aggregated events after
-  capture completes
+- `--decode-json` enables multi-board decoded JSON output
 - `--watch-waveforms` adds a best-effort sampled waveform monitor with one window, same-aggregate-event board switching, and short history navigation
 - Multi waveform watch only supports boards currently sending waveform-bearing modes `1` or `3`
 - The watcher samples packets from the legacy multi receive path; it does not read waveform data from `monitor.jsonl`
 - If you want the viewer to follow essentially every watched event, use `--watch-every 1`; larger values intentionally sample the stream
-- `defaults.acquire_multi` in the profile can provide default values for `output_dir`, `aggregation_key`, `timestamp_match_window_ticks`, `event_timeout_ms`, `tcp_timeout_s`, `allow_start_without_ack`, `decode_json`, `watch_waveforms`, and `watch_every`
+- `defaults.acquire_multi` in the profile can provide default values for `output_dir`, `aggregation_key`, `timestamp_match_window_ticks`, `event_timeout_ms`, `tcp_timeout_s`, `allow_start_without_ack`, `watch_waveforms`, `watch_every`, and `outputs.*`
 - The command prints the final run directory, generated config path, and status
 
 Typical output data includes:
@@ -521,8 +555,8 @@ Typical output data includes:
 - `complete_events.idx`
 - `monitor.jsonl`
 - `log.txt`
-- `decoded/complete/event_XXXXX.json` when multi decode is enabled
-- `decoded/partial/event_XXXXX.json` when multi decode is enabled
+- `complete/event_XXXXX.json` and `partial/event_XXXXX.json` under the configured JSON output root when multi decode is enabled
+- `complete/events_00001.txt` and `partial/events_00001.txt` under the configured text output root when TXT output is enabled
 
 Multi decoded JSON is written per aggregated event, not per original board packet.
 Each JSON contains top-level aggregation metadata plus one decoded board entry

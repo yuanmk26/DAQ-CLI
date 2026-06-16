@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import queue
 import shutil
 import unittest
 import uuid
@@ -27,6 +28,10 @@ from daq_cli.infrastructure.tcp_sent_decode import (
     DecodedTcpSentEvent,
     TcpSentDecodeError,
     decode_tcp_sent_file,
+)
+from daq_cli.infrastructure.adapters.legacy_multi_capture_runner import (
+    _DecodeControlMessage,
+    _multi_board_decode_backend_main,
 )
 
 
@@ -341,6 +346,104 @@ class DecodeTests(unittest.TestCase):
             self.assertEqual(partial_json["event_kind"], "partial")
             self.assertEqual(partial_json["missing_board_ids"], [1])
             self.assertEqual(len(partial_json["boards"]), 1)
+        finally:
+            shutil.rmtree(run_dir.parent, ignore_errors=True)
+
+    def test_multi_decode_backend_appends_multiple_events_to_text_files(self) -> None:
+        run_dir = self._make_multi_run_dir()
+        try:
+            complete_events = [
+                _build_multi_event(
+                    aggregate_seq=1,
+                    timestamp=5000,
+                    status_flags=EVENT_FLAG_COMPLETE,
+                    board_packets=[
+                        _build_multi_board_packet(
+                            board_id=0,
+                            packet=_build_tcp_sent_packet(
+                                send_mode=1, hit_mask=0x0003, event_count=21
+                            ),
+                            recv_unix_ns=444,
+                        )
+                    ],
+                ),
+                _build_multi_event(
+                    aggregate_seq=2,
+                    timestamp=5001,
+                    status_flags=EVENT_FLAG_COMPLETE,
+                    board_packets=[
+                        _build_multi_board_packet(
+                            board_id=1,
+                            packet=_build_tcp_sent_packet(
+                                send_mode=1, hit_mask=0x0003, event_count=22
+                            ),
+                            recv_unix_ns=445,
+                        )
+                    ],
+                ),
+            ]
+            partial_events = [
+                _build_multi_event(
+                    aggregate_seq=3,
+                    timestamp=6000,
+                    status_flags=EVENT_FLAG_PARTIAL | EVENT_FLAG_TIMEOUT_FLUSH,
+                    boards_missing_mask=0x00000002,
+                    board_packets=[
+                        _build_multi_board_packet(
+                            board_id=0,
+                            packet=_build_tcp_sent_packet(
+                                send_mode=3, hit_mask=0x0001, event_count=23
+                            ),
+                            recv_unix_ns=666,
+                        ),
+                    ],
+                )
+            ]
+            _write_multi_data_file(run_dir / "complete_events.dat", complete_events)
+            _write_multi_data_file(run_dir / "partial_events.dat", partial_events)
+
+            control_queue: queue.Queue = queue.Queue()
+            result_queue: queue.Queue = queue.Queue()
+            control_queue.put(_DecodeControlMessage(kind="capture_finished"))
+            _multi_board_decode_backend_main(
+                task_queue=control_queue,
+                result_queue=result_queue,
+                run_output_dir=str(run_dir),
+                decoded_output_dir="",
+                decode_json=False,
+                text_output_dir=str(run_dir / "text"),
+                text_output_enabled=True,
+                text_max_events_per_file=10,
+                text_waveform_layout="channel_blocks",
+            )
+
+            summary = result_queue.get_nowait()
+            self.assertEqual(summary.text_output_complete_events, 2)
+            self.assertEqual(summary.text_output_partial_events, 1)
+            complete_text = (run_dir / "text" / "complete" / "events_00001.txt").read_text(
+                encoding="utf-8"
+            )
+            partial_text = (run_dir / "text" / "partial" / "events_00001.txt").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("===== EVENT 1 =====", complete_text)
+            self.assertIn("===== EVENT 2 =====", complete_text)
+            self.assertIn("===== EVENT 3 =====", partial_text)
+            self.assertIn("waveforms:", complete_text)
+            self.assertIn("NA", partial_text)
+            self.assertNotIn("waveform_samples:", complete_text)
+            self.assertNotIn("ch00:", complete_text)
+            waveform_lines = complete_text.splitlines()
+            header_line = waveform_lines[waveform_lines.index("waveforms:") + 1]
+            first_row = waveform_lines[waveform_lines.index("waveforms:") + 2]
+            self.assertEqual(
+                header_line.split(),
+                [f"ch{channel_index:02d}" for channel_index in range(16)],
+            )
+            self.assertEqual(
+                first_row.split(),
+                [str(channel_index) for channel_index in range(16)],
+            )
         finally:
             shutil.rmtree(run_dir.parent, ignore_errors=True)
 

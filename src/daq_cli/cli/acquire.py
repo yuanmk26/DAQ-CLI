@@ -4,6 +4,11 @@ from typing import Annotated
 import typer
 
 from daq_cli.application.acquire_service import AcquireService, SingleAcquireProgress
+from daq_cli.application.output_config import (
+    AcquireOutputsConfig,
+    OutputTargetConfig,
+    TextOutputConfig,
+)
 from daq_cli.application.profile_service import ProfileService
 from daq_cli.cli.common import RequiredProfileOption
 from daq_cli.presentation.console.printers import (
@@ -122,8 +127,7 @@ def acquire_single(
         events=resolved["events"],
         timeout_s=resolved["timeout_s"],
         output_base_dir=resolved["output_dir"],
-        decode_json=resolved["decode_json"],
-        decoded_output_dir=resolved["decoded_output_dir"],
+        outputs=resolved["outputs"],
         watch_every=resolved["watch_every"],
         progress_callback=on_progress,
     )
@@ -242,7 +246,7 @@ def acquire_multi(
             event_timeout_ms=resolved["event_timeout_ms"],
             tcp_timeout_s=resolved["tcp_timeout_s"],
             allow_start_without_ack=resolved["allow_start_without_ack"],
-            decode_json=resolved["decode_json"],
+            outputs=resolved["outputs"],
             watch_waveforms=resolved["watch_waveforms"],
             watch_every=resolved["watch_every"],
             stop_capture_on_watch_close=resolved["stop_on_watch_close"],
@@ -274,20 +278,20 @@ def _resolve_single_acquire_options(
             return None
         return Path(str(value))
 
+    outputs = _resolve_outputs_config(
+        acquire_defaults=acquire_defaults,
+        decode_json_override=decode_json,
+        decoded_output_dir_override=decoded_output_dir,
+        default_log_enabled=False,
+    )
+
     return {
         "events": events if events is not None else int(acquire_defaults.get("events", 1000)),
         "timeout_s": (
             timeout_s if timeout_s is not None else float(acquire_defaults.get("timeout_s", 10.0))
         ),
         "output_dir": output_dir if output_dir is not None else _path_from_default("output_dir"),
-        "decode_json": (
-            decode_json if decode_json is not None else bool(acquire_defaults.get("decode_json", False))
-        ),
-        "decoded_output_dir": (
-            decoded_output_dir
-            if decoded_output_dir is not None
-            else _path_from_default("decoded_output_dir")
-        ),
+        "outputs": outputs,
         "watch_every": (
             watch_every
             if watch_every is not None
@@ -324,6 +328,12 @@ def _resolve_multi_acquire_options(
         acquire_defaults = {}
 
     output_dir_value = acquire_defaults.get("output_dir")
+    outputs = _resolve_outputs_config(
+        acquire_defaults=acquire_defaults,
+        decode_json_override=decode_json,
+        decoded_output_dir_override=None,
+        default_log_enabled=True,
+    )
     resolved_output_dir = (
         output_dir
         if output_dir is not None
@@ -359,11 +369,7 @@ def _resolve_multi_acquire_options(
             if allow_start_without_ack is not None
             else bool(acquire_defaults.get("allow_start_without_ack", False))
         ),
-        "decode_json": (
-            decode_json
-            if decode_json is not None
-            else bool(acquire_defaults.get("decode_json", False))
-        ),
+        "outputs": outputs,
         "watch_waveforms": (
             watch_waveforms
             if watch_waveforms is not None
@@ -384,3 +390,91 @@ def _resolve_multi_acquire_options(
             else bool(acquire_defaults.get("stop_on_watch_close", True))
         ),
     }
+
+
+def _resolve_outputs_config(
+    *,
+    acquire_defaults: dict[str, object],
+    decode_json_override: bool | None,
+    decoded_output_dir_override: Path | None,
+    default_log_enabled: bool,
+) -> AcquireOutputsConfig:
+    outputs_defaults = acquire_defaults.get("outputs")
+    if not isinstance(outputs_defaults, dict):
+        outputs_defaults = {}
+    legacy_text_defaults = acquire_defaults.get("text_output")
+    if not isinstance(legacy_text_defaults, dict):
+        legacy_text_defaults = {}
+
+    raw_defaults = outputs_defaults.get("raw")
+    if not isinstance(raw_defaults, dict):
+        raw_defaults = {}
+    json_defaults = outputs_defaults.get("json")
+    if not isinstance(json_defaults, dict):
+        json_defaults = {}
+    text_defaults = outputs_defaults.get("text")
+    if not isinstance(text_defaults, dict):
+        text_defaults = {}
+    log_defaults = outputs_defaults.get("log")
+    if not isinstance(log_defaults, dict):
+        log_defaults = {}
+
+    json_enabled = (
+        decode_json_override
+        if decode_json_override is not None
+        else bool(
+            json_defaults.get(
+                "enabled",
+                acquire_defaults.get("decode_json", False),
+            )
+        )
+    )
+    json_dir = decoded_output_dir_override or _path_from_value(
+        json_defaults.get("dir", acquire_defaults.get("decoded_output_dir"))
+    )
+
+    text_enabled = bool(
+        text_defaults.get("enabled", legacy_text_defaults.get("enabled", False))
+    )
+    text_dir = _path_from_value(
+        text_defaults.get("dir", legacy_text_defaults.get("output_dir"))
+    )
+    text_max_events_per_file = int(
+        text_defaults.get(
+            "max_events_per_file",
+            legacy_text_defaults.get("max_events_per_file", 100),
+        )
+    )
+    text_waveform_layout = str(
+        text_defaults.get(
+            "waveform_layout",
+            legacy_text_defaults.get("waveform_layout", "channel_blocks"),
+        )
+    )
+
+    return AcquireOutputsConfig(
+        raw=OutputTargetConfig(
+            enabled=bool(raw_defaults.get("enabled", True)),
+            dir=_path_from_value(raw_defaults.get("dir")),
+        ),
+        json=OutputTargetConfig(
+            enabled=json_enabled,
+            dir=json_dir,
+        ),
+        text=TextOutputConfig(
+            enabled=text_enabled,
+            dir=text_dir,
+            max_events_per_file=text_max_events_per_file,
+            waveform_layout=text_waveform_layout,
+        ),
+        log=OutputTargetConfig(
+            enabled=bool(log_defaults.get("enabled", default_log_enabled)),
+            dir=_path_from_value(log_defaults.get("dir")),
+        ),
+    )
+
+
+def _path_from_value(value: object) -> Path | None:
+    if value in (None, ""):
+        return None
+    return Path(str(value))

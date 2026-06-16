@@ -1,0 +1,49 @@
+===== EVENT 1 =====
+event_kind=single
+device_name=dev1
+board_ip=192.168.10.10
+source_file=raw/event_00000.bin
+send_mode=1
+event_count=1
+timestamp=12345
+hit_mask=0x00FF
+raw_packet_bytes=4116
+
+[board dev1]
+send_mode=1
+event_count=1
+timestamp=12345
+hit_mask=0x00FF
+feature_records=none
+waveforms:
+ch00 ch01 ch02 ch03 ch04 ch05 ch06 ch07 ch08 ch09 ch10 ch11 ch12 ch13 ch14 ch15
+   0    1    2    3    4    5    6    7    8    9   10   11   12   13   14   15
+   1    2    3    4    5    6    7    8    9   10   11   12   13   14   15   16
+   2    3    4    5    6    7    8    9   10   11   12   13   14   15   16   17
+   3    4    5    6    7    8    9   10   11   12   13   14   15   16   17   18
+===== END EVENT 1 =====
+
+===== EVENT 2 =====
+event_kind=single
+device_name=dev1
+board_ip=192.168.10.10
+source_file=raw/event_00001.bin
+send_mode=1
+event_count=2
+timestamp=24690
+hit_mask=0x00FF
+raw_packet_bytes=4116
+
+[board dev1]
+send_mode=1
+event_count=2
+timestamp=24690
+hit_mask=0x00FF
+feature_records=none
+waveforms:
+ch00 ch01 ch02 ch03 ch04 ch05 ch06 ch07 ch08 ch09 ch10 ch11 ch12 ch13 ch14 ch15
+  10   11   12   13   14   15   16   17   18   19   20   21   22   23   24   25
+  11   12   13   14   15   16   17   18   19   20   21   22   23   24   25   26
+  12   13   14   15   16   17   18   19   20   21   22   23   24   25   26   27
+  13   14   15   16   17   18   19   20   21   22   23   24   25   26   27   28
+===== END EVENT 2 =====

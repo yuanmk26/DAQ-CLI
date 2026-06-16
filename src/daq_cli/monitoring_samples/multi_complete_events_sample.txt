@@ -1,0 +1,74 @@
+===== EVENT 1 =====
+event_kind=complete
+aggregate_seq=1
+aggregation_key=timestamp
+aggregate_timestamp=5000
+boards_present_mask=0x00000003
+boards_missing_mask=0x00000000
+missing_board_ids=
+status_flags=1
+event_count_min=21
+event_count_max=21
+
+[board dev1]
+board_id=0
+board_ip=192.168.10.10
+recv_unix_ns=444
+reconnect_mark=False
+send_mode=1
+event_count=21
+timestamp=5000
+hit_mask=0x0003
+feature_records=none
+waveforms:
+ch00 ch01 ch02 ch03 ch04 ch05 ch06 ch07 ch08 ch09 ch10 ch11 ch12 ch13 ch14 ch15
+   0    1    2    3    4    5    6    7    8    9   10   11   12   13   14   15
+   1    2    3    4    5    6    7    8    9   10   11   12   13   14   15   16
+
+[board dev2]
+board_id=1
+board_ip=192.168.10.11
+recv_unix_ns=555
+reconnect_mark=False
+send_mode=3
+event_count=21
+timestamp=5002
+hit_mask=0x0003
+feature_records:
+feature channel=0 baseline=100 peak_amp=200 peak_pos=3 integral=-10
+feature channel=1 baseline=101 peak_amp=201 peak_pos=4 integral=-9
+waveforms:
+ch00 ch01 ch02 ch03 ch04 ch05 ch06 ch07 ch08 ch09 ch10 ch11 ch12 ch13 ch14 ch15
+1000 1001   NA   NA   NA   NA   NA   NA   NA   NA   NA   NA   NA   NA   NA   NA
+1002 1003   NA   NA   NA   NA   NA   NA   NA   NA   NA   NA   NA   NA   NA   NA
+
+===== END EVENT 1 =====
+
+===== EVENT 2 =====
+event_kind=complete
+aggregate_seq=2
+aggregation_key=timestamp
+aggregate_timestamp=5012
+boards_present_mask=0x00000001
+boards_missing_mask=0x00000002
+missing_board_ids=1
+status_flags=2
+event_count_min=22
+event_count_max=22
+
+[board dev1]
+board_id=0
+board_ip=192.168.10.10
+recv_unix_ns=666
+reconnect_mark=False
+send_mode=1
+event_count=22
+timestamp=5012
+hit_mask=0x0001
+feature_records=none
+waveforms:
+ch00 ch01 ch02 ch03 ch04 ch05 ch06 ch07 ch08 ch09 ch10 ch11 ch12 ch13 ch14 ch15
+  20   21   22   23   24   25   26   27   28   29   30   31   32   33   34   35
+  21   22   23   24   25   26   27   28   29   30   31   32   33   34   35   36
+
+===== END EVENT 2 =====
