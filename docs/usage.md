@@ -757,12 +757,17 @@ The window has four tabs plus a shared log panel at the bottom:
 
 - **板卡**: device dropdown with info / sysmon / trigger-show /
   tcp-mode2-show / config-show / tcm-link-show buttons, the board config
-  form (step toggles, trigger parameters, thresholds, send-mode), the TCM
-  trigger-link form (mask / polarity / thresholds / debounce / width /
-  enable), a dedicated **TCM 触发 (mode 9)** one-click section (sets
-  `Trigger_model=9`, forces the external trigger off, applies
-  `trigger_position` and the adjacent TCM-link fields in one go), and a
-  register reader with hex dump.
+  form (step toggles, trigger parameters, thresholds, send-mode), a full
+  **TCM 触发 (mode 9) 寄存器面板** — three groups of editable registers:
+  trigger source (`0x10` model, `0x19` position, `0x06` Time_clean /
+  EXT_Trigger, `0x1B~1D` start delay), the TCM link (`0x45~6C` with 16
+  per-channel threshold fields plus a broadcast-fill helper, mask,
+  polarity, debounce, width, enable), and data format (`0x42` send mode,
+  `0x43/0x44` integration samples). **应用全部并回读验证** writes every
+  group and verifies by readback; **回读刷新** fills the form from the
+  current registers. Per-channel thresholds exist because channel baselines
+  differ — use the broadcast-fill only when they match. The register reader
+  shows hex dumps.
 - **采集**: single capture (device, events, timeout, output switches) with a
   live progress bar, and multi capture (group, aggregation key, match
   window, no-ack allowance) with a busy indicator and result summary.
