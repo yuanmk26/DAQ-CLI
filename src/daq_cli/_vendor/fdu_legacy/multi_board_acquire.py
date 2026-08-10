@@ -247,6 +247,8 @@ class Frame:
     feature_bytes: bytes
     waveform_bytes: bytes
     recv_unix_ns: int
+    crossing_fine: int = 0
+    accept_fine: int = 0
     reconnect_mark: bool = False
 
     @property
@@ -545,18 +547,33 @@ class FrameParser:
             )
 
         if len(buffer) >= 3 and buffer[0] == 0xFF and buffer[1] == 0xFE and buffer[2] == 0x01:
-            header_bytes = 20
-            if len(buffer) < header_bytes:
+            # NOTE: daq-cli divergence from upstream (unconditional 28-byte
+            # header): discriminate by frame format version (byte 19) so mixed
+            # old/new firmware boards parse correctly during transitions.
+            # Upstream: FDU-ADC-250M-16ch/script/multi_board_acquire.py
+            base_header_bytes = 20
+            if len(buffer) < base_header_bytes:
                 return None, False
-            header = bytes(buffer[:header_bytes])
-            mode = header[3]
+            base_header = bytes(buffer[:base_header_bytes])
+            mode = base_header[3]
             if mode < MODE_HIT_WAVEFORM or mode > MODE_HIT_FEATURE_WAVEFORM:
                 del buffer[0]
                 return None, True
+            format_version = base_header[19]
+            header_bytes = 28 if format_version >= 1 else base_header_bytes
+            if len(buffer) < header_bytes:
+                return None, False
+            header = bytes(buffer[:header_bytes])
             event_count = self._u32_be(header, 4)
             timestamp = self._u64_be(header, 8)
             hit_mask = self._u16_be(header, 16)
             feature_size = header[18]
+            if format_version >= 1:
+                crossing_fine = self._u32_be(header, 20)
+                accept_fine = self._u32_be(header, 24)
+            else:
+                crossing_fine = 0
+                accept_fine = 0
             hit_count = bit_count(hit_mask)
             if self._mode_has_feature(mode):
                 feature_bytes = hit_count * feature_size
@@ -589,6 +606,8 @@ class FrameParser:
                     feature_bytes=raw[header_bytes : header_bytes + feature_bytes],
                     waveform_bytes=raw[header_bytes + feature_bytes :],
                     recv_unix_ns=now_unix_ns(),
+                    crossing_fine=crossing_fine,
+                    accept_fine=accept_fine,
                     reconnect_mark=reconnect_mark,
                 ),
                 False,
