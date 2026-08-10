@@ -756,14 +756,19 @@ class LegacyMultiCaptureRunner:
 
 
 def _legacy_frame_to_tcp_sent_packet(frame: Any) -> bytes:
-    header = bytearray(20)
+    format_version = int(getattr(frame, "format_version", 0))
+    has_fine = format_version >= 1
+    header = bytearray(28 if has_fine else 20)
     header[0:3] = b"\xFF\xFE\x01"
     header[3] = int(frame.mode) & 0xFF
     header[4:8] = int(frame.event_count).to_bytes(4, byteorder="big", signed=False)
     header[8:16] = int(frame.timestamp).to_bytes(8, byteorder="big", signed=False)
     header[16:18] = int(frame.hit_mask).to_bytes(2, byteorder="big", signed=False)
     header[18] = int(frame.feature_size) & 0xFF
-    header[19] = 0
+    header[19] = format_version
+    if has_fine:
+        header[20:24] = int(frame.crossing_fine).to_bytes(4, "big", signed=False)
+        header[24:28] = int(frame.accept_fine).to_bytes(4, "big", signed=False)
     return bytes(header) + bytes(frame.feature_bytes) + bytes(frame.waveform_bytes)
 
 

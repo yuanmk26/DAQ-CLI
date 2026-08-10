@@ -33,6 +33,7 @@ from daq_cli.infrastructure.tcp_sent_protocol import (
     HEADER_BYTES,
     MODE2_MAGIC,
     frame_total_size,
+    header_bytes_for,
 )
 
 
@@ -848,6 +849,14 @@ class _TcpSentRawStreamReader:
                 f"{self.expected_send_mode}"
             )
 
+        # Frame format version lives in header byte 19: 0 = legacy 20-byte
+        # header, >=1 = 28-byte header with crossing_fine/accept_fine.
+        format_version = header[19]
+        header_bytes = header_bytes_for(format_version)
+        if header_bytes > HEADER_BYTES:
+            self._fill(header_bytes)
+            header = bytes(self.buffer[:header_bytes])
+
         hit_mask = _u16_be(header, 16)
         feature_size = header[18]
         if mode in (2, 3) and feature_size != FEATURE_BYTES:
@@ -868,6 +877,7 @@ class _TcpSentRawStreamReader:
             hit_count=hit_count,
             adc_length=ADC_LENGTH,
             feature_bytes=FEATURE_BYTES,
+            format_version=format_version,
         )
         self._fill(total_size)
         packet = bytes(self.buffer[:total_size])

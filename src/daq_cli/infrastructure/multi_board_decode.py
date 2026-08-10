@@ -20,14 +20,25 @@ EVENT_FLAG_EVENT_COUNT_MISMATCH = 1 << 3
 BOARD_FLAG_HAS_FEATURE = 1 << 0
 BOARD_FLAG_HAS_WAVEFORM = 1 << 1
 BOARD_FLAG_TCP_RECONNECTED_BEFORE_FRAME = 1 << 2
+BOARD_FLAG_HAS_FINE = 1 << 3  # chunk carries crossing_fine/accept_fine (28-byte frame)
+
+# Aggregate file format versions (FILE header version field):
+#   1 = board chunks without fine fields (20-byte wire frames)
+#   2 = board chunks with crossing_fine/accept_fine (28-byte wire frames)
+AGGREGATE_FORMAT_VERSION_V1 = 1
+AGGREGATE_FORMAT_VERSION_V2 = 2
 
 FILE_HEADER_FMT = "<8sHHIQIII"
 EVENT_HEADER_FMT = "<IHHQQQQIIIIQQ"
+# v1 board chunk (48 bytes); kept for reading legacy aggregated files.
 BOARD_HEADER_FMT = "<IHHIIQHHHHIIQ"
+# v2 board chunk (56 bytes): + crossing_fine, accept_fine.
+BOARD_HEADER_FMT_V2 = "<IHHIIQHHHHIIQII"
 
 FILE_HEADER_SIZE = struct.calcsize(FILE_HEADER_FMT)
 EVENT_HEADER_SIZE = struct.calcsize(EVENT_HEADER_FMT)
 BOARD_HEADER_SIZE = struct.calcsize(BOARD_HEADER_FMT)
+BOARD_HEADER_SIZE_V2 = struct.calcsize(BOARD_HEADER_FMT_V2)
 
 
 @dataclass(slots=True)
@@ -53,6 +64,8 @@ class MultiBoardChunkRecord:
     recv_unix_ns: int
     feature_bytes: bytes
     waveform_bytes: bytes
+    crossing_fine: int = 0
+    accept_fine: int = 0
 
 
 @dataclass(slots=True)
@@ -101,7 +114,9 @@ class MultiBoardAggregatedEventReader:
     def iter_events(self) -> Iterable[MultiBoardEventRecord]:
         with self.path.open("rb") as fh:
             file_header = fh.read(FILE_HEADER_SIZE)
-            _parse_file_header(header=file_header, source=self.path)
+            file_version = _parse_file_header(
+                header=file_header, source=self.path
+            ).version
 
             while True:
                 event_header = fh.read(EVENT_HEADER_SIZE)
@@ -150,6 +165,7 @@ class MultiBoardAggregatedEventReader:
                     event_count_max=int(event_count_max),
                     board_chunk_count=int(board_chunk_count),
                     event_body=event_body,
+                    file_version=file_version,
                 )
 
 
@@ -215,14 +231,21 @@ def build_board_packet(record: MultiBoardChunkRecord) -> bytes:
         feature_record_length = record.feature_len // record.hit_count
     else:
         feature_record_length = 0
-    header = bytearray(20)
+    has_fine = bool(record.board_flags & BOARD_FLAG_HAS_FINE)
+    header_bytes = 28 if has_fine else 20
+    header = bytearray(header_bytes)
     header[0:3] = b"\xFF\xFE\x01"
     header[3] = record.mode & 0xFF
     header[4:8] = int(record.event_count).to_bytes(4, "big", signed=False)
     header[8:16] = int(record.timestamp).to_bytes(8, "big", signed=False)
     header[16:18] = int(record.hit_mask).to_bytes(2, "big", signed=False)
     header[18] = int(feature_record_length) & 0xFF
-    header[19] = 0
+    if has_fine:
+        header[19] = 1  # frame format version: fine fields follow
+        header[20:24] = int(record.crossing_fine).to_bytes(4, "big", signed=False)
+        header[24:28] = int(record.accept_fine).to_bytes(4, "big", signed=False)
+    else:
+        header[19] = 0
     return bytes(header) + record.feature_bytes + record.waveform_bytes
 
 
@@ -258,6 +281,10 @@ def board_to_json_dict(
         "hit_mask": decoded.hit_mask,
         "hit_mask_hex": f"0x{decoded.hit_mask:04X}",
         "feature_record_length": decoded.feature_record_length,
+        "format_version": decoded.format_version,
+        "crossing_fine": decoded.crossing_fine,
+        "accept_fine": decoded.accept_fine,
+        "delta_fine": decoded.delta_fine,
         "channels": decoded.channels,
         "feature_records": [
             {
@@ -289,12 +316,14 @@ def read_available_tail_events(
         header_read=state.header_read,
     )
     header: MultiBoardFileHeader | None = None
+    file_version = AGGREGATE_FORMAT_VERSION_V1
     if not current_state.header_read:
         if file_size < FILE_HEADER_SIZE:
             return MultiBoardTailReadResult(state=current_state, events=[])
         with source.open("rb") as fh:
             header_bytes = fh.read(FILE_HEADER_SIZE)
         header = _parse_file_header(header=header_bytes, source=source)
+        file_version = header.version
         current_state.header_read = True
         current_state.offset = FILE_HEADER_SIZE
 
@@ -354,6 +383,7 @@ def read_available_tail_events(
                     event_count_max=int(event_count_max),
                     board_chunk_count=int(board_chunk_count),
                     event_body=event_body,
+                    file_version=file_version,
                 )
             )
             current_state.offset += record_bytes
@@ -404,8 +434,14 @@ def _build_event_record(
     event_count_max: int,
     board_chunk_count: int,
     event_body: bytes,
+    file_version: int,
 ) -> MultiBoardEventRecord:
-    boards = _parse_board_chunks(event_body=event_body, source_file=source_file, board_chunk_count=board_chunk_count)
+    boards = _parse_board_chunks(
+        event_body=event_body,
+        source_file=source_file,
+        board_chunk_count=board_chunk_count,
+        file_version=file_version,
+    )
     return MultiBoardEventRecord(
         source_file=source_file,
         event_kind=event_kind,
@@ -427,30 +463,58 @@ def _parse_board_chunks(
     event_body: bytes,
     source_file: Path,
     board_chunk_count: int,
+    file_version: int,
 ) -> list[MultiBoardChunkRecord]:
     boards: list[MultiBoardChunkRecord] = []
     offset = 0
+    if file_version >= AGGREGATE_FORMAT_VERSION_V2:
+        chunk_format = BOARD_HEADER_FMT_V2
+        chunk_size = BOARD_HEADER_SIZE_V2
+    else:
+        chunk_format = BOARD_HEADER_FMT
+        chunk_size = BOARD_HEADER_SIZE
     for _board_index in range(board_chunk_count):
-        chunk_header = event_body[offset : offset + BOARD_HEADER_SIZE]
-        if len(chunk_header) != BOARD_HEADER_SIZE:
+        chunk_header = event_body[offset : offset + chunk_size]
+        if len(chunk_header) != chunk_size:
             raise MultiBoardDecodeError(
                 f"Truncated board header in '{source_file}'."
             )
-        (
-            board_record_bytes,
-            board_header_bytes,
-            board_id,
-            board_flags,
-            board_event_count,
-            board_timestamp,
-            mode,
-            hit_mask,
-            hit_count,
-            feature_size,
-            feature_len,
-            waveform_len,
-            recv_unix_ns,
-        ) = struct.unpack(BOARD_HEADER_FMT, chunk_header)
+        if chunk_format is BOARD_HEADER_FMT_V2:
+            (
+                board_record_bytes,
+                board_header_bytes,
+                board_id,
+                board_flags,
+                board_event_count,
+                board_timestamp,
+                mode,
+                hit_mask,
+                hit_count,
+                feature_size,
+                feature_len,
+                waveform_len,
+                recv_unix_ns,
+                crossing_fine,
+                accept_fine,
+            ) = struct.unpack(chunk_format, chunk_header)
+        else:
+            (
+                board_record_bytes,
+                board_header_bytes,
+                board_id,
+                board_flags,
+                board_event_count,
+                board_timestamp,
+                mode,
+                hit_mask,
+                hit_count,
+                feature_size,
+                feature_len,
+                waveform_len,
+                recv_unix_ns,
+            ) = struct.unpack(chunk_format, chunk_header)
+            crossing_fine = 0
+            accept_fine = 0
         board_record_bytes = int(board_record_bytes)
         board_header_bytes = int(board_header_bytes)
         if board_record_bytes < board_header_bytes:
@@ -485,6 +549,8 @@ def _parse_board_chunks(
                 recv_unix_ns=int(recv_unix_ns),
                 feature_bytes=board_body[:feature_len],
                 waveform_bytes=board_body[feature_len:],
+                crossing_fine=int(crossing_fine),
+                accept_fine=int(accept_fine),
             )
         )
         offset += board_record_bytes

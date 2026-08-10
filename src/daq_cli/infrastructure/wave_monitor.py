@@ -12,6 +12,7 @@ from typing import Iterator
 from importlib import resources
 
 from daq_cli.domain.device import DeviceConfig
+from daq_cli.infrastructure.tcp_sent_protocol import header_bytes_for
 
 DEFAULT_MULTI_BOARD_VIEWER_QUEUE_MIN_SIZE = 16
 DEFAULT_MULTI_BOARD_VIEWER_QUEUE_PER_BOARD = 8
@@ -314,8 +315,12 @@ class LiveWaveMonitorSource(BaseWaveMonitorSource):
             raise WaveMonitorError(
                 f"Expected send_mode=1 for full-waveform monitoring, got {send_mode}."
             )
+        # Frame format version lives in header byte 19: 0 = legacy 20-byte
+        # header, >=1 = 28-byte header (fine fields ignored by the viewer).
+        format_version = buffer[19]
+        header_bytes = header_bytes_for(format_version)
         payload_bytes = 16 * self._adc_length * 4
-        frame_bytes = 20 + payload_bytes
+        frame_bytes = header_bytes + payload_bytes
         if len(buffer) < frame_bytes:
             return None
         raw = bytes(buffer[:frame_bytes])
@@ -324,7 +329,7 @@ class LiveWaveMonitorSource(BaseWaveMonitorSource):
         timestamp = int.from_bytes(raw[8:16], byteorder="big", signed=False)
         hit_mask = int.from_bytes(raw[16:18], byteorder="big", signed=False)
         channels = [[] for _ in range(16)]
-        payload = raw[20:]
+        payload = raw[header_bytes:]
         offset = 0
         for _sample_index in range(self._adc_length):
             for channel_index in range(16):

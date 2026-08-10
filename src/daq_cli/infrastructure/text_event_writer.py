@@ -68,6 +68,10 @@ def format_single_event_text(
         f"event_count={event.event_count}",
         f"timestamp={event.timestamp}",
         f"hit_mask=0x{event.hit_mask:04X}",
+        f"format_version={event.format_version}",
+        f"crossing_fine={event.crossing_fine}",
+        f"accept_fine={event.accept_fine}",
+        f"delta_fine={event.delta_fine}",
         f"raw_packet_bytes={event.raw_packet_bytes}",
         "",
         f"[board {device_name}]",
@@ -119,6 +123,10 @@ def format_multi_event_text(payload: dict[str, object]) -> str:
                 f"event_count={board.get('event_count', 0)}",
                 f"timestamp={board.get('timestamp', 0)}",
                 f"hit_mask={board.get('hit_mask_hex', '0x0000')}",
+                f"format_version={board.get('format_version', 0)}",
+                f"crossing_fine={board.get('crossing_fine', 0)}",
+                f"accept_fine={board.get('accept_fine', 0)}",
+                f"delta_fine={board.get('delta_fine', 0)}",
             ]
         )
         feature_records = board.get("feature_records", [])

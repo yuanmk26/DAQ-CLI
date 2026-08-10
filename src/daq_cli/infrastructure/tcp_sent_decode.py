@@ -7,8 +7,10 @@ from pathlib import Path
 from daq_cli.infrastructure.tcp_sent_protocol import (
     ADC_LENGTH,
     FEATURE_BYTES,
+    FORMAT_VERSION_FINE,
+    FORMAT_VERSION_LEGACY,
     FRAME_PREFIX,
-    HEADER_BYTES,
+    header_bytes_for,
     frame_total_size,
 )
 
@@ -33,6 +35,21 @@ class DecodedTcpSentEvent:
     channels: list[list[int] | None]
     feature_records: list[TcpSentFeatureRecord]
     raw_packet_bytes: int
+    format_version: int = FORMAT_VERSION_LEGACY
+    crossing_fine: int | None = None
+    accept_fine: int | None = None
+
+    @property
+    def delta_fine(self) -> int | None:
+        """accept_fine - crossing_fine (200M counts, x5 = ns, wrap-safe).
+
+        Only meaningful when both fine fields are present (28-byte frames).
+        Unsigned subtraction is always correct across the 32-bit counter
+        rollover; see FDU-ADC-250M-16ch/docs/delta_fine_timestamp.md.
+        """
+        if self.crossing_fine is None or self.accept_fine is None:
+            return None
+        return (self.accept_fine - self.crossing_fine) & 0xFFFFFFFF
 
     def to_json_dict(self) -> dict[str, object]:
         return {
@@ -55,6 +72,10 @@ class DecodedTcpSentEvent:
                 for record in self.feature_records
             ],
             "raw_packet_bytes": self.raw_packet_bytes,
+            "format_version": self.format_version,
+            "crossing_fine": self.crossing_fine,
+            "accept_fine": self.accept_fine,
+            "delta_fine": self.delta_fine,
         }
 
 
@@ -83,9 +104,9 @@ def decode_tcp_sent_packet(
     expected_send_mode: int | None = None,
     adc_length: int = ADC_LENGTH,
 ) -> DecodedTcpSentEvent:
-    if len(packet) < HEADER_BYTES:
+    if len(packet) < 20:
         raise TcpSentDecodeError(
-            f"Packet '{source_file}' is shorter than {HEADER_BYTES} bytes."
+            f"Packet '{source_file}' is shorter than the 20-byte base header."
         )
     if packet[:3] != FRAME_PREFIX:
         raise TcpSentDecodeError(
@@ -103,10 +124,21 @@ def decode_tcp_sent_packet(
             f"send_mode {expected_send_mode}."
         )
 
+    # Frame format version lives in header byte 19: 0 = legacy 20-byte header,
+    # >=1 = 28-byte header with crossing_fine/accept_fine payload.
+    format_version = packet[19]
+    header_bytes = header_bytes_for(format_version)
+
     event_count = int.from_bytes(packet[4:8], byteorder="big", signed=False)
     timestamp = int.from_bytes(packet[8:16], byteorder="big", signed=False)
     hit_mask = int.from_bytes(packet[16:18], byteorder="big", signed=False)
     feature_record_length = packet[18]
+    if format_version >= FORMAT_VERSION_FINE:
+        crossing_fine = int.from_bytes(packet[20:24], byteorder="big", signed=False)
+        accept_fine = int.from_bytes(packet[24:28], byteorder="big", signed=False)
+    else:
+        crossing_fine = None
+        accept_fine = None
     hit_channels = _hit_channels(hit_mask)
     hit_count = len(hit_channels)
 
@@ -127,14 +159,16 @@ def decode_tcp_sent_packet(
         hit_count=hit_count,
         adc_length=adc_length,
         feature_bytes=FEATURE_BYTES,
+        format_version=format_version,
     )
     if len(packet) != expected_bytes:
         raise TcpSentDecodeError(
             f"Packet '{source_file}' has {len(packet)} bytes, expected {expected_bytes} "
-            f"for send_mode {send_mode} with hit_count {hit_count}."
+            f"for send_mode {send_mode} with hit_count {hit_count} and format "
+            f"version {format_version}."
         )
 
-    offset = HEADER_BYTES
+    offset = header_bytes
     feature_records: list[TcpSentFeatureRecord] = []
     if send_mode in {2, 3}:
         for _ in range(hit_count):
@@ -183,6 +217,9 @@ def decode_tcp_sent_packet(
         channels=channels,
         feature_records=feature_records,
         raw_packet_bytes=len(packet),
+        format_version=format_version,
+        crossing_fine=crossing_fine,
+        accept_fine=accept_fine,
     )
 
 

@@ -34,7 +34,8 @@ from rbcp import Rbcp, RbcpError  # type: ignore
 
 
 FORMAT_NAME = "FDU_ADC_AGGR"
-FORMAT_VERSION = 1
+# v2: board chunks carry crossing_fine / accept_fine (28-byte wire frames)
+FORMAT_VERSION = 2
 FILE_MAGIC = b"FDUAGGR1"
 
 DEFAULT_ADC_LENGTH = 64
@@ -68,6 +69,7 @@ EVENT_FLAG_EVENT_COUNT_MISMATCH = 1 << 3
 BOARD_FLAG_HAS_FEATURE = 1 << 0
 BOARD_FLAG_HAS_WAVEFORM = 1 << 1
 BOARD_FLAG_TCP_RECONNECTED_BEFORE_FRAME = 1 << 2
+BOARD_FLAG_HAS_FINE = 1 << 3  # frame carried a 28-byte header (fine fields)
 
 MODE_HIT_WAVEFORM = 0
 MODE_FULL_WAVEFORM = 1
@@ -76,7 +78,7 @@ MODE_HIT_FEATURE_WAVEFORM = 3
 
 FILE_HEADER_FMT = "<8sHHIQIII"
 EVENT_HEADER_FMT = "<IHHQQQQIIIIQQ"
-BOARD_HEADER_FMT = "<IHHIIQHHHHIIQ"
+BOARD_HEADER_FMT = "<IHHIIQHHHHIIQII"  # v2: + crossing_fine, accept_fine
 INDEX_ENTRY_FMT = "<QQQIIII"
 
 
@@ -249,6 +251,9 @@ class Frame:
     recv_unix_ns: int
     crossing_fine: int = 0
     accept_fine: int = 0
+    # daq-cli divergence: records the wire frame format version (byte 19) so
+    # the aggregated writer can preserve 20-byte vs 28-byte framing.
+    format_version: int = 0
     reconnect_mark: bool = False
 
     @property
@@ -546,6 +551,8 @@ class FrameParser:
                 False,
             )
 
+        # legacy 16-byte (0xFFFF magic) frames are format version 0 by default
+
         if len(buffer) >= 3 and buffer[0] == 0xFF and buffer[1] == 0xFE and buffer[2] == 0x01:
             # NOTE: daq-cli divergence from upstream (unconditional 28-byte
             # header): discriminate by frame format version (byte 19) so mixed
@@ -608,6 +615,7 @@ class FrameParser:
                     recv_unix_ns=now_unix_ns(),
                     crossing_fine=crossing_fine,
                     accept_fine=accept_fine,
+                    format_version=format_version,
                     reconnect_mark=reconnect_mark,
                 ),
                 False,
@@ -662,6 +670,8 @@ class DataWriter:
             board_flags |= BOARD_FLAG_HAS_WAVEFORM
         if frame.reconnect_mark:
             board_flags |= BOARD_FLAG_TCP_RECONNECTED_BEFORE_FRAME
+        if frame.format_version >= 1:
+            board_flags |= BOARD_FLAG_HAS_FINE
 
         feature_len = len(frame.feature_bytes)
         waveform_len = len(frame.waveform_bytes)
@@ -682,6 +692,8 @@ class DataWriter:
             feature_len,
             waveform_len,
             frame.recv_unix_ns,
+            frame.crossing_fine,
+            frame.accept_fine,
         )
         return payload + frame.feature_bytes + frame.waveform_bytes
 
