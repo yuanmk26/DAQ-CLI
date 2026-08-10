@@ -49,14 +49,16 @@
 `script/multi_board_acquire.py` 的差异仅约 30 行（不含注释），同步内容：
 
 - `Frame` dataclass 增加 `crossing_fine: int = 0` / `accept_fine: int = 0`
-- `FrameParser.parse_one`：`FF FE 01` 路径 `header_bytes` 20 → 28，解析
+- `FrameParser.parse_one`：`FF FE 01` 路径支持 28B 头，解析
   `crossing_fine = u32(header, 20)` / `accept_fine = u32(header, 24)`
 - 同步后 legacy 多板采集（`legacy_multi_capture_runner.py` 经 importlib 加载此
   模块）立即获得 28B 帧支持
 
-**同步策略**：与上游保持函数级一致；`FrameParser` 例外——daq-cli 侧保留
-version 判别（byte 19）而非上游的无条件 28B（见 §7 设计决策 D2），diff 控制在
-几十行内。同步后跑 `tests/test_multi_wave_watch.py` 回归。
+**同步策略**：与上游函数级一致，但 `FrameParser` 采用 **version 判别**（先读
+20 字节、按 byte 19 决定是否再读 8 字节）而非上游的无条件 28B——上游文档
+`delta_fine_timestamp.md` §9 本身建议按 byte 19 区分，且判别逻辑可防止
+**新旧固件混用时旧板帧被误解析**。与上游的差异以注释标注，控制在 ~10 行内，
+每次同步时按注释点合并。同步后跑 `tests/test_multi_wave_watch.py` 回归。
 
 ### A1. `src/daq_cli/infrastructure/tcp_sent_protocol.py`
 
@@ -97,7 +99,15 @@ version 判别（byte 19）而非上游的无条件 28B（见 §7 设计决策 D
 
 - `src/daq_cli/infrastructure/adapters/legacy_capture_runner.py`（live
   single 采集 watch 路径，~830-880 行）：`_fill(HEADER_BYTES)` / `MODE2_MAGIC`
-  / `frame_total_size` 调用全部改为 version 判别（先读 byte 19 定头长）
+  / `frame_total_size` 调用全部改为 version 判别（先读 20 字节、按 byte 19
+  定头长）
+- `src/daq_cli/infrastructure/wave_monitor.py`（`daq monitor wave` live 路径，
+  `_try_parse_frame` ~296-311 行）：**硬编码 `20`**（`len(buffer) < 20`、
+  `frame_bytes = 20 + payload_bytes`、`payload = raw[20:]`）→ 改为按 byte 19
+  判别、支持 28B 头，否则新固件下每帧少读 8 字节、波形偏移
+- `legacy_multi_capture_runner.py` live watch 传递链（显式）：vendor
+  `FrameParser` 解析出的 fine 字段 → `build_board_packet`（A3 已支持透传）→
+  原生解码器 → 查看器/文本输出。**fine 字段必须跨过 packet 重建这一跳**
 - `src/daq_cli/infrastructure/text_event_writer.py`：TXT 事件增加
   `format_version` / `crossing_fine` / `accept_fine` / `delta_fine` 行
 - JSON 输出（decode_service / acquire_service）自动随 A2 的 to_json_dict 生效
@@ -166,6 +176,9 @@ version 判别（byte 19）而非上游的无条件 28B（见 §7 设计决策 D
 
 ## 5. 阶段 C（选做）：TCM 板触发联动配置（FDU-TCM 0x20~0x25）
 
+> **前提条件**：TCM v2 固件（`5550276`）先通过板级联调验证（TCM 仓库测试
+> 指南中的单板/联调用例全部通过）后才启动本阶段；避免基于未验证固件开发。
+
 | 地址 | 内容 |
 | --- | --- |
 | `0x20` | TRG_CTRL（bit0 使能，bit1 清 sticky） |
@@ -185,6 +198,7 @@ version 判别（byte 19）而非上游的无条件 28B（见 §7 设计决策 D
 - `docs/firmware-compatibility.md`：28B 帧格式、0x45~0x6C、0x20~0x25、
   `Trigger_model=9`、Δfine 语义更新
 - `docs/usage.md`：两个新命令 + TCM 链路联调流程（含 TP 标定提示）
+- `README.md`：命令列表随新命令同步更新（现有列表会过期）
 - `profiles/example.yaml` / 模板：可选 `defaults.tcm_link` 配置段（阈值/掩码/
   极性默认值）
 - `CLAUDE.md`：命令表、固件契约段更新
@@ -196,7 +210,7 @@ version 判别（byte 19）而非上游的无条件 28B（见 §7 设计决策 D
 | # | 决策 | 理由 |
 | --- | --- | --- |
 | D1 | 帧版本按 **byte 19** 判别（0=20B 头，1=28B 头） | 固件文档明确定义（`>=1 时 byte 20..27 有效`），与 `delta_fine_timestamp.md` §9 一致；旧帧 byte 19 恒为 0，判别无歧义 |
-| D2 | 原生解码器（A1/A2）与 vendor 脚本（A0）的 version 处理**刻意不同**：原生支持 v0/v1 双版本，vendor 与上游对齐为无条件 28B | 原生解码器要解码历史 capture 文件（向后兼容）；vendor 脚本跟上游同步成本最低，采集路径由固件配套（旧固件不配合新脚本，可接受） |
+| D2 | 原生解码器（A1/A2）与 vendor 脚本（A0）**统一按 byte 19 做 version 判别**，都支持 v0/v1 双版本；与上游（无条件 28B）的差异以注释标注 | 过渡期新旧固件可能混用（TCM 触发链路逐步烧录），无条件 28B 会让旧板帧被误解析；固件侧文档 §9 本身建议按 byte 19 区分。代价是每次同步上游时多一个 ~10 行的手动合并点 |
 | D3 | 聚合格式升级为 v2（BOARD chunk 加 2×u32 fine 字段），读取端兼容 v1 | fine 字段在聚合时是有效数据，不应丢失；版本号字段已存在，升级无破坏 |
 | D4 | TCM 链路用独立子命令 `tcm-link-show` / `tcm-link-config` | `daq board config` 已有 4 个 step 开关 + 8 个选项，再加 6 个会失控；独立命令职责清晰 |
 | D5 | `--thr` 支持单值广播或 16 值列表 | 与 sipm_trigger_setup.py 行为一致（测试脚本已获认可） |
@@ -205,7 +219,7 @@ version 判别（byte 19）而非上游的无条件 28B（见 §7 设计决策 D
 
 | 风险 | 影响 | 缓解 |
 | --- | --- | --- |
-| 旧固件板子 + 新软件采集 | live 采集解析错乱 | A2/A4 双版本判别；vendor 路径 D2 已说明，单板采集 watch 路径保留判别 |
+| 旧固件板子 + 新软件采集（过渡期混用） | live 采集解析错乱 | 所有实时/离线路径（A2/A4/vendor）统一 byte 19 判别，新旧固件帧均可解析 |
 | 老 capture 文件 / 老 .aggr 文件不可读 | 历史数据丢失 | 原生解码双版本 + 聚合 v1 兼容读取 |
 | vendor 脚本与上游漂移 | 后续同步困难 | 同步后 diff 控制在几十行，CHANGELOG 记录同步基线提交 |
 | 28B 帧长的 mode 1（28+4096）超大帧 | 无，现有缓冲逻辑按 total_bytes 分配 | 不涉及 |
