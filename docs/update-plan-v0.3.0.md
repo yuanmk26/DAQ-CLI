@@ -47,6 +47,16 @@ monitor_service / tcm_service / telemetry_service），application/infrastructur
 - 采集进度：`capture_single` 已有 `progress_callback`
   （`acquire_service.py`）——回调发生在工作线程，转 queue 再经 after 更新
   进度条
+- **后端选择顺序（硬约束）**：`cli/gui.py` 入口必须在**任何
+  `import matplotlib.pyplot` 之前**调用 `matplotlib.use("TkAgg")`——
+  `wave_monitor_viewer.py` 模块顶部就 import pyplot，一旦被 import 后端就
+  锁死，无法再改
+- **波形循环复用纯函数层，不调用阻塞入口**：复用 `WaveMonitorFigure.update` /
+  `_advance_loop_state` / `_drain_latest_frame`（by `after()` 驱动），
+  **不要**调用 `run_wave_monitor_viewer` / `run_multi_board_wave_viewer`
+  （它们是 `plt.ion()` + `plt.pause()` 的阻塞循环）
+- 每 tab 单操作互斥：运行时禁用该 tab 按钮；跨 tab 并发（如 live 监视持
+  send_mode=1 时再跑 board config）记日志提示，不强制阻止
 
 ### 2.3 主窗口布局
 
@@ -65,16 +75,23 @@ monitor_service / tcm_service / telemetry_service），application/infrastructur
 ```
 
 界面文案用中文（实验操作员使用），控件命名遵循 CLI 选项语义。
+**全局字体必须显式设置** `("Microsoft YaHei", 9)`（tkinter 默认字体不含
+中文字形，否则中文显示为豆腐块）。
 
 ## 3. 组件清单
 
 ### G0. 入口与骨架
 
-- `cli/gui.py`：`daq gui [--profile PATH]` 命令
+- `cli/gui.py`：`daq gui [--profile PATH]` 命令；**第一个动作**是
+  `matplotlib.use("TkAgg")`（在任何 presentation import 之前）
 - `gui/app.py`：主窗口、profile 加载（文件对话框/命令行参数）、Notebook、
-  共享日志面板、关闭时清理后台线程（stop_event 模式）
+  共享日志面板（**行数上限**，截断保留尾部，防长 capture log 撑爆）、
+  关闭时清理后台线程（stop_event 模式）；**重新加载 profile 时刷新所有
+  tab 的下拉（设备/组/TCM）并清空结果区**
 - `gui/threads.py`：`run_in_background(fn, on_done)` 封装——线程执行 +
-  结果/异常入队 + `after()` 轮询回调 GUI 线程；提供取消信号
+  结果/异常入队 + 轮询回调 GUI 线程；提供取消信号。**模块不 import
+  tkinter**，通过注入的 `schedule(callback)`（=root.after）调度，保证可
+  单测
 
 ### G1. 板卡 tab（对应 `daq board *`）
 
@@ -95,9 +112,11 @@ monitor_service / tcm_service / telemetry_service），application/infrastructur
   摘要 + 输出目录
 - 多板：组、聚合 key（timestamp/event_count）、匹配窗口、TCM 无 ack 放行、
   输出开关、`capture_multi` → busy 指示 + 结果摘要（complete/partial 事件
-  数）（multi 无 progress 回调，见 §3.5 可选增强）
-- 运行中按钮变"停止"（stop_event 尽力取消；capture 是阻塞的，停止=关闭
-  后不阻塞 UI，运行完自然结束）
+  数）（multi 无 progress 回调，见 §3.5 可选增强）；**GUI 里固定关 watch**
+  （`watch_waveforms=False`，否则 runner 会自己弹出独立 matplotlib 窗口，
+  波形走监视 tab）
+- 运行中按钮变"停止"：capture 无公开取消 API，停止只禁用控件、后台线程
+  跑完自然结束（诚实语义写进界面提示）
 
 ### G3. 监视 tab（对应 `daq monitor wave` / `multi-demo`）
 
@@ -154,9 +173,15 @@ monitor_service / tcm_service / telemetry_service），application/infrastructur
 | 风险 | 对策 |
 | --- | --- |
 | 长任务冻结 UI | 所有 service 调用走后台线程 + after 轮询 |
-| matplotlib 非 GUI 线程更新崩溃 | 波形渲染只在 after 回调（GUI 线程）执行 |
+| matplotlib 后端锁死/非 GUI 线程更新崩溃 | 入口强制 `matplotlib.use("TkAgg")` 前置；渲染只在 after 回调 |
+| 误用阻塞 viewer 入口卡死主循环 | 只复用纯函数层（update/advance/drain），不调 `run_*_viewer` |
+| 中文显示豆腐块 | 全局字体 Microsoft YaHei |
+| capture 无法真正取消 | 停止=禁用控件等待完成；真取消需 runner 加可选参数（§8） |
+| 同设备并发操作冲突 | 每 tab 单操作互斥；跨 tab 冲突记日志提示 |
+| profile 重载后 tab 数据过期 | 加载按钮统一刷新各 tab 下拉并清结果区 |
+| 长日志撑爆面板 | 日志面板行数上限截断 |
 | capture_multi 无进度回调 | busy 指示 + 最终结果（可选增强见下） |
-| Tk 组件的可测性差 | 逻辑下沉纯函数，窗口薄壳 |
+| Tk 组件的可测性差 | 逻辑下沉纯函数，窗口薄壳；threads.py 不 import tkinter |
 | 关闭窗口时后台线程泄漏 | stop_event + join（带超时）模式复用 |
 
 ## 8. 可选增强（不阻塞主线）
@@ -164,6 +189,8 @@ monitor_service / tcm_service / telemetry_service），application/infrastructur
 - `capture_multi` 增加 `progress_callback`（仿 capture_single 模式，runner
   已写 monitor.jsonl，可在 GUI 尾部轮询展示事件率）——需要 application 层
   小改动，GUI 主线可以先不做
+- capture_single/multi 增加可选 `cancel_event` 参数，让"停止"按钮真正中断
+  采集（runner 内部循环轮询该 event）——需要 infra 层小改动
 
 ## 9. 实施顺序
 
