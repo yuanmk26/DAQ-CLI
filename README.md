@@ -28,6 +28,7 @@ The repository currently contains:
   - `daq acquire single <device>`
   - `daq acquire multi <group>`
   - `daq monitor wave <device>`
+  - `daq-gui [--profile ...]` / `daq gui` — desktop GUI console
 
 Not implemented yet:
 

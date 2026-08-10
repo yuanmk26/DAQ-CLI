@@ -32,7 +32,30 @@ Development environment is Windows (Git Bash / PowerShell):
 CLI surface (`daq --help`): `profile` (show/validate/init),
 `board` (info/sysmon/config/trigger-show/tcp-mode2-show/tcm-link-show/
 tcm-link-config/config-show/reg-read), `tcm` (show/config),
-`acquire` (single/multi), `monitor` (wave/multi-demo), `decode`, `group`.
+`acquire` (single/multi), `monitor` (wave/multi-demo), `decode`, `group`,
+`gui`. A separate `daq-gui` entry point launches the desktop GUI console
+(tkinter).
+
+## GUI console
+
+`src/daq_cli/presentation/gui/` is a thin shell over the application
+services; application/infrastructure layers stay GUI-free.
+
+- `app.py` — main window (profile bar, 4-tab notebook, capped log panel)
+- `threads.py` — background task marshalling, **tkinter-free** (inject
+  `schedule` = `root.after`); unit-tested
+- `formatting.py` — pure result→text and form→service-parameter builders;
+  unit-tested
+- tabs: `boards_tab` / `acquire_tab` / `monitor_tab` / `tcm_tab`
+- **backend ordering constraint**: `daq-gui` (gui_main.py) calls
+  `matplotlib.use("TkAgg")` before any other import, because the CLI import
+  chain (cli/monitor → wave_monitor_viewer) already loads pyplot and locks
+  the backend. Never import pyplot-using modules before the backend is set.
+- the monitor tab reuses `WaveMonitorFigure` + `_advance_loop_state` /
+  `_drain_latest_frame` driven by `root.after` — never call the blocking
+  `run_*_viewer` entry points from the GUI
+- all service calls run in daemon threads; results marshal through queues
+  back to the GUI thread
 
 ## Architecture
 

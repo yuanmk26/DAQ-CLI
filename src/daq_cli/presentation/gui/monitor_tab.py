@@ -151,6 +151,8 @@ class MonitorTab:
     def _poll_frames(self) -> None:
         if self._session is None or self._figure is None or self._canvas is None:
             return
+        if not self.app.root.winfo_exists():
+            return  # window closing; stop rescheduling
         latest_frame = _drain_latest_frame(self._session.frame_queue)
         step_result = _advance_loop_state(
             loop_state=self._loop_state, latest_frame=latest_frame

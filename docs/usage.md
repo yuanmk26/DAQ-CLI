@@ -733,7 +733,47 @@ Mode definitions:
 `SINGLE` here means "wait for the next frame and freeze on it". It does not stop
 hardware acquisition and it is not a hardware single-shot sampling mode.
 
-## 13. Suggested Workflow
+## 13. GUI Console
+
+Since v0.3.0 the desktop GUI console wraps the full CLI surface. It needs no
+new dependencies (tkinter ships with Python on Windows).
+
+Launch it:
+
+```bash
+daq-gui --profile profiles/example.yaml
+```
+
+or from the CLI:
+
+```bash
+daq gui --profile profiles/example.yaml
+```
+
+> Prefer `daq-gui`: it selects the TkAgg matplotlib backend before any other
+> import, which the `daq gui` subcommand cannot guarantee.
+
+The window has four tabs plus a shared log panel at the bottom:
+
+- **板卡**: device dropdown with info / sysmon / trigger-show /
+  tcp-mode2-show / config-show / tcm-link-show buttons, the board config
+  form (step toggles, trigger parameters, thresholds, send-mode), the TCM
+  trigger-link form (mask / polarity / thresholds / debounce / width /
+  enable), and a register reader with hex dump.
+- **采集**: single capture (device, events, timeout, output switches) with a
+  live progress bar, and multi capture (group, aggregation key, match
+  window, no-ack allowance) with a busy indicator and result summary.
+- **监视**: waveform monitor with live / demo / replay sources and
+  RUN / STOP / SINGLE buttons. Stopping the monitor restores the board's
+  original `send_mode`. Use demo or replay to try it without hardware.
+- **TCM**: TCM board trigger-link show (configuration + status: sticky,
+  pending, wide pulse, last trigger channels) and config with readback
+  verification and an optional clear-sticky.
+
+All operations run in background threads; the UI never blocks. The shared
+log panel keeps the last 5000 lines.
+
+## 14. Suggested Workflow
 
 A simple single-board workflow looks like this:
 
@@ -764,7 +804,7 @@ daq board config dev2 --profile profiles/example.yaml
 daq acquire multi two_board --profile profiles/example.yaml
 ```
 
-## 14. Current Limitations
+## 15. Current Limitations
 
 Not implemented yet:
 
@@ -782,7 +822,7 @@ Current technical limitation:
 - cross-board crossing alignment stays at 20M (50ns) precision; the 200M fine
   fields are board-local and must not be compared across boards
 
-## 15. Troubleshooting
+## 16. Troubleshooting
 
 ### Command not found
 
@@ -828,7 +868,7 @@ Check:
 - Whether the dump path passed to `--replay` is readable
 - Whether the board is producing `send_mode = 1` packets after the CLI switches modes
 
-## 16. Related Documents
+## 17. Related Documents
 
 - [Architecture](./architecture.md)
 - [CLI Design](./cli-design.md)

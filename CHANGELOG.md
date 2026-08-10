@@ -6,6 +6,32 @@ Each version is tagged as `v<version>` on the `main` branch. The detailed
 snapshot of the v0.1.x line (commands, firmware contract, architecture,
 release flow) is archived in `docs/version-snapshot-v0.1.4.md`.
 
+## [v0.3.0] - 2026-08-10
+
+Desktop GUI console (tkinter, zero new dependencies) wrapping the full CLI
+surface.
+
+### Added
+
+- `daq-gui` dedicated entry point (selects the TkAgg matplotlib backend
+  before any pyplot import) and a `daq gui` subcommand.
+- Main window: profile bar with file dialog, four-tab notebook, shared
+  capped log panel, clean shutdown of background work.
+- 板卡 tab: info / sysmon / trigger-show / tcp-mode2-show / config-show /
+  tcm-link-show, board config form (steps, trigger params, thresholds,
+  send-mode), TCM link config form, reg-read hex dump.
+- 采集 tab: single capture with live progress bar (progress callback
+  marshalled through a queue), multi capture with busy state and result
+  summary (watch disabled; waveforms belong to the monitor tab).
+- 监视 tab: live / demo / replay waveform monitoring embedded via
+  `FigureCanvasTkAgg`, reusing `WaveMonitorFigure` and the pure loop state
+  machine with RUN/STOP/SINGLE buttons; stopping restores the original
+  `send_mode` through the existing session context.
+- TCM tab: show config + status (sticky / pending / wide pulse / last
+  trigger channels), config with readback verification and clear-sticky.
+- GUI helpers (background task marshalling, result formatting) are
+  tkinter-free pure functions with unit tests (19 new tests).
+
 ## [v0.2.0] - 2026-08-10
 
 Frame format upgrade (28-byte header + fine timestamps) and TCM trigger-link
