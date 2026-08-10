@@ -14,6 +14,8 @@ from daq_cli.presentation.console.printers import (
     print_send_mode_set_result,
     print_board_sysmon,
     print_register_read_result,
+    print_tcm_link_config_read_result,
+    print_tcm_link_config_write_result,
     print_tcp_mode2_config_read_result,
     print_trigger_config_read_result,
 )
@@ -207,6 +209,104 @@ def board_send_mode_set(
         send_mode=mode,
     )
     print_send_mode_set_result(result)
+
+
+def _parse_thr_list(text: str) -> list[int]:
+    """Accept a single threshold value (broadcast) or 16 comma-separated values."""
+    values = [int(item.strip(), 0) for item in text.split(",")]
+    if len(values) == 1:
+        return values * 16
+    if len(values) != 16:
+        raise typer.BadParameter(
+            "--thr needs 1 value (broadcast to 16 channels) or 16 comma-separated values"
+        )
+    return values
+
+
+@app.command("tcm-link-show")
+def board_tcm_link_show(
+    device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
+    profile: RequiredProfileOption = ...,
+) -> None:
+    """Read TCM trigger-link configuration without writing registers."""
+    service = BoardService()
+    result = service.read_tcm_link_config(device_name=device, profile_path=profile)
+    print_tcm_link_config_read_result(result)
+
+
+@app.command("tcm-link-config")
+def board_tcm_link_config(
+    device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
+    mask: Annotated[
+        str | None,
+        typer.Option("--mask", help="Channel mask as decimal or 0x-prefixed hex, e.g. 0x0003."),
+    ] = None,
+    polarity: Annotated[
+        str | None,
+        typer.Option("--polarity", help="Polarity mask, 0=pos (adc>thr), 1=neg (adc<thr)."),
+    ] = None,
+    thr: Annotated[
+        str | None,
+        typer.Option(
+            "--thr",
+            help="Thresholds: single value (broadcast) or 16 comma-separated values.",
+        ),
+    ] = None,
+    debounce: Annotated[
+        int,
+        typer.Option("--debounce", min=0, max=0xFFFF, help="Min pulse interval in 5ns units (default 200 = 1us)."),
+    ] = 200,
+    width: Annotated[
+        int,
+        typer.Option("--width", min=0, max=0xFF, help="M21 pulse width in 5ns units (default 20 = 100ns)."),
+    ] = 20,
+    enable: Annotated[
+        bool,
+        typer.Option("--enable/--disable", help="Enable or disable threshold pulse output."),
+    ] = True,
+    profile: RequiredProfileOption = ...,
+) -> None:
+    """Write TCM trigger-link configuration (0x45..0x6C) and verify by readback."""
+    if mask is None:
+        raise typer.BadParameter(
+            "--mask is required to write the TCM trigger-link configuration"
+        )
+    try:
+        parsed_mask = int(mask, 0)
+    except ValueError as exc:
+        raise typer.BadParameter(
+            f"Invalid --mask '{mask}'. Use decimal or 0x-prefixed hex."
+        ) from exc
+    if parsed_mask < 0 or parsed_mask > 0xFFFF:
+        raise typer.BadParameter("--mask must stay in range 0..0xFFFF")
+    parsed_polarity = 0
+    if polarity is not None:
+        try:
+            parsed_polarity = int(polarity, 0)
+        except ValueError as exc:
+            raise typer.BadParameter(
+                f"Invalid --polarity '{polarity}'. Use decimal or 0x-prefixed hex."
+            ) from exc
+        if parsed_polarity < 0 or parsed_polarity > 0xFFFF:
+            raise typer.BadParameter("--polarity must stay in range 0..0xFFFF")
+    parsed_thr = [0] * 16
+    if thr is not None:
+        parsed_thr = _parse_thr_list(thr)
+        if any(value < 0 or value > 0xFFFF for value in parsed_thr):
+            raise typer.BadParameter("--thr values must stay in range 0..0xFFFF")
+
+    service = BoardService()
+    result = service.configure_tcm_link(
+        device_name=device,
+        profile_path=profile,
+        thresholds=parsed_thr,
+        mask=parsed_mask,
+        polarity=parsed_polarity,
+        debounce=debounce,
+        pulse_width=width,
+        enable=enable,
+    )
+    print_tcm_link_config_write_result(result)
 
 
 @app.command("config-show")

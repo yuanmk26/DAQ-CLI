@@ -212,5 +212,140 @@ class BoardSendModeTests(unittest.TestCase):
         self.assertIn("effective_send_mode", result.output)
 
 
+class TcmLinkTests(unittest.TestCase):
+    def _patched_service(self) -> tuple[BoardService, SimpleNamespace, SimpleNamespace, Mock]:
+        profile = SimpleNamespace(
+            path=Path("profiles/example.yaml"),
+            legacy=SimpleNamespace(project_root=Path("legacy")),
+        )
+        device = SimpleNamespace(name="dev1")
+        adapter = Mock()
+        service = BoardService()
+        profile_patcher = patch.object(service, "_resolve_device", return_value=(profile, device))
+        adapter_patcher = patch.object(service, "_make_adapter", return_value=adapter)
+        return service, profile, device, adapter
+
+    def test_read_tcm_link_config_passes_through(self) -> None:
+        service, profile, device, adapter = self._patched_service()
+        adapter.read_tcm_link_config.return_value = SimpleNamespace(
+            thresholds=[2700] + [0] * 15,
+            mask=0x0003,
+            polarity=0x0002,
+            debounce=200,
+            enable=True,
+            pulse_width=20,
+        )
+        with patch.object(service, "_resolve_device", return_value=(profile, device)), patch.object(service, "_make_adapter", return_value=adapter):
+            result = service.read_tcm_link_config(
+                device_name="dev1", profile_path="profiles/example.yaml"
+            )
+
+        adapter.read_tcm_link_config.assert_called_once_with(device)
+        self.assertEqual(result.mask, 0x0003)
+        self.assertEqual(result.thresholds, [2700] + [0] * 15)
+        self.assertEqual(result.polarity, 0x0002)
+        self.assertEqual(result.debounce, 200)
+        self.assertTrue(result.enable)
+        self.assertEqual(result.pulse_width, 20)
+        self.assertEqual(result.source_profile, profile.path)
+
+    def test_configure_tcm_link_writes_and_reads_back(self) -> None:
+        service, profile, device, adapter = self._patched_service()
+        adapter.read_tcm_link_config.return_value = SimpleNamespace(
+            thresholds=[1800] * 16,
+            mask=0x0001,
+            polarity=0x0001,
+            debounce=200,
+            enable=True,
+            pulse_width=20,
+        )
+        with patch.object(service, "_resolve_device", return_value=(profile, device)), patch.object(service, "_make_adapter", return_value=adapter):
+            result = service.configure_tcm_link(
+                device_name="dev1",
+                profile_path="profiles/example.yaml",
+                thresholds=[1800] * 16,
+                mask=0x0001,
+                polarity=0x0001,
+                debounce=200,
+                pulse_width=20,
+                enable=True,
+            )
+
+        adapter.write_tcm_link_config.assert_called_once()
+        self.assertEqual(result.mask, 0x0001)
+        self.assertTrue(result.enable)
+
+    def test_configure_tcm_link_raises_on_readback_mismatch(self) -> None:
+        service, profile, device, adapter = self._patched_service()
+        adapter.read_tcm_link_config.return_value = SimpleNamespace(
+            thresholds=[1800] * 16,
+            mask=0x0000,  # differs from requested 0x0001
+            polarity=0x0001,
+            debounce=200,
+            enable=True,
+            pulse_width=20,
+        )
+        with patch.object(service, "_resolve_device", return_value=(profile, device)), patch.object(service, "_make_adapter", return_value=adapter):
+            with self.assertRaises(RuntimeError):
+                service.configure_tcm_link(
+                    device_name="dev1",
+                    profile_path="profiles/example.yaml",
+                    thresholds=[1800] * 16,
+                    mask=0x0001,
+                    polarity=0x0001,
+                    debounce=200,
+                    pulse_width=20,
+                    enable=True,
+                )
+
+    def test_cli_tcm_link_config_requires_mask(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [
+                "board",
+                "tcm-link-config",
+                "dev1",
+                "--profile",
+                "profiles/example.yaml",
+            ],
+        )
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("--mask is required", result.output)
+
+    def test_cli_tcm_link_show_invokes_service(self) -> None:
+        runner = CliRunner()
+        service = BoardService()
+        with patch.object(BoardService, "read_tcm_link_config") as read_tcm_link_config:
+            read_tcm_link_config.return_value = SimpleNamespace(
+                device=SimpleNamespace(name="dev1"),
+                source_profile=Path("profiles/example.yaml"),
+                thresholds=[2700, 1800] + [0] * 14,
+                mask=0x0003,
+                polarity=0x0002,
+                debounce=200,
+                enable=True,
+                pulse_width=20,
+            )
+            with patch("daq_cli.cli.board.BoardService", return_value=service):
+                result = runner.invoke(
+                    app,
+                    [
+                        "board",
+                        "tcm-link-show",
+                        "dev1",
+                        "--profile",
+                        "profiles/example.yaml",
+                    ],
+                )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        read_tcm_link_config.assert_called_once_with(
+            device_name="dev1", profile_path=Path("profiles/example.yaml")
+        )
+        self.assertIn("TCM Link Config", result.output)
+        self.assertIn("2700", result.output)
+
+
 if __name__ == "__main__":
     unittest.main()

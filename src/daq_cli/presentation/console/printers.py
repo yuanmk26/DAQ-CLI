@@ -8,6 +8,8 @@ from daq_cli.application.board_service import (
     BoardInfoResult,
     RegisterReadResult,
     SendModeSetResult,
+    TcmLinkConfigReadResult,
+    TcmLinkConfigWriteResult,
     TcpMode2ConfigReadResult,
     TriggerConfigReadResult,
 )
@@ -234,6 +236,67 @@ def print_tcp_mode2_config_read_result(result: TcpMode2ConfigReadResult) -> None
         "hit_polarities",
         ", ".join(str(value) for value in result.hit_polarities),
     )
+    table.add_row("profile", str(result.source_profile))
+    console.print(table)
+
+
+def _tcm_link_table(result: TcmLinkConfigReadResult) -> Table:
+    table = Table(title=f"TCM Link Config: {result.device.name}")
+    table.add_column("Field", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
+
+    enabled_channels = [
+        channel
+        for channel in range(16)
+        if (result.mask >> channel) & 0x1
+    ]
+    table.add_row("mask", f"0x{result.mask:04X} ({len(enabled_channels)} ch)")
+    table.add_row("polarity", f"0x{result.polarity:04X}")
+    table.add_row(
+        "debounce",
+        f"{result.debounce} x 5ns = {result.debounce * 5e-3:.1f} us",
+    )
+    table.add_row("pulse_width", f"{result.pulse_width} x 5ns = {result.pulse_width * 5} ns")
+    table.add_row("enable", str(result.enable))
+    if enabled_channels:
+        for channel in enabled_channels:
+            polarity = "neg" if (result.polarity >> channel) & 0x1 else "pos"
+            table.add_row(
+                f"thr ch{channel:02d}",
+                f"{result.thresholds[channel]} ({polarity})",
+            )
+    table.add_row("profile", str(result.source_profile))
+    return table
+
+
+def print_tcm_link_config_read_result(result: TcmLinkConfigReadResult) -> None:
+    console.print(_tcm_link_table(result))
+
+
+def print_tcm_link_config_write_result(result: TcmLinkConfigWriteResult) -> None:
+    table = Table(title=f"TCM Link Config Written: {result.device.name}")
+    table.add_column("Field", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
+
+    enabled_channels = [
+        channel
+        for channel in range(16)
+        if (result.mask >> channel) & 0x1
+    ]
+    table.add_row("mask", f"0x{result.mask:04X} ({len(enabled_channels)} ch)")
+    table.add_row("polarity", f"0x{result.polarity:04X}")
+    table.add_row(
+        "debounce",
+        f"{result.debounce} x 5ns = {result.debounce * 5e-3:.1f} us",
+    )
+    table.add_row("pulse_width", f"{result.pulse_width} x 5ns = {result.pulse_width * 5} ns")
+    table.add_row("enable", str(result.enable))
+    for channel in enabled_channels:
+        polarity = "neg" if (result.polarity >> channel) & 0x1 else "pos"
+        table.add_row(
+            f"thr ch{channel:02d}",
+            f"{result.thresholds[channel]} ({polarity})",
+        )
     table.add_row("profile", str(result.source_profile))
     console.print(table)
 

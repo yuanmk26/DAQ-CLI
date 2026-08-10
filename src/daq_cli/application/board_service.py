@@ -73,6 +73,30 @@ class SendModeSetResult:
 
 
 @dataclass(slots=True)
+class TcmLinkConfigReadResult:
+    device: DeviceConfig
+    source_profile: Path
+    thresholds: list[int]
+    mask: int
+    polarity: int
+    debounce: int
+    enable: bool
+    pulse_width: int
+
+
+@dataclass(slots=True)
+class TcmLinkConfigWriteResult:
+    device: DeviceConfig
+    source_profile: Path
+    thresholds: list[int]
+    mask: int
+    polarity: int
+    debounce: int
+    enable: bool
+    pulse_width: int
+
+
+@dataclass(slots=True)
 class BoardConfigSummaryResult:
     device: DeviceConfig
     source_profile: Path
@@ -234,6 +258,76 @@ class BoardService:
             device=device,
             source_profile=profile.path,
             send_mode=send_mode,
+        )
+
+    def read_tcm_link_config(
+        self, device_name: str, profile_path: Path | str
+    ) -> TcmLinkConfigReadResult:
+        profile, device = self._resolve_device(device_name, profile_path)
+        adapter = self._make_adapter(profile)
+        raw_result = adapter.read_tcm_link_config(device)
+        return TcmLinkConfigReadResult(
+            device=device,
+            source_profile=profile.path,
+            thresholds=raw_result.thresholds,
+            mask=raw_result.mask,
+            polarity=raw_result.polarity,
+            debounce=raw_result.debounce,
+            enable=raw_result.enable,
+            pulse_width=raw_result.pulse_width,
+        )
+
+    def configure_tcm_link(
+        self,
+        device_name: str,
+        profile_path: Path | str,
+        *,
+        thresholds: list[int],
+        mask: int,
+        polarity: int,
+        debounce: int,
+        pulse_width: int,
+        enable: bool,
+    ) -> TcmLinkConfigWriteResult:
+        """Write the TCM trigger-link configuration and verify by readback."""
+        profile, device = self._resolve_device(device_name, profile_path)
+        adapter = self._make_adapter(profile)
+        adapter.write_tcm_link_config(
+            device,
+            thresholds=thresholds,
+            mask=mask,
+            polarity=polarity,
+            debounce=debounce,
+            pulse_width=pulse_width,
+            enable=enable,
+        )
+        readback = adapter.read_tcm_link_config(device)
+        if (
+            readback.thresholds != thresholds
+            or readback.mask != mask
+            or readback.polarity != polarity
+            or readback.debounce != debounce
+            or readback.pulse_width != pulse_width
+            or readback.enable != enable
+        ):
+            raise RuntimeError(
+                "TCM link write verification failed: requested "
+                f"mask=0x{mask:04X} polarity=0x{polarity:04X} "
+                f"debounce={debounce} width={pulse_width} enable={enable}, "
+                f"read back mask=0x{readback.mask:04X} "
+                f"polarity=0x{readback.polarity:04X} "
+                f"debounce={readback.debounce} width={readback.pulse_width} "
+                f"enable={readback.enable}."
+            )
+        return TcmLinkConfigWriteResult(
+            device=device,
+            source_profile=profile.path,
+            thresholds=readback.thresholds,
+            mask=readback.mask,
+            polarity=readback.polarity,
+            debounce=readback.debounce,
+            enable=readback.enable,
+            pulse_width=readback.pulse_width,
         )
 
     def _make_adapter(self, profile) -> LegacyBoardAdapter:

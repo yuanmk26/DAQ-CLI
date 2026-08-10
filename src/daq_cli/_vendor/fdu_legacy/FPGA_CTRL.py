@@ -148,7 +148,7 @@ class FPGAControl:
 
 
     def trigger_model(self, mode):
-        if mode < 0 or mode > 8:
+        if mode < 0 or mode > 9:
             print("Error: Invalid trigger mode")
             return
         self.rbcp.write(0x10, bytes([mode]))
@@ -170,7 +170,68 @@ class FPGAControl:
             threshold = (high_byte[0] << 8) | low_byte[0]
             thresholds.append(threshold)
         return trigger_model[0], trigger_postion[0], thresholds
-    
+
+    def set_tcm_thresholds(self, thresholds):
+        """配置 TCM 触发链路 16 通道实时过阈阈值（0x45~0x64，高字节在前）。"""
+        if len(thresholds) != 16:
+            print("Error: Incorrect number of TCM threshold values provided")
+            return
+        for i, threshold in enumerate(thresholds):
+            if threshold < 0 or threshold > 0xFFFF:
+                print(f"Error: Invalid TCM threshold for channel {i}")
+                return
+        for i, threshold in enumerate(thresholds):
+            reg_addr = 0x45 + i*2
+            self.rbcp.write(reg_addr, bytes([(threshold >> 8) & 0xFF]))
+            self.rbcp.write(reg_addr + 1, bytes([threshold & 0xFF]))
+
+    def set_tcm_config(self, mask=0, polarity=0, pulse_width=20, debounce=200, enable=True):
+        """配置 TCM 触发链路控制寄存器（0x65~0x6C）。
+
+        mask: 16 位通道掩码，bitN=chN（1=参与过阈脉冲输出）
+        polarity: 16 位极性，bitN=chN（0=正 adc>thr，1=负 adc<thr）
+        pulse_width: M21 脉冲宽度，单位 5ns（默认 20=100ns）
+        debounce: 最小脉冲间隔，单位 5ns（默认 200=1us）
+        enable: 过阈脉冲输出使能
+        """
+        if mask < 0 or mask > 0xFFFF:
+            print("Error: Invalid TCM mask value")
+            return
+        if polarity < 0 or polarity > 0xFFFF:
+            print("Error: Invalid TCM polarity value")
+            return
+        self.rbcp.write(0x65, bytes([(mask >> 8) & 0xFF]))
+        self.rbcp.write(0x66, bytes([mask & 0xFF]))
+        self.rbcp.write(0x67, bytes([(polarity >> 8) & 0xFF]))
+        self.rbcp.write(0x68, bytes([polarity & 0xFF]))
+        self.rbcp.write(0x69, bytes([(debounce >> 8) & 0xFF]))
+        self.rbcp.write(0x6A, bytes([debounce & 0xFF]))
+        self.rbcp.write(0x6C, bytes([pulse_width]))
+        self.rbcp.write(0x6B, bytes([0x01 if enable else 0x00]))
+
+    def read_tcm_config(self):
+        """回读 TCM 触发链路配置。"""
+        thresholds = []
+        for i in range(16):
+            reg_addr = 0x45 + i*2
+            high_byte = self.rbcp.read(reg_addr, 1)
+            low_byte = self.rbcp.read(reg_addr + 1, 1)
+            thresholds.append((high_byte[0] << 8) | low_byte[0])
+        mask_high = self.rbcp.read(0x65, 1)[0]
+        mask_low = self.rbcp.read(0x66, 1)[0]
+        pol_high = self.rbcp.read(0x67, 1)[0]
+        pol_low = self.rbcp.read(0x68, 1)[0]
+        deb_high = self.rbcp.read(0x69, 1)[0]
+        deb_low = self.rbcp.read(0x6A, 1)[0]
+        enable = self.rbcp.read(0x6B, 1)[0]
+        pulse_width = self.rbcp.read(0x6C, 1)[0]
+        return (thresholds,
+                (mask_high << 8) | mask_low,
+                (pol_high << 8) | pol_low,
+                (deb_high << 8) | deb_low,
+                enable & 0x01,
+                pulse_width)
+
 
 # # 实例化FPGAControl对象
 # fpga_ctrl = FPGAControl()

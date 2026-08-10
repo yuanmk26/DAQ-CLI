@@ -56,6 +56,16 @@ class LegacyTcpMode2ReadResult:
     hit_polarities: list[int]
 
 
+@dataclass(slots=True)
+class LegacyTcmLinkReadResult:
+    thresholds: list[int]
+    mask: int
+    polarity: int
+    debounce: int
+    enable: bool
+    pulse_width: int
+
+
 class LegacyBoardAdapter:
     """Thin wrapper around the existing board-control scripts."""
 
@@ -160,6 +170,70 @@ class LegacyBoardAdapter:
         current = self.read_registers(device, 0x42, 1).data[0]
         updated = (current & 0xFC) | (send_mode & 0x03)
         self.write_registers(device, 0x42, bytes([updated]))
+
+    def read_tcm_link_config(self, device: DeviceConfig) -> LegacyTcmLinkReadResult:
+        """Read the TCM trigger-link registers (0x45..0x6C) without writing."""
+        with temporary_sys_path(self._script_dir), device_environment(device):
+            clear_legacy_modules()
+            fpga_ctrl_module = importlib.import_module("FPGA_CTRL")
+            controller = fpga_ctrl_module.FPGAControl()
+            (
+                thresholds,
+                mask,
+                polarity,
+                debounce,
+                enable,
+                pulse_width,
+            ) = controller.read_tcm_config()
+            return LegacyTcmLinkReadResult(
+                thresholds=[int(value) for value in thresholds],
+                mask=int(mask),
+                polarity=int(polarity),
+                debounce=int(debounce),
+                enable=bool(enable & 0x01),
+                pulse_width=int(pulse_width),
+            )
+
+    def write_tcm_link_config(
+        self,
+        device: DeviceConfig,
+        *,
+        thresholds: list[int],
+        mask: int,
+        polarity: int,
+        debounce: int,
+        pulse_width: int,
+        enable: bool,
+    ) -> None:
+        """Write the TCM trigger-link configuration (0x45..0x6C).
+
+        Thresholds/mask/polarity are written before the enable bit so the
+        pulse output is only activated once everything is in place.
+        """
+        if len(thresholds) != 16:
+            raise ValueError("TCM link needs exactly 16 channel thresholds")
+        if any(value < 0 or value > 0xFFFF for value in thresholds):
+            raise ValueError("TCM link thresholds must stay in range 0..0xFFFF")
+        if mask < 0 or mask > 0xFFFF:
+            raise ValueError("TCM link mask must stay in range 0..0xFFFF")
+        if polarity < 0 or polarity > 0xFFFF:
+            raise ValueError("TCM link polarity must stay in range 0..0xFFFF")
+        if debounce < 0 or debounce > 0xFFFF:
+            raise ValueError("TCM link debounce must stay in range 0..0xFFFF")
+        if pulse_width < 0 or pulse_width > 0xFF:
+            raise ValueError("TCM link pulse width must stay in range 0..0xFF")
+        with temporary_sys_path(self._script_dir), device_environment(device):
+            clear_legacy_modules()
+            fpga_ctrl_module = importlib.import_module("FPGA_CTRL")
+            controller = fpga_ctrl_module.FPGAControl()
+            controller.set_tcm_thresholds(thresholds)
+            controller.set_tcm_config(
+                mask=mask,
+                polarity=polarity,
+                pulse_width=pulse_width,
+                debounce=debounce,
+                enable=enable,
+            )
 
     @contextmanager
     def _patched_trigger_behavior(
