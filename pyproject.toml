@@ -17,6 +17,7 @@ dependencies = [
 
 [project.scripts]
 daq = "daq_cli.main:main"
+daq-gui = "daq_cli.gui_main:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
