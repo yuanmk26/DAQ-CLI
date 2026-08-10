@@ -60,6 +60,59 @@ class MultiWaveWatchTests(unittest.TestCase):
         self.assertIsNotNone(decoded.channels[1])
         self.assertIsNone(decoded.channels[2])
 
+    def test_legacy_frame_round_trips_fine_frame_to_v1_packet(self) -> None:
+        frame = _build_legacy_frame(mode=1, hit_mask=0x00FF, event_count=12, timestamp=3456)
+        frame.format_version = 1
+        frame.crossing_fine = 0xCAFE0000
+        frame.accept_fine = 0xCAFE0064
+        packet = _legacy_frame_to_tcp_sent_packet(frame)
+        decoded = decode_tcp_sent_packet(packet, source_file=Path("sample.bin"))
+
+        self.assertEqual(decoded.format_version, 1)
+        self.assertEqual(decoded.crossing_fine, 0xCAFE0000)
+        self.assertEqual(decoded.accept_fine, 0xCAFE0064)
+        self.assertEqual(decoded.delta_fine, 100)
+
+    def test_vendored_frame_parser_discriminates_frame_versions(self) -> None:
+        from daq_cli.infrastructure.adapters.legacy_runtime import (
+            bundled_legacy_script_dir,
+            temporary_sys_path,
+        )
+        from daq_cli.infrastructure.tcp_sent_protocol import FORMAT_VERSION_FINE
+        from daq_cli.infrastructure.tcp_sent_decode import decode_tcp_sent_packet
+        from daq_cli.infrastructure.multi_board_decode import build_board_packet
+        import types as _types
+
+        fine_packet = _build_tcp_sent_packet_v2(
+            1, 0x00FF, 21, format_version=1,
+            crossing_fine=0x100, accept_fine=0x180,
+        )
+        legacy_packet = _build_tcp_sent_packet_v2(1, 0x00FF, 21)
+
+        with temporary_sys_path(bundled_legacy_script_dir()):
+            import multi_board_acquire as mba
+
+            board = mba.BoardConfig(
+                board_id=0, name="dev1", ip="192.168.10.10", tcp_port=24,
+            )
+            parser = mba.FrameParser(adc_length=64)
+
+            fine_buffer = bytearray(fine_packet)
+            fine_frame, desync = parser.parse_one(fine_buffer, board, False)
+            self.assertFalse(desync)
+            self.assertIsNotNone(fine_frame)
+            self.assertEqual(fine_frame.format_version, FORMAT_VERSION_FINE)
+            self.assertEqual(fine_frame.crossing_fine, 0x100)
+            self.assertEqual(fine_frame.accept_fine, 0x180)
+
+            legacy_buffer = bytearray(legacy_packet)
+            legacy_frame, desync = parser.parse_one(legacy_buffer, board, False)
+            self.assertFalse(desync)
+            self.assertIsNotNone(legacy_frame)
+            self.assertEqual(legacy_frame.format_version, 0)
+            self.assertEqual(legacy_frame.crossing_fine, 0)
+            self.assertEqual(legacy_frame.accept_fine, 0)
+
     def test_watch_publisher_samples_every_nth_frame_per_board(self) -> None:
         task_queue: queue.Queue = queue.Queue(maxsize=4)
         publisher = _MultiBoardWatchPublisher(
@@ -591,6 +644,9 @@ def _build_legacy_frame(mode: int, hit_mask: int, event_count: int, timestamp: i
         board_name="dev1",
         board_ip="192.168.10.10",
         mode=mode,
+        format_version=0,
+        crossing_fine=0,
+        accept_fine=0,
         event_count=event_count,
         timestamp=timestamp,
         hit_mask=hit_mask,
@@ -607,6 +663,54 @@ def _bit_count(value: int) -> int:
         count += value & 1
         value >>= 1
     return count
+
+
+def _build_tcp_sent_packet_v2(
+    send_mode: int,
+    hit_mask: int,
+    event_count: int,
+    format_version: int = 0,
+    crossing_fine: int = 0,
+    accept_fine: int = 0,
+) -> bytes:
+    hit_channels = [channel for channel in range(16) if (hit_mask >> channel) & 0x1]
+    hit_count = len(hit_channels)
+    has_fine = format_version >= 1
+    header = bytearray(28 if has_fine else 20)
+    header[:3] = b"\xFF\xFE\x01"
+    header[3] = send_mode
+    header[4:8] = event_count.to_bytes(4, byteorder="big", signed=False)
+    header[8:16] = (event_count * 12345).to_bytes(8, byteorder="big", signed=False)
+    header[16:18] = hit_mask.to_bytes(2, byteorder="big", signed=False)
+    header[18] = 10 if send_mode in (2, 3) else 0
+    header[19] = format_version
+    if has_fine:
+        header[20:24] = crossing_fine.to_bytes(4, "big", signed=False)
+        header[24:28] = accept_fine.to_bytes(4, "big", signed=False)
+
+    payload = bytearray()
+    if send_mode in (2, 3):
+        for channel in hit_channels:
+            payload.extend(bytes([channel]))
+            payload.extend((100 + channel).to_bytes(2, "big", signed=False))
+            payload.extend((200 + channel).to_bytes(2, "big", signed=False))
+            payload.append((channel + 3) & 0xFF)
+            payload.extend((channel - 10).to_bytes(4, "big", signed=True))
+
+    if send_mode == 1:
+        waveform_channels = list(range(16))
+    elif send_mode in (0, 3):
+        waveform_channels = hit_channels
+    else:
+        waveform_channels = []
+
+    for sample_index in range(ADC_LENGTH):
+        for channel in waveform_channels:
+            value_a = (sample_index + channel) & 0x0FFF
+            value_b = (sample_index + channel + 1) & 0x0FFF
+            payload.extend((((value_a << 16) | value_b)).to_bytes(4, "big", signed=False))
+
+    return bytes(header + payload)
 
 
 class _FakeProcess:
