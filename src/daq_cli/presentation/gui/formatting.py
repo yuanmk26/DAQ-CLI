@@ -200,6 +200,57 @@ def board_config_options_from_form(
     )
 
 
+def parse_int_field(text: str, field_name: str) -> int:
+    """Parse one integer field (decimal or 0x-prefixed hex)."""
+    stripped = text.strip()
+    if not stripped:
+        raise ValueError(f"{field_name} 为空")
+    try:
+        return int(stripped, 0)
+    except ValueError as exc:
+        raise ValueError(f"{field_name} 不是有效整数: {stripped!r}") from exc
+
+
+def mode9_thresholds_from_fields(texts: list[str]) -> list[int]:
+    """Parse the 16 per-channel threshold fields, validating the 16-bit range."""
+    if len(texts) != 16:
+        raise ValueError(f"需要 16 个通道阈值字段，收到 {len(texts)} 个")
+    values = [
+        parse_int_field(text, f"ch{channel:02d} 阈值")
+        for channel, text in enumerate(texts)
+    ]
+    for channel, value in enumerate(values):
+        if value < 0 or value > 0xFFFF:
+            raise ValueError(f"ch{channel:02d} 阈值超出范围 0..0xFFFF: {value}")
+    return values
+
+
+def mode9_readback_to_values(
+    trigger, tcm, tcp
+) -> dict[str, object]:
+    """Map service readback results to mode-9 panel form values.
+
+    Text fields map to ``str``, checkboxes to ``bool``; the tab decides how
+    to apply each to its widget variables.
+    """
+    return {
+        "model": str(trigger.trigger_mode),
+        "position": str(trigger.trigger_position),
+        "time_clean": bool(trigger.timestamp_clean_enabled),
+        "ext_trigger": bool(trigger.ext_trigger_enabled),
+        "start_delay": str(trigger.send_start_delay),
+        "thr": [str(value) for value in tcm.thresholds],
+        "mask": f"0x{tcm.mask:04X}",
+        "polarity": f"0x{tcm.polarity:04X}",
+        "debounce": str(tcm.debounce),
+        "enable": bool(tcm.enable),
+        "pulse_width": str(tcm.pulse_width),
+        "send_mode": str(tcp.send_mode),
+        "integ_pre": str(tcp.integration_pre_samples),
+        "integ_post": str(tcp.integration_post_samples),
+    }
+
+
 def parse_int_list(text: str, count: int, field_name: str) -> list[int]:
     """Parse 1 or ``count`` comma/whitespace separated integers (1 = broadcast)."""
     raw = [part for part in text.replace(",", " ").split() if part]

@@ -156,6 +156,63 @@ class ResultFormattingTests(unittest.TestCase):
         self.assertIn("trig_sticky: True", text)
         self.assertIn("last_trigger_channels: 1", text)
 
+    def test_mode9_thresholds_from_fields_parses_16_values(self) -> None:
+        texts = [str(2000 + channel) for channel in range(16)]
+        values = formatting.mode9_thresholds_from_fields(texts)
+        self.assertEqual(values, [2000 + channel for channel in range(16)])
+
+    def test_mode9_thresholds_from_fields_rejects_range(self) -> None:
+        texts = ["2700"] * 16
+        texts[3] = "0x10000"
+        with self.assertRaisesRegex(ValueError, "ch03 阈值超出范围"):
+            formatting.mode9_thresholds_from_fields(texts)
+
+    def test_mode9_thresholds_from_fields_rejects_bad_text(self) -> None:
+        texts = ["abc"] * 16
+        with self.assertRaisesRegex(ValueError, "ch00 阈值 不是有效整数"):
+            formatting.mode9_thresholds_from_fields(texts)
+
+    def test_mode9_readback_to_values_maps_all_fields(self) -> None:
+        trigger = SimpleNamespace(
+            trigger_mode=9,
+            trigger_position=5,
+            timestamp_clean_enabled=False,
+            ext_trigger_enabled=False,
+            send_start_delay=100,
+        )
+        tcm = SimpleNamespace(
+            thresholds=[2700, 1800] + [0] * 14,
+            mask=0x0003,
+            polarity=0x0002,
+            debounce=200,
+            enable=True,
+            pulse_width=20,
+        )
+        tcp = SimpleNamespace(
+            send_mode=1,
+            integration_pre_samples=4,
+            integration_post_samples=12,
+        )
+        values = formatting.mode9_readback_to_values(trigger, tcm, tcp)
+        self.assertEqual(values["model"], "9")
+        self.assertEqual(values["position"], "5")
+        self.assertFalse(values["time_clean"])
+        self.assertEqual(values["mask"], "0x0003")
+        self.assertEqual(values["polarity"], "0x0002")
+        self.assertTrue(values["enable"])
+        self.assertEqual(values["thr"], ["2700", "1800"] + ["0"] * 14)
+        self.assertEqual(values["send_mode"], "1")
+        self.assertEqual(values["integ_pre"], "4")
+        self.assertEqual(values["integ_post"], "12")
+
+    def test_parse_int_field(self) -> None:
+        self.assertEqual(formatting.parse_int_field("9", "model"), 9)
+        self.assertEqual(formatting.parse_int_field("0x1B", "x"), 0x1B)
+        with self.assertRaisesRegex(ValueError, "为空"):
+            formatting.parse_int_field("  ", "x")
+        with self.assertRaisesRegex(ValueError, "不是有效整数"):
+            formatting.parse_int_field("abc", "x")
+
     def test_board_config_options_from_form(self) -> None:
         options = formatting.board_config_options_from_form(
             adc_enabled=True,

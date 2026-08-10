@@ -196,6 +196,13 @@ class BoardService:
             data=raw_result.data,
         )
 
+    def write_registers(
+        self, device_name: str, profile_path: Path | str, address: int, data: bytes
+    ) -> None:
+        profile, device = self._resolve_device(device_name, profile_path)
+        adapter = self._make_adapter(profile)
+        adapter.write_registers(device, address, data)
+
     def read_trigger_config(
         self, device_name: str, profile_path: Path | str
     ) -> TriggerConfigReadResult:

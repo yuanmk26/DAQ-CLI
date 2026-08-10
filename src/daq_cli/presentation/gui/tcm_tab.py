@@ -97,9 +97,11 @@ class TcmTab:
         on_result(result)
 
     def _run_show(self) -> None:
+        tcm_name = self._selected_tcm()  # read on the GUI thread
+
         def task():
             return self.tcm_service.read_trigger_config(
-                tcm_name=self._selected_tcm(), profile_path=self.app.profile_path
+                tcm_name=tcm_name, profile_path=self.app.profile_path
             )
 
         def render(result) -> None:
@@ -123,18 +125,25 @@ class TcmTab:
         self._run_task(task, render)
 
     def _run_config(self) -> None:
+        tcm_name = self._selected_tcm()  # read on the GUI thread
+        enable = self._enable_var.get()
+        mask = formatting.parse_int_field(self._form_vars["mask_var"].get(), "mask")
+        pulse_width = formatting.parse_int_field(self._form_vars["width_var"].get(), "width")
+        debounce = formatting.parse_int_field(self._form_vars["debounce_var"].get(), "debounce")
+        clear_sticky = self._clear_sticky_var.get()
+
         def task():
             result = self.tcm_service.configure_trigger(
-                tcm_name=self._selected_tcm(),
+                tcm_name=tcm_name,
                 profile_path=self.app.profile_path,
-                enable=self._enable_var.get(),
-                mask=int(self._form_vars["mask_var"].get(), 0),
-                pulse_width=int(self._form_vars["width_var"].get(), 0),
-                debounce=int(self._form_vars["debounce_var"].get(), 0),
+                enable=enable,
+                mask=mask,
+                pulse_width=pulse_width,
+                debounce=debounce,
             )
-            if self._clear_sticky_var.get():
+            if clear_sticky:
                 self.tcm_service.clear_trigger_sticky(
-                    tcm_name=self._selected_tcm(), profile_path=self.app.profile_path
+                    tcm_name=tcm_name, profile_path=self.app.profile_path
                 )
             return result
 

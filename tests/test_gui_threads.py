@@ -20,6 +20,12 @@ class FakeScheduler:
 
 
 class BackgroundTaskTests(unittest.TestCase):
+    def _pump(self, scheduler: FakeScheduler) -> None:
+        # Poll self-reschedules while the queue is empty; keep pumping until
+        # the result is delivered (delivery stops the rescheduling).
+        for _ in range(100):
+            scheduler.run_pending()
+
     def test_result_is_delivered_on_done(self) -> None:
         scheduler = FakeScheduler()
         done: list = []
@@ -31,7 +37,7 @@ class BackgroundTaskTests(unittest.TestCase):
             schedule=scheduler,
         )
         thread.join(timeout=2.0)
-        scheduler.run_pending()
+        self._pump(scheduler)
         self.assertEqual(done, [42])
         self.assertEqual(errors, [])
 
@@ -50,7 +56,7 @@ class BackgroundTaskTests(unittest.TestCase):
             schedule=scheduler,
         )
         thread.join(timeout=2.0)
-        scheduler.run_pending()
+        self._pump(scheduler)
         self.assertEqual(done, [])
         self.assertEqual(len(errors), 1)
         self.assertIsInstance(errors[0], RuntimeError)
@@ -66,10 +72,26 @@ class BackgroundTaskTests(unittest.TestCase):
             schedule=scheduler,
         )
         thread.join(timeout=2.0)
-        scheduler.run_pending()
+        self._pump(scheduler)
         # poll_once must not be re-scheduled after delivery
-        scheduler.run_pending()
+        self._pump(scheduler)
         self.assertEqual(calls, ["ok"])
+
+    def test_worker_never_calls_schedule(self) -> None:
+        # Regression: the worker must only touch the queue; ``schedule`` is
+        # called from the calling thread, because tkinter's ``after`` is not
+        # thread-safe.
+        scheduler = FakeScheduler()
+        thread = run_in_background(
+            fn=lambda: "ok",
+            on_done=lambda result: None,
+            on_error=lambda exc: None,
+            schedule=scheduler,
+        )
+        thread.join(timeout=2.0)
+        # The initial schedule came from run_in_background's caller; the
+        # worker thread itself must not have appended anything midway.
+        self.assertEqual(len(scheduler.pending), 1)
 
     def test_drain_queue_returns_oldest_first(self) -> None:
         source: "queue.Queue[int]" = queue.Queue()

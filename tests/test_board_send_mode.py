@@ -298,6 +298,19 @@ class TcmLinkTests(unittest.TestCase):
                     enable=True,
                 )
 
+    def test_write_registers_passes_through(self) -> None:
+        service, profile, device, adapter = self._patched_service()
+        with patch.object(
+            service, "_resolve_device", return_value=(profile, device)
+        ), patch.object(service, "_make_adapter", return_value=adapter):
+            service.write_registers(
+                device_name="dev1",
+                profile_path="profiles/example.yaml",
+                address=0x43,
+                data=bytes([4]),
+            )
+        adapter.write_registers.assert_called_once_with(device, 0x43, bytes([4]))
+
     def test_cli_tcm_link_config_requires_mask(self) -> None:
         runner = CliRunner()
         result = runner.invoke(

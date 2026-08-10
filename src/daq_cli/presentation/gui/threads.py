@@ -26,6 +26,12 @@ def run_in_background(
     """Run ``fn`` on a daemon thread and marshal its outcome back to the
     GUI thread.
 
+    - The worker thread only touches a queue; all ``schedule`` calls happen
+      on the calling (GUI) thread — tkinter's ``after`` must never be called
+      from another thread.
+    - ``fn`` must not touch any tkinter object (widgets, StringVar reads):
+      read all form values on the GUI thread and capture them in the
+      closure before starting the task.
     - ``schedule`` must run its argument on the GUI thread at some later
       point (pass ``root.after(50, cb)``-style callables).
     - ``on_done(result)`` / ``on_error(exception)`` are invoked exactly once,
@@ -37,6 +43,8 @@ def run_in_background(
     result_queue: "queue.Queue[_Result]" = queue.Queue(maxsize=1)
 
     def poll_once() -> None:
+        # Runs on the GUI thread (invoked through ``schedule``), so the
+        # re-schedule below is GUI-thread-safe.
         try:
             kind, payload = result_queue.get_nowait()
         except queue.Empty:
@@ -54,11 +62,10 @@ def run_in_background(
             result_queue.put(("error", exc))
         else:
             result_queue.put(("ok", result))
-        finally:
-            schedule(poll_once)
 
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
+    schedule(poll_once)  # initial poll from the calling (GUI) thread
     return thread
 
 
