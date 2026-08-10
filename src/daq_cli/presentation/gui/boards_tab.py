@@ -8,19 +8,21 @@ from tkinter import ttk
 from daq_cli.application.board_service import BoardService
 from daq_cli.application.telemetry_service import TelemetryService
 from daq_cli.presentation.gui import formatting, threads
-from daq_cli.presentation.gui.widgets import ResultArea
+from daq_cli.presentation.gui.widgets import ResultArea, ScrollableFrame
 
 
 class BoardTab:
     def __init__(self, app, notebook) -> None:
         self.app = app
-        self.frame = ttk.Frame(notebook, padding=8)
+        # The whole tab is scrollable: the mode 9 panel plus forms exceed
+        # typical window heights; children go into frame.inner.
+        self.frame = ScrollableFrame(notebook, padding=8)
         self.board_service = BoardService()
         self.telemetry_service = TelemetryService()
         self._busy = False
         self._task_buttons: list = []
 
-        row = ttk.Frame(self.frame)
+        row = ttk.Frame(self.frame.inner)
         row.pack(fill=tk.X)
         ttk.Label(row, text="设备:").pack(side=tk.LEFT)
         self._device_var = tk.StringVar()
@@ -29,7 +31,7 @@ class BoardTab:
         )
         self._device_combo.pack(side=tk.LEFT, padx=(4, 0))
 
-        action_row = ttk.Frame(self.frame)
+        action_row = ttk.Frame(self.frame.inner)
         action_row.pack(fill=tk.X, pady=(8, 4))
         for label, callback in (
             ("info", self._run_info),
@@ -43,7 +45,7 @@ class BoardTab:
             button.pack(side=tk.LEFT, padx=(0, 6))
             self._task_buttons.append(button)
 
-        body = ttk.Frame(self.frame)
+        body = ttk.Frame(self.frame.inner)
         body.pack(fill=tk.BOTH, expand=True, pady=(4, 4))
         forms_row = ttk.Frame(body)
         forms_row.pack(fill=tk.X)
@@ -51,7 +53,7 @@ class BoardTab:
         self._build_mode9_panel(body)
         self._build_reg_read_row(body)
 
-        self.result = ResultArea(self.frame, text="结果")
+        self.result = ResultArea(self.frame.inner, text="结果")
         self.result.pack(fill=tk.BOTH, expand=True)
 
     # ---------------------------------------------------------------- forms
@@ -230,34 +232,27 @@ class BoardTab:
         group = ttk.LabelFrame(parent, text="B. 过阈链路 (TCM, 0x45..0x6C)", padding=(8, 4))
         group.pack(fill=tk.X, pady=(6, 0))
 
-        # 16 per-channel threshold fields (2 columns x 8 rows); each channel
-        # has its own register, because baselines/gains differ per channel.
+        # 16 per-channel threshold fields (4 columns x 4 rows; registers
+        # 0x45..0x64, high byte first). Each channel has its own register,
+        # because baselines/gains differ per channel.
+        ttk.Label(
+            group, text="0x45..0x64 阈值（每通道独立，参考各自基线）:"
+        ).pack(anchor="w")
         thr_frame = ttk.Frame(group)
-        thr_frame.pack(fill=tk.X)
+        thr_frame.pack(fill=tk.X, pady=(2, 0))
         self._m9_thr_vars: list[tk.StringVar] = []
-        for row_index in range(8):
-            for col_index in range(2):
-                channel = col_index * 8 + row_index
+        for row_index in range(4):
+            for col_index in range(4):
+                channel = col_index * 4 + row_index
                 cell = ttk.Frame(thr_frame)
-                cell.grid(row=row_index, column=col_index, sticky="w", padx=(0, 16))
-                ttk.Label(cell, text=f"0x{0x45 + channel * 2:02X} ch{channel:02d}").pack(
-                    side=tk.LEFT
-                )
+                cell.grid(row=row_index, column=col_index, sticky="w", padx=(0, 12))
+                ttk.Label(cell, text=f"ch{channel:02d}").pack(side=tk.LEFT)
                 var = tk.StringVar(value="0")
                 self._m9_thr_vars.append(var)
                 ttk.Entry(cell, textvariable=var, width=6).pack(side=tk.LEFT, padx=(4, 0))
 
-        # broadcast fill helper (convenience only; thresholds stay per-channel)
-        bcast_row = ttk.Frame(group)
-        bcast_row.pack(fill=tk.X, pady=(4, 0))
-        ttk.Label(bcast_row, text="广播填值:").pack(side=tk.LEFT)
-        self._m9_broadcast_var = tk.StringVar(value="")
-        ttk.Entry(bcast_row, textvariable=self._m9_broadcast_var, width=8).pack(
-            side=tk.LEFT, padx=(4, 4)
-        )
-        bcast_button = ttk.Button(bcast_row, text="填到 16 通道", command=self._fill_thr_broadcast)
-        bcast_button.pack(side=tk.LEFT)
-
+        # control + broadcast-fill helpers on one row (convenience only;
+        # thresholds stay per-channel)
         control_row = ttk.Frame(group)
         control_row.pack(fill=tk.X, pady=(6, 0))
         self._m9_mask_var = tk.StringVar(value="0x0003")
@@ -267,23 +262,31 @@ class BoardTab:
         self._m9_enable_var = tk.BooleanVar(value=True)
         ttk.Label(control_row, text="0x65~66 mask").pack(side=tk.LEFT)
         ttk.Entry(control_row, textvariable=self._m9_mask_var, width=7).pack(
-            side=tk.LEFT, padx=(4, 12)
+            side=tk.LEFT, padx=(4, 10)
         )
         ttk.Label(control_row, text="0x67~68 polarity").pack(side=tk.LEFT)
         ttk.Entry(control_row, textvariable=self._m9_polarity_var, width=7).pack(
-            side=tk.LEFT, padx=(4, 12)
+            side=tk.LEFT, padx=(4, 10)
         )
         ttk.Label(control_row, text="0x69~6A debounce(5ns)").pack(side=tk.LEFT)
         ttk.Entry(control_row, textvariable=self._m9_debounce_var, width=6).pack(
-            side=tk.LEFT, padx=(4, 12)
+            side=tk.LEFT, padx=(4, 10)
         )
         ttk.Label(control_row, text="0x6C width(5ns)").pack(side=tk.LEFT)
         ttk.Entry(control_row, textvariable=self._m9_width_var, width=6).pack(
-            side=tk.LEFT, padx=(4, 12)
+            side=tk.LEFT, padx=(4, 10)
         )
         ttk.Checkbutton(control_row, text="0x6B enable", variable=self._m9_enable_var).pack(
             side=tk.LEFT
         )
+        ttk.Label(control_row, text="广播填值:").pack(side=tk.LEFT, padx=(12, 0))
+        self._m9_broadcast_var = tk.StringVar(value="")
+        ttk.Entry(control_row, textvariable=self._m9_broadcast_var, width=8).pack(
+            side=tk.LEFT, padx=(4, 4)
+        )
+        ttk.Button(
+            control_row, text="填到16通道", command=self._fill_thr_broadcast
+        ).pack(side=tk.LEFT)
 
     # ---------------------------------------------------------------- actions
 
