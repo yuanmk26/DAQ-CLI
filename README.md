@@ -23,6 +23,8 @@ The repository currently contains:
   - `daq board tcm-link-config <device> --mask ...`
   - `daq board config-show <device>`
   - `daq board reg-read <device> <address>`
+  - `daq tcm show <name>`
+  - `daq tcm config <name> --mask ...`
   - `daq acquire single <device>`
   - `daq acquire multi <group>`
   - `daq monitor wave <device>`
@@ -92,8 +94,9 @@ Firmware notes:
   special "mode-2" protocol
 - since v0.2.0 frames carry a 28-byte header (format version in byte 19) with
   `crossing_fine` / `accept_fine` timestamps; old 20-byte frames still decode
-- `daq board tcm-link-*` drives the TCM trigger link registers (`0x45..0x6C`)
-  and `Trigger_model = 9` is supported
+- `daq board tcm-link-*` drives the ADC-side TCM trigger link registers
+  (`0x45..0x6C`), `daq tcm show/config` drives the TCM-board side
+  (`0x20..0x25`), and `Trigger_model = 9` is supported
 - see `docs/firmware-compatibility.md` for the current firmware-facing contract
 
 Capture single-board data:

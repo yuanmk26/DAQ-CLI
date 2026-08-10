@@ -268,12 +268,10 @@ class AcquireService:
             raise ValueError(f"Group '{group_name}' does not define a TCM reference")
 
         tcm_config = profile.tcm.get(group.tcm)
-        if not isinstance(tcm_config, dict):
+        if tcm_config is None:
             raise ValueError(
                 f"Group '{group_name}' references unknown TCM '{group.tcm}'"
             )
-        if tcm_config.get("ip") is None:
-            raise ValueError(f"TCM '{group.tcm}' does not define an IP address")
 
         devices = self._resolve_group_devices(profile.devices, group)
         base_dir = output_base_dir or (
@@ -307,8 +305,8 @@ class AcquireService:
             LegacyMultiCaptureConfig(
                 run_name_prefix=group.name,
                 output_base_dir=base_dir,
-                tcm_ip=str(tcm_config["ip"]),
-                tcm_rbcp_port=int(tcm_config.get("rbcp_port", 4660)),
+                tcm_ip=tcm_config.ip,
+                tcm_rbcp_port=tcm_config.rbcp_port,
                 adc_length=int(profile.defaults.get("adc_length", 64)),
                 aggregation_key=aggregation_key,
                 timestamp_match_window_ticks=timestamp_match_window_ticks,

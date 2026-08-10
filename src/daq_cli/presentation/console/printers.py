@@ -13,6 +13,10 @@ from daq_cli.application.board_service import (
     TcpMode2ConfigReadResult,
     TriggerConfigReadResult,
 )
+from daq_cli.application.tcm_service import (
+    TcmTriggerConfigReadResult,
+    TcmTriggerConfigWriteResult,
+)
 from daq_cli.application.telemetry_service import BoardSysmonResult
 
 console = Console()
@@ -297,6 +301,72 @@ def print_tcm_link_config_write_result(result: TcmLinkConfigWriteResult) -> None
             f"thr ch{channel:02d}",
             f"{result.thresholds[channel]} ({polarity})",
         )
+    table.add_row("profile", str(result.source_profile))
+    console.print(table)
+
+
+def _tcm_trigger_table(result: TcmTriggerConfigReadResult) -> Table:
+    table = Table(title=f"TCM Trigger Config: {result.tcm.name}")
+    table.add_column("Field", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
+
+    enabled_channels = [
+        channel
+        for channel in range(8)
+        if (result.mask >> channel) & 0x1
+    ]
+    table.add_row("tcm_ip", f"{result.tcm.ip}:{result.tcm.rbcp_port}")
+    table.add_row("enable", str(result.enable))
+    table.add_row("mask", f"0x{result.mask:02X} ({len(enabled_channels)} ch)")
+    table.add_row(
+        "pulse_width",
+        f"{result.pulse_width} x 50ns = {result.pulse_width * 50e-3:.1f} us",
+    )
+    table.add_row(
+        "debounce",
+        f"{result.debounce} x 50ns = {result.debounce * 50e-3:.1f} us",
+    )
+    table.add_row("trig_sticky", str(result.trig_sticky))
+    table.add_row("pending", str(result.pending))
+    table.add_row("wide_pulse_active", str(result.wide_pulse_active))
+    if result.last_trigger_channels:
+        channels = [
+            str(channel)
+            for channel in range(8)
+            if (result.last_trigger_channels >> channel) & 0x1
+        ]
+        table.add_row("last_trigger_channels", ",".join(channels))
+    table.add_row("profile", str(result.source_profile))
+    return table
+
+
+def print_tcm_trigger_config_read_result(result: TcmTriggerConfigReadResult) -> None:
+    console.print(_tcm_trigger_table(result))
+
+
+def print_tcm_trigger_config_write_result(
+    result: TcmTriggerConfigWriteResult,
+) -> None:
+    table = Table(title=f"TCM Trigger Config Written: {result.tcm.name}")
+    table.add_column("Field", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
+
+    enabled_channels = [
+        channel
+        for channel in range(8)
+        if (result.mask >> channel) & 0x1
+    ]
+    table.add_row("tcm_ip", f"{result.tcm.ip}:{result.tcm.rbcp_port}")
+    table.add_row("enable", str(result.enable))
+    table.add_row("mask", f"0x{result.mask:02X} ({len(enabled_channels)} ch)")
+    table.add_row(
+        "pulse_width",
+        f"{result.pulse_width} x 50ns = {result.pulse_width * 50e-3:.1f} us",
+    )
+    table.add_row(
+        "debounce",
+        f"{result.debounce} x 50ns = {result.debounce * 50e-3:.1f} us",
+    )
     table.add_row("profile", str(result.source_profile))
     console.print(table)
 

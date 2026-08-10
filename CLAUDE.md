@@ -31,8 +31,8 @@ Development environment is Windows (Git Bash / PowerShell):
 
 CLI surface (`daq --help`): `profile` (show/validate/init),
 `board` (info/sysmon/config/trigger-show/tcp-mode2-show/tcm-link-show/
-tcm-link-config/config-show/reg-read), `acquire` (single/multi),
-`monitor` (wave/multi-demo), `decode`, `group`.
+tcm-link-config/config-show/reg-read), `tcm` (show/config),
+`acquire` (single/multi), `monitor` (wave/multi-demo), `decode`, `group`.
 
 ## Architecture
 
@@ -98,11 +98,15 @@ Full reference: `docs/firmware-compatibility.md`. Key rules:
   boards (phases differ); cross-board absolute time uses the 20M timestamp.
 - Feature record (modes 2/3), 10 bytes per selected channel: channel id,
   baseline[15:0], peak_amp[15:0], peak_pos[7:0], integral[31:0] (signed).
-- TCM trigger link registers (ADC board `0x45..0x6C`): 16 crossing
-  thresholds, mask, polarity, debounce (5ns units), enable, M21 pulse width.
-  `Trigger_model = 9` is the TCM-trigger source; keep `Trigger_position` 0..10
-  (link delay D ≈ 397ns). TCM board side (FDU-TCM v2) uses its own
-  `0x20..0x25` registers — not implemented in the CLI yet.
+- TCM trigger link, ADC side (board `0x45..0x6C`): 16 crossing thresholds,
+  mask, polarity, debounce (5ns units), enable, M21 pulse width —
+  `daq board tcm-link-show/config`. `Trigger_model = 9` is the TCM-trigger
+  source; keep `Trigger_position` 0..10 (link delay D ≈ 397ns).
+- TCM trigger link, TCM board side (FDU-TCM v2 `0x20..0x25`): TRG_CTRL
+  (enable/clear-sticky), 8-bit TRG_IN_MASK, pulse width + debounce in 20M
+  cycles (50ns units, NOT 5ns like the ADC side), TRG_STATUS, TRG_CHAN —
+  `daq tcm show/config`. The profile `tcm:` section holds ip/rbcp_port
+  (`domain/tcm.py` TcmConfig).
 - `tcp-mode2-*` command names are historical labels for the TCP_SENT
   registers — keep them for compatibility; plan a rename toward
   `tcp-sent`/`packet-mode`.

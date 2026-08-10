@@ -523,7 +523,56 @@ TCM-link notes:
   D ≈ 397ns), otherwise the crossing point may fall outside the event window
 - `--trigger-mode 9` is accepted by `board config` as the TCM-trigger source
 
-### 11.3 Semantic Summary Readback
+### 11.3 TCM Board Trigger-Link Commands
+
+The TCM board (FDU-TCM v2 firmware `5550276`+) receives the M21 threshold
+pulses from up to 8 ADC boards, applies a mask-OR decision, and broadcasts a
+wide trigger pulse back. Its trigger-link registers live at `0x20..0x25`:
+
+| Address | Content |
+| --- | --- |
+| `0x20` | TRG_CTRL: bit0 = enable, bit1 = clear trigger sticky (write 1) |
+| `0x21` | TRG_IN_MASK: 8-bit channel participation mask |
+| `0x22` | TRG_PULSE_WIDTH: wide pulse width in 20M cycles (default 32 = 1.6us) |
+| `0x23` | TRG_DEBOUNCE: debounce in 20M cycles (default 20 = 1us) |
+| `0x24` | TRG_STATUS: bit0 = trig_sticky, bit1 = pending, bit2 = wide pulse active |
+| `0x25` | TRG_CHAN: channels of the most recent trigger event |
+
+Read the current configuration and status:
+
+```bash
+daq tcm show main --profile profiles/example.yaml
+```
+
+Write the configuration with readback verification:
+
+```bash
+daq tcm config main --mask 0x01 --width 32 --debounce 20 --enable \
+  --clear-sticky --profile profiles/example.yaml
+```
+
+Options:
+
+- `--enable/--disable`: trigger-link enable (default enabled)
+- `--mask`: 8-bit participation mask, decimal or `0x`-prefixed hex (default 0)
+- `--width`: wide pulse width in 20M cycles, 0..255 (default 32)
+- `--debounce`: debounce in 20M cycles, 0..65535 (default 20)
+- `--clear-sticky/--keep-sticky`: clear the trigger sticky status bit after
+  writing (default keep)
+
+`tcm show` also reports `trig_sticky` / `pending` / `wide_pulse_active` and
+the `last_trigger_channels` mask — useful during TCM-link bring-up to confirm
+the trigger actually arrived and which board channel fired.
+
+TCM-link integration notes:
+
+- the TCM `TRG_IN_MASK` channel N corresponds to ADC board N's M21 pulse
+- the TCM wide pulse must be >= 800ns (16 cycles) for the ADC side to
+  recognize it as a trigger return
+- keep the ADC-side `Trigger_position` at 0..10 while the TCM link drives
+  acquisition (measured link delay D ≈ 397ns)
+
+### 11.4 Semantic Summary Readback
 
 To view the most important trigger and TCP mode-2 settings together:
 
@@ -722,7 +771,6 @@ Not implemented yet:
 - Additional monitor commands beyond `monitor wave`
 - Separate `wave` command workflows
 - Interactive shell mode
-- TCM board (FDU-TCM v2) trigger-link configuration commands (`0x20..0x25`)
 
 Current technical limitation:
 

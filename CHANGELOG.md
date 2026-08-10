@@ -27,6 +27,11 @@ trigger link) for the new features; old 20-byte frames remain decodable.
   trigger-link configuration with readback verification (single-value
   broadcast or 16 threshold values).
 - `Trigger_model = 9` support (TCM-trigger source) in `board config`.
+- `daq tcm show <name>` / `daq tcm config <name>` — TCM board trigger-link
+  configuration and status (0x20..0x25): enable, 8-bit mask, pulse width /
+  debounce (20M cycles), sticky/pending/wide-pulse status, last trigger
+  channels. Write path verifies by readback.
+- TCM profile entries now load as typed `TcmConfig` (name/ip/rbcp_port).
 - Vendored `FPGA_CTRL.py` synced from upstream (TCM config functions,
   trigger_model 0..9).
 

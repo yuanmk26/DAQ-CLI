@@ -5,6 +5,7 @@ import yaml
 from daq_cli.application.models import ProfileData
 from daq_cli.domain.device import DeviceConfig
 from daq_cli.domain.group import GroupConfig
+from daq_cli.domain.tcm import TcmConfig
 
 
 def load_profile(profile_path: Path | str) -> ProfileData:
@@ -31,10 +32,18 @@ def load_profile(profile_path: Path | str) -> ProfileData:
             tcm=str(item["tcm"]) if item.get("tcm") is not None else None,
         )
 
+    tcm = {}
+    for name, item in (raw.get("tcm") or {}).items():
+        tcm[name] = TcmConfig(
+            name=name,
+            ip=str(item["ip"]),
+            rbcp_port=int(item.get("rbcp_port", 4660)),
+        )
+
     return ProfileData(
         path=profile_path,
         devices=devices,
         groups=groups,
-        tcm=dict(raw.get("tcm") or {}),
+        tcm=tcm,
         defaults=dict(raw.get("defaults") or {}),
     )

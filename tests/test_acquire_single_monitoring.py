@@ -14,6 +14,7 @@ from daq_cli.application.acquire_service import (
     SingleAcquireProgress,
     SingleAcquireResult,
 )
+from daq_cli.domain.tcm import TcmConfig
 from daq_cli.application.output_config import (
     AcquireOutputsConfig,
     OutputTargetConfig,
@@ -1047,7 +1048,11 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                     name="two_board", devices=["dev1", "dev2"], tcm="main"
                 )
             },
-            tcm={"main": {"ip": "192.168.10.16", "rbcp_port": 4660}},
+            tcm={
+                "main": TcmConfig(
+                    name="main", ip="192.168.10.16", rbcp_port=4660
+                )
+            },
             defaults={"output_dir": "out", "adc_length": 64},
             legacy=SimpleNamespace(project_root=Path("legacy")),
         )

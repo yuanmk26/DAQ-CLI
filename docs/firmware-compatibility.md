@@ -154,7 +154,9 @@ Rules:
 - `Trigger_model = 9` is the TCM-trigger source; values 0..8 unchanged
 - TCM board side (FDU-TCM v2) exposes its own trigger-link registers at
   `0x20..0x25` (TRG_CTRL / TRG_IN_MASK / TRG_PULSE_WIDTH / TRG_DEBOUNCE /
-  TRG_STATUS / TRG_CHAN) — different address space, not conflicting
+  TRG_STATUS / TRG_CHAN) — different address space, not conflicting; driven
+  by `daq tcm show/config` since v0.2.0. Note the units: TCM-side width and
+  debounce are in 20M cycles (50ns), unlike the ADC-side 5ns units.
 
 ### 2.7 Multi-board acquisition already has a legacy workflow
 
