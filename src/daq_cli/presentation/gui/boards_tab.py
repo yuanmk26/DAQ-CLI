@@ -18,6 +18,7 @@ class BoardTab:
         self.board_service = BoardService()
         self.telemetry_service = TelemetryService()
         self._busy = False
+        self._task_buttons: list = []
 
         row = ttk.Frame(self.frame)
         row.pack(fill=tk.X)
@@ -38,15 +39,17 @@ class BoardTab:
             ("config-show", self._run_config_show),
             ("tcm-link-show", self._run_tcm_link_show),
         ):
-            ttk.Button(action_row, text=label, command=callback).pack(
-                side=tk.LEFT, padx=(0, 6)
-            )
-        self._action_buttons = action_row.winfo_children()
+            button = ttk.Button(action_row, text=label, command=callback)
+            button.pack(side=tk.LEFT, padx=(0, 6))
+            self._task_buttons.append(button)
 
         body = ttk.Frame(self.frame)
         body.pack(fill=tk.BOTH, expand=True, pady=(4, 4))
-        self._build_config_form(body)
-        self._build_tcm_link_form(body)
+        forms_row = ttk.Frame(body)
+        forms_row.pack(fill=tk.X)
+        self._build_config_form(forms_row)
+        self._build_tcm_link_form(forms_row)
+        self._build_mode9_form(body)
         self._build_reg_read_row(body)
 
         self.result = ResultArea(self.frame, text="结果")
@@ -118,9 +121,9 @@ class BoardTab:
             side=tk.LEFT, padx=(4, 0)
         )
 
-        ttk.Button(group, text="配置板卡", command=self._run_board_config).pack(
-            anchor="w", pady=(8, 0)
-        )
+        button = ttk.Button(group, text="配置板卡", command=self._run_board_config)
+        button.pack(anchor="w", pady=(8, 0))
+        self._task_buttons.append(button)
 
     def _build_tcm_link_form(self, parent) -> None:
         group = ttk.LabelFrame(parent, text="TCM 触发链路 (0x45..0x6C)", padding=(8, 4))
@@ -145,9 +148,9 @@ class BoardTab:
         ttk.Checkbutton(group, text="使能", variable=self._tcm_enable_var).pack(
             anchor="w", pady=(4, 0)
         )
-        ttk.Button(group, text="配置 TCM 链路", command=self._run_tcm_link_config).pack(
-            anchor="w", pady=(6, 0)
-        )
+        button = ttk.Button(group, text="配置 TCM 链路", command=self._run_tcm_link_config)
+        button.pack(anchor="w", pady=(6, 0))
+        self._task_buttons.append(button)
 
     def _build_reg_read_row(self, parent) -> None:
         row = ttk.Frame(parent)
@@ -161,9 +164,41 @@ class BoardTab:
         ttk.Entry(row, textvariable=self._reg_length_var, width=4).pack(
             side=tk.LEFT, padx=(0, 4)
         )
-        ttk.Button(row, text="读取寄存器", command=self._run_reg_read).pack(
-            side=tk.LEFT
+        button = ttk.Button(row, text="读取寄存器", command=self._run_reg_read)
+        button.pack(side=tk.LEFT)
+        self._task_buttons.append(button)
+
+    def _build_mode9_form(self, parent) -> None:
+        """TCM 触发 (mode 9) 独立配置区：一键完成触发源 + 过阈链路。"""
+        group = ttk.LabelFrame(parent, text="TCM 触发 (mode 9)", padding=(8, 4))
+        group.pack(fill=tk.X, pady=(6, 0))
+        ttk.Label(
+            group,
+            text="一键配置：Trigger_model=9（触发源=TCM 宽脉冲）+ 过阈链路（复用上方 TCM 触发链路字段）。",
+        ).pack(anchor="w")
+
+        row = ttk.Frame(group)
+        row.pack(fill=tk.X, pady=(6, 0))
+        ttk.Label(row, text="trigger-position:").pack(side=tk.LEFT)
+        self._mode9_position_var = tk.StringVar(value="5")
+        ttk.Entry(row, textvariable=self._mode9_position_var, width=6).pack(
+            side=tk.LEFT, padx=(4, 8)
         )
+        ttk.Label(row, text="(建议 0~10，吸收 TCM 链路延迟 ~397ns)").pack(side=tk.LEFT)
+        ttk.Label(row, text="   send-mode (留空不改):").pack(side=tk.LEFT)
+        self._mode9_send_mode_var = tk.StringVar(value="")
+        ttk.Entry(row, textvariable=self._mode9_send_mode_var, width=6).pack(
+            side=tk.LEFT, padx=(4, 0)
+        )
+
+        ttk.Label(
+            group,
+            text="注：mode 9 下主触发阈值 (0x11~0x18) 不使用；外部触发会被强制关闭（否则覆盖触发源）。",
+            foreground="#666666",
+        ).pack(anchor="w", pady=(4, 0))
+        button = ttk.Button(group, text="配置 mode 9 触发", command=self._run_mode9_config)
+        button.pack(anchor="w", pady=(6, 0))
+        self._task_buttons.append(button)
 
     # ---------------------------------------------------------------- actions
 
@@ -180,7 +215,7 @@ class BoardTab:
             self.app.log("板卡 tab 有操作进行中，请等待完成")
             return
         self._busy = True
-        for button in self._action_buttons:
+        for button in self._task_buttons:
             button.configure(state=tk.DISABLED)
         self.result.show("运行中...")
 
@@ -196,7 +231,7 @@ class BoardTab:
 
     def _finish_task(self, ok: bool, payload, on_result=None) -> None:
         self._busy = False
-        for button in self._action_buttons:
+        for button in self._task_buttons:
             button.configure(state=tk.NORMAL)
         if ok:
             on_result(payload)
@@ -321,6 +356,66 @@ class BoardTab:
         self._run_task(
             task, lambda result: self.result.show(formatting.format_tcm_link_write(result))
         )
+
+    def _run_mode9_config(self) -> None:
+        """一键配置 mode 9：触发源（model 9 + position + 关 ext-trigger）+
+        过阈链路（复用 TCM 链路表单）。"""
+
+        def task():
+            from daq_cli.application.config_models import BoardConfigOptions
+
+            device = self._selected_device()
+            position = int(self._mode9_position_var.get(), 0)
+            send_mode = (
+                int(self._mode9_send_mode_var.get(), 0)
+                if self._mode9_send_mode_var.get().strip()
+                else None
+            )
+            options = BoardConfigOptions(
+                adc_enabled=False,
+                clock_enabled=False,
+                trigger_enabled=True,
+                tcp_mode2_enabled=False,
+                trigger_thresholds=(0, 0, 0, 0),  # unused in mode 9
+                trigger_mode=9,
+                trigger_position=position,
+                timestamp_clean_enabled=False,
+                ext_trigger_enabled=False,  # must stay off: overrides the source
+                send_mode=send_mode,
+            )
+            board_result = self.board_service.configure_board(
+                device_name=device,
+                profile_path=self.app.profile_path,
+                options=options,
+            )
+            thr = formatting.parse_int_list(self._tcm_vars["thr_var"].get(), 16, "thr")
+            tcm_result = self.board_service.configure_tcm_link(
+                device_name=device,
+                profile_path=self.app.profile_path,
+                thresholds=thr,
+                mask=int(self._tcm_vars["mask_var"].get(), 0),
+                polarity=int(self._tcm_vars["polarity_var"].get(), 0),
+                debounce=int(self._tcm_vars["debounce_var"].get(), 0),
+                pulse_width=int(self._tcm_vars["width_var"].get(), 0),
+                enable=self._tcm_enable_var.get(),
+            )
+            trigger = self.board_service.read_trigger_config(
+                device_name=device, profile_path=self.app.profile_path
+            )
+            return board_result, tcm_result, trigger
+
+        def render(results) -> None:
+            board_result, tcm_result, trigger = results
+            self.result.show(
+                f"mode 9 配置完成\n"
+                f"trigger_mode={trigger.trigger_mode} "
+                f"trigger_position={trigger.trigger_position} "
+                f"ext_trigger_enabled={trigger.ext_trigger_enabled}\n"
+                + formatting.format_tcm_link_write(tcm_result)
+            )
+            self.app.log(board_result.log_output)
+
+        self._run_task(task, render)
 
     def _run_reg_read(self) -> None:
         def task():

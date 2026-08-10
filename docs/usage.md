@@ -759,7 +759,10 @@ The window has four tabs plus a shared log panel at the bottom:
   tcp-mode2-show / config-show / tcm-link-show buttons, the board config
   form (step toggles, trigger parameters, thresholds, send-mode), the TCM
   trigger-link form (mask / polarity / thresholds / debounce / width /
-  enable), and a register reader with hex dump.
+  enable), a dedicated **TCM 触发 (mode 9)** one-click section (sets
+  `Trigger_model=9`, forces the external trigger off, applies
+  `trigger_position` and the adjacent TCM-link fields in one go), and a
+  register reader with hex dump.
 - **采集**: single capture (device, events, timeout, output switches) with a
   live progress bar, and multi capture (group, aggregation key, match
   window, no-ack allowance) with a busy indicator and result summary.
