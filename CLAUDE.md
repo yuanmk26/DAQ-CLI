@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `daq-cli` is a Python CLI (typer + rich) for DAQ boards (FDU-ADC-250M-16ch
 hardware): board configuration, telemetry, single/multi-board capture,
 TCP_SENT packet decoding, and waveform monitoring. Current version line:
-v0.1.4 (see `CHANGELOG.md`).
+v0.2.0 (see `CHANGELOG.md`).
 
 Hardware access is NOT native: it runs through vendored legacy scripts
 (`src/daq_cli/_vendor/fdu_legacy/`) wrapped by adapters in
@@ -30,8 +30,9 @@ Development environment is Windows (Git Bash / PowerShell):
   → produces `dist\daq_cli-<version>-offline-win-amd64.zip`
 
 CLI surface (`daq --help`): `profile` (show/validate/init),
-`board` (info/sysmon/config/trigger-show/tcp-mode2-show/config-show/reg-read),
-`acquire` (single/multi), `monitor` (wave/multi-demo), `decode`, `group`.
+`board` (info/sysmon/config/trigger-show/tcp-mode2-show/tcm-link-show/
+tcm-link-config/config-show/reg-read), `acquire` (single/multi),
+`monitor` (wave/multi-demo), `decode`, `group`.
 
 ## Architecture
 
@@ -84,11 +85,24 @@ Full reference: `docs/firmware-compatibility.md`. Key rules:
   1 = full-channel waveform, 2 = hit-selected feature,
   3 = feature + waveform. **send_mode = 2 is NOT feature+waveform**
   (semantics changed with the firmware).
-- Fixed 20-byte packet header: magic `FF FE 01`, send_mode, event_count,
-  timestamp, hit_mask, feature record length, reserved. Payload length
-  derives from `send_mode`, not from `hit_mask`.
+- Packet header: 20 bytes (format version 0) or 28 bytes (version 1, byte 19
+  >= 1) — magic `FF FE 01`, send_mode, event_count, timestamp, hit_mask,
+  feature record length, then (v1) crossing_fine/accept_fine. **Header
+  length is decided by byte 19; all parsers discriminate on it** so old
+  firmware frames still work. Payload length derives from `send_mode`, not
+  `hit_mask`. Length formulas (v1): mode 0 = 28+hit*256, mode 1 = 28+4096,
+  mode 2 = 28+hit*10, mode 3 = 28+hit*266.
+- `crossing_fine`/`accept_fine` are board-local 200M counters (5ns);
+  `Δfine = (accept - crossing) & 0xFFFFFFFF` cancels TCM-link quantization
+  for single-board crossing alignment. Never compare fine values across
+  boards (phases differ); cross-board absolute time uses the 20M timestamp.
 - Feature record (modes 2/3), 10 bytes per selected channel: channel id,
   baseline[15:0], peak_amp[15:0], peak_pos[7:0], integral[31:0] (signed).
+- TCM trigger link registers (ADC board `0x45..0x6C`): 16 crossing
+  thresholds, mask, polarity, debounce (5ns units), enable, M21 pulse width.
+  `Trigger_model = 9` is the TCM-trigger source; keep `Trigger_position` 0..10
+  (link delay D ≈ 397ns). TCM board side (FDU-TCM v2) uses its own
+  `0x20..0x25` registers — not implemented in the CLI yet.
 - `tcp-mode2-*` command names are historical labels for the TCP_SENT
   registers — keep them for compatibility; plan a rename toward
   `tcp-sent`/`packet-mode`.

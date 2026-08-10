@@ -6,6 +6,37 @@ Each version is tagged as `v<version>` on the `main` branch. The detailed
 snapshot of the v0.1.x line (commands, firmware contract, architecture,
 release flow) is archived in `docs/version-snapshot-v0.1.4.md`.
 
+## [v0.2.0] - 2026-08-10
+
+Frame format upgrade (28-byte header + fine timestamps) and TCM trigger-link
+support. Requires ADC firmware `64c2885`+ (fine stamps) / `b02db46`+ (TCM
+trigger link) for the new features; old 20-byte frames remain decodable.
+
+### Added
+
+- 28-byte TCP_SENT frame header support (format version in byte 19):
+  `crossing_fine` / `accept_fine` fields and wrap-safe `delta_fine` on
+  decoded events, JSON, and TXT outputs.
+- Version-aware parsing everywhere (native decoder, live single capture,
+  wave monitor, vendored multi-board script, aggregated files), so old and
+  new firmware frames coexist during transitions.
+- Aggregated format v2: board chunks carry fine fields; v1 files still read.
+- `daq board tcm-link-show <device>` — read TCM trigger-link configuration
+  (0x45..0x6C) without writing.
+- `daq board tcm-link-config <device> --mask ... --thr ...` — write the TCM
+  trigger-link configuration with readback verification (single-value
+  broadcast or 16 threshold values).
+- `Trigger_model = 9` support (TCM-trigger source) in `board config`.
+- Vendored `FPGA_CTRL.py` synced from upstream (TCM config functions,
+  trigger_model 0..9).
+
+### Changed
+
+- Vendored `multi_board_acquire.py` synced from upstream; FrameParser keeps a
+  documented byte-19 version discrimination divergence.
+- Text event outputs include `format_version` / `crossing_fine` /
+  `accept_fine` / `delta_fine`.
+
 ## [v0.1.4] - 2026-08-10 (archived)
 
 Archive point before the next development cycle. Contains everything from

@@ -475,7 +475,55 @@ Important behavior:
 - `board config --send-mode ...` uses the same write-and-readback verification path
 - this is different from `monitor wave`, which temporarily switches to `send_mode = 1` for the live viewer session and then restores the previous mode
 
-### 11.2 Semantic Summary Readback
+### 11.2 TCM Trigger-Link Readback
+
+The TCM trigger link (firmware `b02db46`+) adds real-time per-channel
+threshold crossing that pulses the M21 line toward the TCM board; the TCM
+board can return a wide MOSI pulse that acts as the acquisition trigger
+(`Trigger_model = 9`). Read the current configuration without writing:
+
+```bash
+daq board tcm-link-show dev1 --profile profiles/example.yaml
+```
+
+`tcm-link-show` reports:
+
+- Channel mask (which channels participate)
+- Polarity mask (pos = `adc > thr`, neg = `adc < thr`)
+- Debounce interval (5ns units)
+- M21 pulse width (5ns units)
+- Enable state
+- Thresholds for the enabled channels
+
+Write the configuration with readback verification:
+
+```bash
+daq board tcm-link-config dev1 \
+  --mask 0x0003 --polarity 0x0002 --thr 2700,1800 \
+  --debounce 200 --width 20 --enable \
+  --profile profiles/example.yaml
+```
+
+Options:
+
+- `--mask` (required): 16-bit channel mask, decimal or `0x`-prefixed hex
+- `--polarity`: 0 = pos (`adc>thr`), 1 = neg (`adc<thr`)
+- `--thr`: single value broadcast to all 16 channels, or 16 comma-separated values
+- `--debounce`: min pulse interval in 5ns units (default 200 = 1us)
+- `--width`: M21 pulse width in 5ns units (default 20 = 100ns)
+- `--enable/--disable`: pulse output enable (default enabled)
+
+TCM-link notes:
+
+- the registers (`0x45..0x6C`) are fully decoupled from the event `hit`
+  thresholds (`0x20..0x3F`)
+- polarity direction matters: a positive-signal threshold must sit above the
+  baseline, a negative one below it
+- with the TCM link, keep `Trigger_position` at 0..10 (measured link delay
+  D ≈ 397ns), otherwise the crossing point may fall outside the event window
+- `--trigger-mode 9` is accepted by `board config` as the TCM-trigger source
+
+### 11.3 Semantic Summary Readback
 
 To view the most important trigger and TCP mode-2 settings together:
 
@@ -674,7 +722,7 @@ Not implemented yet:
 - Additional monitor commands beyond `monitor wave`
 - Separate `wave` command workflows
 - Interactive shell mode
-- Native protocol and parser modules independent of legacy scripts
+- TCM board (FDU-TCM v2) trigger-link configuration commands (`0x20..0x25`)
 
 Current technical limitation:
 
@@ -683,6 +731,8 @@ Current technical limitation:
 - `monitor wave` currently supports only `send_mode = 1` full-waveform monitoring
 - `monitor wave` currently supports only single-board monitoring
 - `monitor wave` currently has no advanced trigger conditions or frame history buffer
+- cross-board crossing alignment stays at 20M (50ns) precision; the 200M fine
+  fields are board-local and must not be compared across boards
 
 ## 15. Troubleshooting
 

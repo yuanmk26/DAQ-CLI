@@ -68,7 +68,8 @@ Compatibility note:
 
 ### 2.3 Packet framing is now mode-dependent
 
-Every packet now starts with a fixed 20-byte header:
+Every packet starts with a fixed header, either 20 bytes (format version 0)
+or 28 bytes (format version 1):
 
 ```text
 byte 0      : 0xFF
@@ -79,18 +80,22 @@ byte 4..7   : event_count[31:0]
 byte 8..15  : timestamp[63:0]
 byte 16..17 : hit_mask[15:0]
 byte 18     : feature record length
-byte 19     : reserved
+byte 19     : frame format version（0 = 20-byte header, >=1 = 28-byte header）
+byte 20..23 : crossing_fine[31:0]（>=1 only；200M 域过阈时刻，5ns 粒度）
+byte 24..27 : accept_fine[31:0]  （>=1 only；200M 域事件接受时刻）
 ```
 
 Receiver-side implication:
 
+- **header length is decided by byte 19**, not by send_mode; all daq-cli
+  parsers (native decode, live capture, wave monitor, vendored multi-board
+  script) discriminate on byte 19 so old-firmware frames still parse
 - payload length must be derived from `send_mode`
 - `hit_mask` alone is not enough to infer frame length
 - `mode 1` still carries a real `hit_mask`, even though payload is full-waveform
-
-Current `daq-cli` note:
-
-- first-version `daq monitor wave` supports only `send_mode = 1` live monitoring
+- frame length formulas start from 28 when version >= 1:
+  mode 0 = `28 + hit*256`, mode 1 = `28 + 4096`, mode 2 = `28 + hit*10`,
+  mode 3 = `28 + hit*266`
 
 ### 2.4 Feature payload exists as a first-class format
 
@@ -108,9 +113,52 @@ byte 6..9   : integral[31:0], signed int32
 This matters because future native parsing in `daq-cli` should not assume that
 all packets contain waveform payload.
 
-### 2.5 Multi-board acquisition already has a legacy workflow
+### 2.5 Fine crossing timestamps (format version >= 1)
 
-The external hardware project now contains `script/multi_board_acquire.py` and a
+`crossing_fine` / `accept_fine` are latched on the board-local 200M counter
+(5ns granularity); their difference `Δfine = accept_fine - crossing_fine`
+(wrap-safe unsigned subtraction) is the "crossing -> accept" on-board delay
+and cancels the 20M TCM-link quantization when aligning crossing positions.
+
+Precision facts:
+
+- single-board crossing moments: 5ns
+- crossing-position alignment across events: ~6ns (measured)
+- cross-board crossing alignment: still 50ns (20M timestamp) — the 200M
+  phases differ per board; level-2 phase locking is not implemented
+- do NOT compute absolute crossing time as `timestamp - Δfine`; cross-board
+  absolute time always uses the 20M `timestamp`
+
+Reference: `FDU-ADC-250M-16ch/docs/delta_fine_timestamp.md`.
+
+### 2.6 TCM trigger-link registers (ADC board 0x45..0x6C)
+
+Firmware `b02db46`+ exposes the TCM trigger link: real-time per-channel
+threshold crossing -> M21 pulse to the TCM board; TCM returns a wide MOSI
+pulse that acts as the acquisition trigger source (`Trigger_model = 9`).
+
+| Address | Content | Reset | Notes |
+| --- | --- | --- | --- |
+| `0x45..0x64` | 16 crossing thresholds `thr[15:0]` | 0 | ch0@0x45/46 ... ch15@0x63/64, big-endian, 12-bit effective |
+| `0x65..0x66` | channel mask `mask[15:0]` | 0 | bitN = chN participates |
+| `0x67..0x68` | polarity `polarity[15:0]` | 0 | 0 = pos (adc>thr), 1 = neg (adc<thr) |
+| `0x69..0x6A` | debounce interval | 200 | unit 5ns @200M (default 1us) |
+| `0x6B` | enable | 0 | bit0 = pulse output enable |
+| `0x6C` | M21 pulse width | 20 | unit 5ns (default 100ns); 0 = no pulse |
+
+Rules:
+
+- fully decoupled from `Hit_threshold` (0x20..0x3F, baseline-relative)
+- measured full-chain delay D ≈ 397ns; keep `Trigger_position` <= 10 when
+  using the TCM link so the crossing point stays inside the window
+- `Trigger_model = 9` is the TCM-trigger source; values 0..8 unchanged
+- TCM board side (FDU-TCM v2) exposes its own trigger-link registers at
+  `0x20..0x25` (TRG_CTRL / TRG_IN_MASK / TRG_PULSE_WIDTH / TRG_DEBOUNCE /
+  TRG_STATUS / TRG_CHAN) — different address space, not conflicting
+
+### 2.7 Multi-board acquisition already has a legacy workflow
+
+The external hardware project contains `script/multi_board_acquire.py` and a
 matching example config. That workflow already supports:
 
 - one TCP receiver thread per board
@@ -120,8 +168,10 @@ matching example config. That workflow already supports:
 - complete and partial event outputs
 - monitor snapshots written to `monitor.jsonl`
 
-This means multi-board acquisition is no longer only a design goal; there is now
-an existing legacy entrypoint that `daq-cli` can wrap.
+`daq-cli` vendors a copy under `_vendor/fdu_legacy/` and wraps it from
+`legacy_multi_capture_runner.py`. The vendored FrameParser is version-aware
+(byte 19) while the upstream script parses 28-byte headers unconditionally;
+keep that divergence marked with comments when re-syncing.
 
 ## 3. What In `daq-cli` Is Now Out Of Date
 
@@ -154,19 +204,16 @@ docs describe the current capture path as if "mode-2" were the protocol model.
 That needs correction because:
 
 - the firmware packet contract is now four-mode
-- future native parsers must branch on `send_mode`
-- future validation should detect incompatible `send_mode` values before capture
+- since v0.2.0 the native parser branches on `send_mode` and on the frame
+  format version (byte 19), and validation rejects incompatible `send_mode`
+  values before capture
 
-### 3.3 Multi-board acquisition status is behind reality
+### 3.3 Multi-board acquisition runs through the vendored legacy script
 
-The current repo still documents multi-board acquisition as "not implemented",
-which is true for this CLI surface, but incomplete from an integration point of
-view because the legacy project already provides a usable script.
-
-The docs should distinguish:
-
-- not implemented natively in `daq-cli`
-- already available as a legacy workflow that can be wrapped next
+`daq acquire multi` wraps the vendored `multi_board_acquire.py` (not a native
+implementation). The vendored FrameParser supports both 20-byte and 28-byte
+frames (byte 19 discrimination); the upstream script parses 28-byte headers
+unconditionally. Keep this divergence documented when re-syncing.
 
 ### 3.4 No local firmware compatibility reference existed
 
@@ -178,39 +225,31 @@ Before this document, the repo relied on external project docs for:
 - multi-board acquisition behavior
 
 That made it too easy for the CLI repo to drift from the firmware contract.
+This document is now the local reference; the external docs
+(`delta_fine_timestamp.md`, `tcp_sent_selected_channel_packet.md`,
+`rbcp_register_map.md`) are the firmware-side authority for details.
 
 ## 4. Recommended Code Changes
 
-These are the highest-value follow-up code changes.
+Status as of v0.2.0:
 
-### 4.1 Short term
+- ~~Add `daq acquire multi <group>` as a wrapper~~ — done, plus configurable
+  multi-board profile defaults (aggregation key, match window, timeouts,
+  outputs).
+- ~~Remove the `send_mode = 2` means `feature + waveform` assumption; base
+  packet length on `send_mode`; support all four frame types~~ — done; native
+  parser branches on `send_mode` and byte-19 format version (20B/28B).
+- ~~Add native data models for packet headers, feature records, waveform
+  frames~~ — done (`tcp_sent_decode.py` models, fine fields since v0.2.0).
 
-- Add a firmware-aware note to single-board acquisition output and docs that the
-  current adapter is legacy-script based.
-- Add a dedicated doc-backed explanation that current `tcp-mode2-*` commands are
-  historical names for `TCP_SENT` configuration readback.
+Still open:
+
+- Rename `tcp-mode2-*` commands toward `tcp-sent` / `packet-mode` terminology
+  (kept for compatibility; see 3.1).
 - Add a board-level readback for firmware version registers:
-  - `0x00..0x03` `SYN_DATE`
-  - `0x04` `FPGA_VER`
-
-### 4.2 Medium term
-
-- Add `daq acquire multi <group>` as a wrapper around
-  `script/multi_board_acquire.py`.
-- Extend profile/default models so multi-board acquisition can express:
-  - aggregation key
-  - timestamp match window
-  - TCM startup policy
-  - reconnect and timeout settings
-- Add native data models for packet headers, feature records, and waveform
-  frames.
-
-### 4.3 Before native parser work
-
-- Remove any future assumption that `send_mode = 2` means
-  `feature + waveform`.
-- Base packet-length computation on `send_mode`.
-- Support all four frame types from the start.
+  `0x00..0x03` `SYN_DATE`, `0x04` `FPGA_VER`.
+- Level-2 phase locking (200M locked to 20M) for cross-board 5ns alignment —
+  firmware-side open item, not implemented.
 
 ## 5. Recommended Documentation Changes
 

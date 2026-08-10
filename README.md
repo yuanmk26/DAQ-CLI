@@ -19,6 +19,8 @@ The repository currently contains:
   - `daq board config <device>`
   - `daq board trigger-show <device>`
   - `daq board tcp-mode2-show <device>`
+  - `daq board tcm-link-show <device>`
+  - `daq board tcm-link-config <device> --mask ...`
   - `daq board config-show <device>`
   - `daq board reg-read <device> <address>`
   - `daq acquire single <device>`
@@ -88,6 +90,10 @@ Firmware notes:
 - current board readback commands still use historical `tcp-mode2` naming
 - latest firmware exposes four `TCP_SENT` packet modes rather than a single
   special "mode-2" protocol
+- since v0.2.0 frames carry a 28-byte header (format version in byte 19) with
+  `crossing_fine` / `accept_fine` timestamps; old 20-byte frames still decode
+- `daq board tcm-link-*` drives the TCM trigger link registers (`0x45..0x6C`)
+  and `Trigger_model = 9` is supported
 - see `docs/firmware-compatibility.md` for the current firmware-facing contract
 
 Capture single-board data:
