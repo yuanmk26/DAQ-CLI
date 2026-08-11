@@ -16,7 +16,7 @@ from daq_cli.application.output_config import (
 from daq_cli.infrastructure.tcp_sent_decode import decode_tcp_sent_packet
 from daq_cli.infrastructure.wave_monitor import MultiBoardWaveUpdate, WaveMonitorFrame
 from daq_cli.presentation.gui import formatting, threads
-from daq_cli.presentation.gui.widgets import ResultArea
+from daq_cli.presentation.gui.widgets import ResultArea, ScrollableFrame
 from daq_cli.presentation.wave_monitor_viewer import (
     DEFAULT_MULTI_BOARD_HISTORY_LIMIT,
     MultiBoardViewerState,
@@ -36,7 +36,9 @@ from daq_cli.presentation.wave_monitor_viewer import (
 class AcquireTab:
     def __init__(self, app, notebook) -> None:
         self.app = app
-        self.frame = ttk.Frame(notebook, padding=8)
+        # The whole tab is scrollable so the result strip stays reachable
+        # even on short windows; children go into frame.inner.
+        self.frame = ScrollableFrame(notebook, padding=8)
         self.acquire_service = AcquireService()
         self._single_busy = False
         self._multi_busy = False
@@ -54,7 +56,7 @@ class AcquireTab:
 
         # The acquire tab splits into two pages so each capture mode gets
         # the full height (the embedded waveform monitor in particular).
-        self._inner_notebook = ttk.Notebook(self.frame)
+        self._inner_notebook = ttk.Notebook(self.frame.inner)
         self._inner_notebook.pack(fill=tk.BOTH, expand=True)
         self._single_page = ttk.Frame(self._inner_notebook, padding=8)
         self._multi_page = ttk.Frame(self._inner_notebook, padding=8)

@@ -77,6 +77,24 @@ class MonitorTab:
     def _build_canvas_area(self) -> None:
         self._canvas_frame = ttk.Frame(self.frame)
         self._canvas_frame.pack(fill=tk.BOTH, expand=True, pady=(6, 4))
+        # Always-present blank canvas; each session recreates it fresh.
+        self._create_canvas(source_label="监视")
+
+    def _create_canvas(self, source_label: str) -> None:
+        """(Re)create the embedded waveform canvas (blank until a session
+        starts rendering into it)."""
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+        if self._canvas is not None:
+            self._canvas.get_tk_widget().destroy()
+            self._canvas = None
+        self._figure = WaveMonitorFigure(
+            source_label=source_label,
+            help_text="启动监视后实时滚动（RUN/STOP/SINGLE 按钮控制）",
+        )
+        self._canvas = FigureCanvasTkAgg(self._figure.figure, master=self._canvas_frame)
+        self._canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self._canvas.draw()
 
     def _build_control_row(self) -> None:
         row = ttk.Frame(self.frame)
@@ -133,15 +151,7 @@ class MonitorTab:
         self._session = context.__enter__()
         self._run_state = WaveMonitorRunState.RUN
         self._loop_state = WaveMonitorLoopState()
-        self._figure = WaveMonitorFigure(
-            source_label=self._session.source_label,
-            help_text="RUN/STOP/SINGLE 按钮控制显示",
-        )
-        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-
-        self._canvas = FigureCanvasTkAgg(self._figure.figure, master=self._canvas_frame)
-        self._canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        self._canvas.draw()
+        self._create_canvas(source_label=self._session.source_label)
         self._start_button.configure(state=tk.DISABLED)
         self._stop_button.configure(state=tk.NORMAL)
         self.result.show(f"监视已启动: {self._session.source_label}")
@@ -176,10 +186,7 @@ class MonitorTab:
         finally:
             self._context = None
             self._session = None
-        if self._canvas is not None:
-            self._canvas.get_tk_widget().destroy()
-            self._canvas = None
-        self._figure = None
+        # Keep the last frame visible for inspection; the canvas stays.
         self._start_button.configure(state=tk.NORMAL)
         self._stop_button.configure(state=tk.DISABLED)
         self._run_state_label.configure(text="RUN")
