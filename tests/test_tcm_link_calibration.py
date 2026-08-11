@@ -11,6 +11,7 @@ from daq_cli.infrastructure.tcm_link_calibration import (
     suggested_threshold_for,
     suggested_thresholds,
 )
+from daq_cli.infrastructure.tcp_sent_protocol import ADC_LENGTH
 
 
 def _build_mode1_packet(
@@ -27,7 +28,7 @@ def _build_mode1_packet(
     header[16:18] = b"\xFF\xFF"
     header[19] = 1
     payload = bytearray()
-    for sample in range(64):
+    for sample in range(ADC_LENGTH):
         for channel in range(16):
             if channel in pulses and sample % 8 == 0:
                 value = pulses[channel]
@@ -112,7 +113,7 @@ class CalibrateFromStreamTests(unittest.TestCase):
         self.assertEqual(calibration.frames, 2)
         self.assertEqual(len(calibration.channels), 16)
         self.assertGreaterEqual(calibration.channels[0].samples, 128)
-        self.assertEqual(calibration.channels[0].baseline, 2048)
+        self.assertEqual(calibration.channels[0].baseline, 2047)
         self.assertTrue(fake_socket.closed)
 
     def test_suggested_thresholds_apply_offset_by_polarity(self) -> None:
@@ -154,7 +155,10 @@ class MeasureTcmLinkServiceTests(unittest.TestCase):
         service = BoardService()
         adapter = SimpleNamespace(
             read_tcp_mode2_config=lambda d: SimpleNamespace(send_mode=1),
+            read_trigger_config=lambda d: SimpleNamespace(trigger_mode=9),
+            read_registers=lambda d, a, l: SimpleNamespace(data=bytes([0x01])),
             write_send_mode=lambda d, m: None,
+            write_registers=lambda d, a, b: None,
         )
         calibration = SimpleNamespace(
             device_name="dev1", duration_s=1.0, frames=10, channels=[],
@@ -177,11 +181,15 @@ class MeasureTcmLinkServiceTests(unittest.TestCase):
         calibrate.assert_called_once()
         self.assertEqual(result.original_send_mode, 1)
 
-    def test_measure_switches_and_restores_send_mode(self) -> None:
+    def test_measure_switches_to_periodic_and_restores(self) -> None:
+        """Non-model-7 boards are switched to the periodic self-trigger so
+        frames arrive without an external trigger, then the original
+        trigger model and M21 enable state are restored."""
         service, profile, device, adapter, calibration = self._service_and_patches()
         adapter.read_tcp_mode2_config = lambda d: SimpleNamespace(send_mode=0)
-        writes: list[int] = []
-        adapter.write_send_mode = lambda d, m: writes.append(m)
+        writes: list[tuple[int, int]] = []
+        adapter.write_send_mode = lambda d, m: writes.append(("sm", m))
+        adapter.write_registers = lambda d, a, b: writes.append((a, b[0]))
         with patch.object(service, "_resolve_device", return_value=(profile, device)):
             with patch.object(service, "_make_adapter", return_value=adapter):
                 with patch(
@@ -193,8 +201,35 @@ class MeasureTcmLinkServiceTests(unittest.TestCase):
                         profile_path="profiles/example.yaml",
                         seconds=1.0,
                     )
-        self.assertEqual(writes, [1, 0])  # switch to 1, restore to 0
+        # send_mode 0 -> 1 -> 0; trigger 9 -> 7 -> 9; M21 re-armed 0 -> 1
+        self.assertEqual(writes, [
+            ("sm", 1),
+            (0x10, 7),
+            (0x10, 9),
+            (0x6B, 0x00),
+            (0x6B, 0x01),
+            ("sm", 0),
+        ])
         self.assertEqual(result.original_send_mode, 0)
+
+    def test_measure_keeps_mode7_untouched(self) -> None:
+        """Boards already in periodic mode are not switched at all."""
+        service, profile, device, adapter, calibration = self._service_and_patches()
+        adapter.read_trigger_config = lambda d: SimpleNamespace(trigger_mode=7)
+        writes: list[tuple[int, int]] = []
+        adapter.write_registers = lambda d, a, b: writes.append((a, b[0]))
+        with patch.object(service, "_resolve_device", return_value=(profile, device)):
+            with patch.object(service, "_make_adapter", return_value=adapter):
+                with patch(
+                    "daq_cli.application.board_service.calibrate_from_stream",
+                    return_value=calibration,
+                ):
+                    service.measure_tcm_link(
+                        device_name="dev1",
+                        profile_path="profiles/example.yaml",
+                        seconds=1.0,
+                    )
+        self.assertEqual(writes, [])  # no register writes at all
 
 
 if __name__ == "__main__":

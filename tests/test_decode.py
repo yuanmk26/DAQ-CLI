@@ -50,7 +50,7 @@ class DecodeTests(unittest.TestCase):
             self.assertEqual(len(event.channels), 16)
             self.assertTrue(all(channel is not None for channel in event.channels))
             self.assertTrue(all(len(channel) == ADC_LENGTH * 2 for channel in event.channels if channel is not None))
-            self.assertEqual(event.raw_packet_bytes, 4116)
+            self.assertEqual(event.raw_packet_bytes, 16404)
         finally:
             shutil.rmtree(event_path.parent.parent.parent, ignore_errors=True)
 
@@ -115,7 +115,7 @@ class DecodeTests(unittest.TestCase):
                 "\n".join(
                     [
                         "send_mode=1",
-                        "adc_length=64",
+                        "adc_length=256",
                     ]
                 )
                 + "\n",
@@ -181,7 +181,7 @@ class DecodeTests(unittest.TestCase):
             self.assertEqual(result.exit_code, 0, result.output)
             self.assertIn("Decoded event:", result.output)
             self.assertIn("send_mode=1", result.output)
-            self.assertIn("raw_packet_bytes=4116", result.output)
+            self.assertIn("raw_packet_bytes=16404", result.output)
         finally:
             shutil.rmtree(event_path.parent.parent.parent, ignore_errors=True)
 
@@ -487,7 +487,7 @@ class DecodeTests(unittest.TestCase):
         root = Path("tmp_test_decode") / uuid.uuid4().hex / "run"
         (root / "raw").mkdir(parents=True, exist_ok=False)
         (root / "capture_info.txt").write_text(
-            f"send_mode={send_mode}\nadc_length=64\n",
+            f"send_mode={send_mode}\nadc_length=256\n",
             encoding="utf-8",
         )
         return root

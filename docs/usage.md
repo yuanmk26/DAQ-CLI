@@ -82,7 +82,7 @@ groups:
     tcm: main
 
 defaults:
-  adc_length: 64
+  adc_length: 256
   output_dir: out
   trigger_mode: 1
   trigger_position: 40

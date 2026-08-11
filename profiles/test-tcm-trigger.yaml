@@ -46,7 +46,7 @@ groups:
 
 defaults:
   output_dir: out
-  adc_length: 64
+  adc_length: 256
   acquire_multi:
     aggregation_key: timestamp
     timestamp_match_window_ticks: 10

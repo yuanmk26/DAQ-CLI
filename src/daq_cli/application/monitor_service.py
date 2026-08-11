@@ -127,7 +127,7 @@ class MonitorService:
         original = adapter.read_tcp_mode2_config(device).send_mode
         source = LiveWaveMonitorSource(
             device=device,
-            adc_length=int(profile.defaults.get("adc_length", 64)),
+            adc_length=int(profile.defaults.get("adc_length", 256)),
             tcp_timeout_s=tcp_timeout_s,
         )
         return LiveWaveMonitorContext(

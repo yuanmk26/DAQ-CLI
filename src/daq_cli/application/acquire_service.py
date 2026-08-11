@@ -317,7 +317,7 @@ class AcquireService:
                 output_base_dir=base_dir,
                 tcm_ip=tcm_config.ip,
                 tcm_rbcp_port=tcm_config.rbcp_port,
-                adc_length=int(profile.defaults.get("adc_length", 64)),
+                adc_length=int(profile.defaults.get("adc_length", 256)),
                 aggregation_key=aggregation_key,
                 timestamp_match_window_ticks=timestamp_match_window_ticks,
                 event_timeout_ms=event_timeout_ms,

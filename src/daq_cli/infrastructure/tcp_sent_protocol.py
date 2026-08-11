@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-ADC_LENGTH = 64
+ADC_LENGTH = 256
 FEATURE_BYTES = 10
 FRAME_PREFIX = b"\xFF\xFE\x01"
 MODE2_MAGIC = b"\xff\xfe\x01\x02"

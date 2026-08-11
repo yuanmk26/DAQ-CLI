@@ -290,19 +290,41 @@ class BoardService:
         """Capture a short full-waveform stream and suggest per-channel
         crossing thresholds + polarities.
 
-        Temporarily switches the board to send_mode=1 and restores the
-        original mode afterwards.
+        Temporarily switches the board to send_mode=1 with the periodic
+        self-trigger (model 7) so frames arrive regardless of the current
+        trigger source (TCM-triggered boards without an active trigger
+        never send frames), then restores both afterwards.
         """
         profile, device = self._resolve_device(device_name, profile_path)
         adapter = self._make_adapter(profile)
         original_send_mode = adapter.read_tcp_mode2_config(device).send_mode
+        original_trigger_model = adapter.read_trigger_config(device).trigger_mode
+        original_m21_en = adapter.read_registers(device, 0x6B, 1).data[0] & 0x01
+        switched_trigger = original_trigger_model != 7
         try:
             if original_send_mode != 1:
                 adapter.write_send_mode(device, 1)
+            if switched_trigger:
+                adapter.write_registers(device, 0x10, bytes([7]))
             calibration = calibrate_from_stream(
                 device, seconds=seconds, tcp_timeout_s=tcp_timeout_s
             )
         finally:
+            if switched_trigger:
+                try:
+                    adapter.write_registers(
+                        device, 0x10, bytes([original_trigger_model])
+                    )
+                except Exception as restore_exc:  # noqa: BLE001 - best effort
+                    print(f"Warning: failed to restore trigger_model: {restore_exc}")
+                # Mode switches can stall the M21 pulse path; restore the
+                # previous enabled state by re-asserting the enable bit.
+                try:
+                    adapter.write_registers(device, 0x6B, bytes([0x00]))
+                    if original_m21_en:
+                        adapter.write_registers(device, 0x6B, bytes([0x01]))
+                except Exception as rearm_exc:  # noqa: BLE001 - best effort
+                    print(f"Warning: failed to re-arm M21 output: {rearm_exc}")
             if original_send_mode != 1:
                 try:
                     adapter.write_send_mode(device, original_send_mode)

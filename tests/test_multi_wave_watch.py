@@ -33,7 +33,7 @@ from daq_cli.infrastructure.tcp_sent_decode import decode_tcp_sent_packet
 from daq_cli.infrastructure.run_name_allocator import allocate_next_run_dir
 
 
-ADC_LENGTH = 64
+ADC_LENGTH = 256
 
 
 class MultiWaveWatchTests(unittest.TestCase):
@@ -95,7 +95,7 @@ class MultiWaveWatchTests(unittest.TestCase):
             board = mba.BoardConfig(
                 board_id=0, name="dev1", ip="192.168.10.10", tcp_port=24,
             )
-            parser = mba.FrameParser(adc_length=64)
+            parser = mba.FrameParser(adc_length=256)
 
             fine_buffer = bytearray(fine_packet)
             fine_frame, desync = parser.parse_one(fine_buffer, board, False)
@@ -297,7 +297,7 @@ class MultiWaveWatchTests(unittest.TestCase):
             output_base_dir=Path("out/multi"),
             tcm_ip="192.168.10.16",
             tcm_rbcp_port=4660,
-            adc_length=64,
+            adc_length=256,
             aggregation_key="timestamp",
             timestamp_match_window_ticks=10,
             event_timeout_ms=50,
@@ -359,7 +359,7 @@ class MultiWaveWatchTests(unittest.TestCase):
             output_base_dir=Path("out/multi"),
             tcm_ip="192.168.10.16",
             tcm_rbcp_port=4660,
-            adc_length=64,
+            adc_length=256,
             aggregation_key="timestamp",
             timestamp_match_window_ticks=10,
             event_timeout_ms=50,
@@ -452,7 +452,7 @@ class MultiWaveWatchTests(unittest.TestCase):
             output_base_dir=base_dir / "out",
             tcm_ip="192.168.10.16",
             tcm_rbcp_port=4660,
-            adc_length=64,
+            adc_length=256,
             aggregation_key="timestamp",
             timestamp_match_window_ticks=10,
             event_timeout_ms=50,

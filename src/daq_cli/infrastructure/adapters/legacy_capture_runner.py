@@ -858,52 +858,64 @@ class _TcpSentRawStreamReader:
             self._recv_more()
 
     def read_packet(self) -> bytes:
-        self._sync_to_magic()
-        self._fill(HEADER_BYTES)
+        # Dense payloads (e.g. high-rate trigger storms) can contain the magic
+        # prefix FF FE 01 by chance; validate header fields and re-sync by
+        # dropping one byte instead of failing on the first garbage header.
+        # Only after many consecutive invalid headers do we treat it as a real
+        # mode/format mismatch and raise.
+        bad_headers = 0
+        while True:
+            self._sync_to_magic()
+            self._fill(HEADER_BYTES)
 
-        header = bytes(self.buffer[:HEADER_BYTES])
-        mode = header[3]
-        if self.expected_send_mode is not None and mode != self.expected_send_mode:
-            del self.buffer[0]
-            raise ValueError(
-                f"synced packet mode {mode} does not match expected send_mode "
-                f"{self.expected_send_mode}"
+            header = bytes(self.buffer[:HEADER_BYTES])
+            mode = header[3]
+
+            # Frame format version lives in header byte 19: 0 = legacy 20-byte
+            # header, >=1 = 28-byte header with crossing_fine/accept_fine.
+            format_version = header[19]
+            header_bytes = header_bytes_for(format_version)
+            if header_bytes > HEADER_BYTES:
+                self._fill(header_bytes)
+                header = bytes(self.buffer[:header_bytes])
+
+            hit_mask = _u16_be(header, 16)
+            feature_size = header[18]
+            valid = (
+                mode <= 3
+                and format_version <= 1
+                and (
+                    self.expected_send_mode is None
+                    or mode == self.expected_send_mode
+                )
+                and (
+                    (mode in (2, 3) and feature_size == FEATURE_BYTES)
+                    or (mode in (0, 1) and feature_size == 0)
+                )
             )
+            if valid:
+                hit_count = _bit_count(hit_mask)
+                total_size = frame_total_size(
+                    send_mode=mode,
+                    hit_count=hit_count,
+                    adc_length=ADC_LENGTH,
+                    feature_bytes=FEATURE_BYTES,
+                    format_version=format_version,
+                )
+                self._fill(total_size)
+                packet = bytes(self.buffer[:total_size])
+                del self.buffer[:total_size]
+                return packet
 
-        # Frame format version lives in header byte 19: 0 = legacy 20-byte
-        # header, >=1 = 28-byte header with crossing_fine/accept_fine.
-        format_version = header[19]
-        header_bytes = header_bytes_for(format_version)
-        if header_bytes > HEADER_BYTES:
-            self._fill(header_bytes)
-            header = bytes(self.buffer[:header_bytes])
-
-        hit_mask = _u16_be(header, 16)
-        feature_size = header[18]
-        if mode in (2, 3) and feature_size != FEATURE_BYTES:
+            bad_headers += 1
+            if bad_headers >= 100:
+                raise ValueError(
+                    f"unable to sync to a valid header after 100 attempts "
+                    f"(last: mode {mode}, format_version {format_version}, "
+                    f"feature_size {feature_size}, expected_send_mode "
+                    f"{self.expected_send_mode})"
+                )
             del self.buffer[0]
-            raise ValueError(
-                f"send_mode {mode} feature size is {feature_size}, expected "
-                f"{FEATURE_BYTES}"
-            )
-        if mode in (0, 1) and feature_size != 0:
-            del self.buffer[0]
-            raise ValueError(
-                f"send_mode {mode} feature size is {feature_size}, expected 0"
-            )
-
-        hit_count = _bit_count(hit_mask)
-        total_size = frame_total_size(
-            send_mode=mode,
-            hit_count=hit_count,
-            adc_length=ADC_LENGTH,
-            feature_bytes=FEATURE_BYTES,
-            format_version=format_version,
-        )
-        self._fill(total_size)
-        packet = bytes(self.buffer[:total_size])
-        del self.buffer[:total_size]
-        return packet
 
 
 _Mode2RawStreamReader = _TcpSentRawStreamReader

@@ -48,7 +48,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
     def test_mode2_reader_rejects_non_mode2_packets(self) -> None:
         bad_packet = _build_tcp_sent_packet(send_mode=1, hit_mask=0x0001, event_count=1)
         reader = _Mode2RawStreamReader(
-            FakeSocket([bad_packet]),
+            FakeSocket([bad_packet] * 120),
             expected_send_mode=2,
         )
         with self.assertRaises(ValueError):
@@ -60,11 +60,26 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         )
         bad_packet[18] = 9
         reader = _Mode2RawStreamReader(
-            FakeSocket([bytes(bad_packet)]),
+            FakeSocket([bytes(bad_packet)] * 120),
             expected_send_mode=2,
         )
         with self.assertRaises(ValueError):
             reader.read_packet()
+
+    def test_mode2_reader_resyncs_across_garbage_header(self) -> None:
+        """A payload byte sequence that mimics the magic prefix with a wrong
+        header must be skipped, and the next valid packet still read."""
+        good_packet = _build_tcp_sent_packet(
+            send_mode=2, hit_mask=0x0001, event_count=1
+        )
+        # Garbage that starts with the magic prefix but has mode=5 (invalid)
+        # followed by the real packet.
+        garbage = b"\xff\xfe\x01\x05" + bytes(20)
+        reader = _Mode2RawStreamReader(
+            FakeSocket([garbage + good_packet]),
+            expected_send_mode=2,
+        )
+        self.assertEqual(reader.read_packet(), good_packet)
 
     def test_frame_total_size_uses_send_mode_specific_lengths(self) -> None:
         self.assertEqual(_frame_total_size(send_mode=0, hit_count=2, adc_length=64, feature_bytes=10), 532)
@@ -1127,7 +1142,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                     name="main", ip="192.168.10.16", rbcp_port=4660
                 )
             },
-            defaults={"output_dir": "out", "adc_length": 64},
+            defaults={"output_dir": "out", "adc_length": 256},
             legacy=SimpleNamespace(project_root=Path("legacy")),
         )
         service = AcquireService()
