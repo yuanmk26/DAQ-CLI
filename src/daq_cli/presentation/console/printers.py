@@ -338,6 +338,32 @@ def _tcm_trigger_table(result: TcmTriggerConfigReadResult) -> Table:
             if (result.last_trigger_channels >> channel) & 0x1
         ]
         table.add_row("last_trigger_channels", ",".join(channels))
+    # coincidence (v3)
+    table.add_row("coincidence_enabled", str(result.coincidence_enabled))
+    table.add_row(
+        "coinc_groups",
+        str(result.grp_count) if result.grp_count else "default 2",
+    )
+    table.add_row(
+        "coinc_window",
+        f"{result.coinc_window} x 50ns = {result.coinc_window * 50e-3:.1f} us"
+        if result.coinc_window
+        else "default 4 (200ns)",
+    )
+    if result.coincidence_enabled:
+        for index in range(4):
+            table.add_row(
+                f"grp{index}_mask",
+                f"0x{result.group_masks[index]:02X}",
+            )
+        table.add_row(
+            "grp_n",
+            ",".join(str(value) for value in result.group_n),
+        )
+        table.add_row("collecting", str(result.collecting))
+        table.add_row("grp_ok", f"0x{result.grp_ok:01X}")
+        table.add_row("coinc_timeout_sticky", str(result.coinc_timeout_sticky))
+        table.add_row("collected_count", str(result.collected_count))
     table.add_row("profile", str(result.source_profile))
     return table
 

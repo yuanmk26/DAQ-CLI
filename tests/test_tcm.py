@@ -36,6 +36,15 @@ class TcmServiceTests(unittest.TestCase):
             trig_sticky=True,
             pending=False,
             wide_pulse_active=False,
+            coincidence_enabled=False,
+            grp_count=0,
+            coinc_window=0,
+            coinc_timeout_sticky=False,
+            collected_count=0,
+            collecting=False,
+            grp_ok=0,
+            group_masks=(0, 0, 0, 0),
+            group_n=(0, 0, 0, 0),
             last_trigger_channels=0x02,
         )
         with patch.object(
@@ -65,6 +74,15 @@ class TcmServiceTests(unittest.TestCase):
             trig_sticky=False,
             pending=False,
             wide_pulse_active=False,
+            coincidence_enabled=False,
+            grp_count=0,
+            coinc_window=0,
+            coinc_timeout_sticky=False,
+            collected_count=0,
+            collecting=False,
+            grp_ok=0,
+            group_masks=(0, 0, 0, 0),
+            group_n=(0, 0, 0, 0),
             last_trigger_channels=0,
         )
         with patch.object(
@@ -85,6 +103,11 @@ class TcmServiceTests(unittest.TestCase):
             mask=0x01,
             pulse_width=40,
             debounce=25,
+            coincidence_enabled=False,
+            grp_count=0,
+            coinc_window=0,
+            group_masks=(0, 0, 0, 0),
+            group_n=(0, 0, 0, 0),
         )
         self.assertEqual(result.mask, 0x01)
         self.assertEqual(result.pulse_width, 40)
@@ -101,6 +124,15 @@ class TcmServiceTests(unittest.TestCase):
             trig_sticky=False,
             pending=False,
             wide_pulse_active=False,
+            coincidence_enabled=False,
+            grp_count=0,
+            coinc_window=0,
+            coinc_timeout_sticky=False,
+            collected_count=0,
+            collecting=False,
+            grp_ok=0,
+            group_masks=(0, 0, 0, 0),
+            group_n=(0, 0, 0, 0),
             last_trigger_channels=0,
         )
         with patch.object(
@@ -155,6 +187,15 @@ class TcmCliTests(unittest.TestCase):
                 trig_sticky=True,
                 pending=False,
                 wide_pulse_active=False,
+            coincidence_enabled=False,
+            grp_count=0,
+            coinc_window=0,
+            coinc_timeout_sticky=False,
+            collected_count=0,
+            collecting=False,
+            grp_ok=0,
+            group_masks=(0, 0, 0, 0),
+            group_n=(0, 0, 0, 0),
                 last_trigger_channels=0x02,
             )
             with patch("daq_cli.cli.tcm.TcmService", return_value=service):
@@ -188,6 +229,11 @@ class TcmCliTests(unittest.TestCase):
                 mask=0x01,
                 pulse_width=32,
                 debounce=20,
+                coincidence_enabled=False,
+                grp_count=0,
+                coinc_window=0,
+                group_masks=(0, 0, 0, 0),
+                group_n=(0, 0, 0, 0),
             )
             with patch.object(TcmService, "clear_trigger_sticky") as clear_sticky:
                 with patch("daq_cli.cli.tcm.TcmService", return_value=service):
@@ -217,6 +263,11 @@ class TcmCliTests(unittest.TestCase):
             mask=0x01,
             pulse_width=40,
             debounce=25,
+            coincidence_enabled=False,
+            grp_count=0,
+            coinc_window=0,
+            group_masks=(0, 0, 0, 0),
+            group_n=(0, 0, 0, 0),
         )
         clear_sticky.assert_called_once_with(
             tcm_name="main", profile_path=Path("profiles/example.yaml")

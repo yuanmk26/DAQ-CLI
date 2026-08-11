@@ -452,6 +452,15 @@ def format_tcm_trigger_read(
     pending: bool,
     wide_pulse_active: bool,
     last_trigger_channels: int,
+    coincidence_enabled: bool = False,
+    grp_count: int = 0,
+    coinc_window: int = 0,
+    coinc_timeout_sticky: bool = False,
+    collected_count: int = 0,
+    collecting: bool = False,
+    grp_ok: int = 0,
+    group_masks: tuple[int, int, int, int] = (0, 0, 0, 0),
+    group_n: tuple[int, int, int, int] = (0, 0, 0, 0),
 ) -> str:
     enabled_channels = [channel for channel in range(8) if (mask >> channel) & 0x1]
     rows: list[tuple[str, object]] = [
@@ -473,6 +482,22 @@ def format_tcm_trigger_read(
             if last_trigger_channels
             else "-",
         ),
-        ("profile", source_profile),
+        ("coincidence_enabled", coincidence_enabled),
+        ("coinc_groups", grp_count if grp_count else "default 2"),
+        (
+            "coinc_window",
+            f"{coinc_window} x 50ns = {coinc_window * 50e-3:.1f} us"
+            if coinc_window
+            else "default 4 (200ns)",
+        ),
     ]
+    if coincidence_enabled:
+        for index in range(4):
+            rows.append((f"grp{index}_mask", f"0x{group_masks[index]:02X}"))
+        rows.append(("grp_n", ",".join(str(value) for value in group_n)))
+        rows.append(("collecting", collecting))
+        rows.append(("grp_ok", f"0x{grp_ok:01X}"))
+        rows.append(("coinc_timeout_sticky", coinc_timeout_sticky))
+        rows.append(("collected_count", collected_count))
+    rows.append(("profile", source_profile))
     return format_fields(f"TCM Trigger Config: {tcm.name}", rows)

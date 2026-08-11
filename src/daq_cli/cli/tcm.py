@@ -74,9 +74,43 @@ def tcm_config(
             help="Clear the trigger sticky status bit after writing.",
         ),
     ] = False,
+    coincidence: Annotated[
+        bool,
+        typer.Option(
+            "--coincidence/--no-coincidence",
+            help="Enable coincidence mode (>=N per group, AND over groups).",
+        ),
+    ] = False,
+    coinc_groups: Annotated[
+        int,
+        typer.Option("--coinc-groups", min=0, max=4, help="Enabled group count (0=default 2)."),
+    ] = 0,
+    coinc_window: Annotated[
+        int,
+        typer.Option(
+            "--coinc-window",
+            min=0,
+            max=0xFF,
+            help="Coincidence window in 20M cycles (0=default 4).",
+        ),
+    ] = 0,
+    coinc_masks: Annotated[
+        str | None,
+        typer.Option(
+            "--coinc-masks",
+            help="4 group participation masks, comma-separated hex, e.g. 0x03,0x0C.",
+        ),
+    ] = None,
+    coinc_ns: Annotated[
+        str | None,
+        typer.Option(
+            "--coinc-ns",
+            help="4 group N values (1..8, 0=default 1), comma-separated, e.g. 1,1,0,0.",
+        ),
+    ] = None,
     profile: RequiredProfileOption = ...,
 ) -> None:
-    """Write TCM trigger-link configuration (0x20..0x23) and verify by readback."""
+    """Write TCM trigger-link configuration (0x20..0x2F) and verify by readback."""
     parsed_mask = 0
     if mask is not None:
         try:
@@ -88,6 +122,38 @@ def tcm_config(
         if parsed_mask < 0 or parsed_mask > 0xFF:
             raise typer.BadParameter("--mask must stay in range 0..0xFF")
 
+    group_masks = (0, 0, 0, 0)
+    if coinc_masks is not None:
+        raw_masks = [part.strip() for part in coinc_masks.split(",")]
+        if len(raw_masks) != 4:
+            raise typer.BadParameter("--coinc-masks needs exactly 4 comma-separated values")
+        parsed_masks = []
+        for item in raw_masks:
+            try:
+                parsed = int(item, 0)
+            except ValueError as exc:
+                raise typer.BadParameter(f"Invalid --coinc-masks value '{item}'") from exc
+            if parsed < 0 or parsed > 0xFF:
+                raise typer.BadParameter("--coinc-masks values must stay in range 0..0xFF")
+            parsed_masks.append(parsed)
+        group_masks = tuple(parsed_masks)  # type: ignore[assignment]
+
+    group_n = (0, 0, 0, 0)
+    if coinc_ns is not None:
+        raw_ns = [part.strip() for part in coinc_ns.split(",")]
+        if len(raw_ns) != 4:
+            raise typer.BadParameter("--coinc-ns needs exactly 4 comma-separated values")
+        parsed_ns = []
+        for item in raw_ns:
+            try:
+                parsed = int(item, 0)
+            except ValueError as exc:
+                raise typer.BadParameter(f"Invalid --coinc-ns value '{item}'") from exc
+            if parsed < 0 or parsed > 8:
+                raise typer.BadParameter("--coinc-ns values must stay in range 0..8")
+            parsed_ns.append(parsed)
+        group_n = tuple(parsed_ns)  # type: ignore[assignment]
+
     service = TcmService()
     result = service.configure_trigger(
         tcm_name=name,
@@ -96,6 +162,11 @@ def tcm_config(
         mask=parsed_mask,
         pulse_width=width,
         debounce=debounce,
+        coincidence_enabled=coincidence,
+        grp_count=coinc_groups,
+        coinc_window=coinc_window,
+        group_masks=group_masks,  # type: ignore[arg-type]
+        group_n=group_n,  # type: ignore[arg-type]
     )
     print_tcm_trigger_config_write_result(result)
     if clear_sticky:

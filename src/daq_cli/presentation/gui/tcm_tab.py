@@ -60,6 +60,52 @@ class TcmTab:
             anchor="w", pady=(8, 0)
         )
 
+        coinc = ttk.LabelFrame(self.frame, text="符合触发 (v3, 0x27..0x2F)", padding=(8, 4))
+        coinc.pack(fill=tk.X, pady=(8, 0))
+        row = ttk.Frame(coinc)
+        row.pack(fill=tk.X)
+        self._coinc_enable_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(row, text="符合模式", variable=self._coinc_enable_var).pack(
+            side=tk.LEFT
+        )
+        ttk.Label(row, text="组数(0=默认2):").pack(side=tk.LEFT, padx=(12, 0))
+        self._coinc_groups_var = tk.StringVar(value="0")
+        ttk.Entry(row, textvariable=self._coinc_groups_var, width=3).pack(
+            side=tk.LEFT, padx=(4, 12)
+        )
+        ttk.Label(row, text="窗口(20M周期, 0=默认4):").pack(side=tk.LEFT)
+        self._coinc_window_var = tk.StringVar(value="0")
+        ttk.Entry(row, textvariable=self._coinc_window_var, width=4).pack(
+            side=tk.LEFT, padx=(4, 0)
+        )
+        grid = ttk.Frame(coinc)
+        grid.pack(fill=tk.X, pady=(6, 0))
+        self._grp_mask_vars: list[tk.StringVar] = []
+        self._grp_n_vars: list[tk.StringVar] = []
+        for index in range(4):
+            ttk.Label(grid, text=f"组{index} mask:").grid(
+                row=index // 2, column=(index % 2) * 3, sticky="w", padx=(0, 4), pady=2
+            )
+            mask_var = tk.StringVar(value="0x00")
+            self._grp_mask_vars.append(mask_var)
+            ttk.Entry(grid, textvariable=mask_var, width=6).grid(
+                row=index // 2, column=(index % 2) * 3 + 1, sticky="w", pady=2
+            )
+            ttk.Label(grid, text="N:").grid(
+                row=index // 2, column=(index % 2) * 3 + 1, sticky="e", padx=(52, 0)
+            )
+            n_var = tk.StringVar(value="0")
+            self._grp_n_vars.append(n_var)
+            ttk.Entry(grid, textvariable=n_var, width=3).grid(
+                row=index // 2, column=(index % 2) * 3 + 2, sticky="w", padx=(4, 12), pady=2
+            )
+        ttk.Label(
+            coinc,
+            text="触发 = AND_i (组 i 内过阈路数 ≥ N_i)。例：(板A∨板B)∧(板C∨板D) → "
+            "组0 mask=0x03、组1 mask=0x0C、组数=2。",
+            foreground="#666666",
+        ).pack(anchor="w", pady=(4, 0))
+
         self.result = ResultArea(self.frame, text="结果")
         self.result.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
 
@@ -117,10 +163,21 @@ class TcmTab:
                     pending=result.pending,
                     wide_pulse_active=result.wide_pulse_active,
                     last_trigger_channels=result.last_trigger_channels,
+                    coincidence_enabled=result.coincidence_enabled,
+                    grp_count=result.grp_count,
+                    coinc_window=result.coinc_window,
+                    coinc_timeout_sticky=result.coinc_timeout_sticky,
+                    collected_count=result.collected_count,
+                    collecting=result.collecting,
+                    grp_ok=result.grp_ok,
+                    group_masks=result.group_masks,
+                    group_n=result.group_n,
                 )
             )
             if result.trig_sticky:
                 self.result.append("提示: trig_sticky 已置位（上次触发已送达）")
+            if result.coinc_timeout_sticky:
+                self.result.append("提示: 符合窗口超时丢弃已发生（单组/窗口过短）")
 
         self._run_task(task, render)
 
@@ -131,6 +188,17 @@ class TcmTab:
         pulse_width = formatting.parse_int_field(self._form_vars["width_var"].get(), "width")
         debounce = formatting.parse_int_field(self._form_vars["debounce_var"].get(), "debounce")
         clear_sticky = self._clear_sticky_var.get()
+        coincidence_enabled = self._coinc_enable_var.get()
+        grp_count = formatting.parse_int_field(self._coinc_groups_var.get(), "组数")
+        coinc_window = formatting.parse_int_field(self._coinc_window_var.get(), "窗口")
+        group_masks = tuple(
+            formatting.parse_int_field(var.get(), f"组{index} mask")
+            for index, var in enumerate(self._grp_mask_vars)
+        )
+        group_n = tuple(
+            formatting.parse_int_field(var.get(), f"组{index} N")
+            for index, var in enumerate(self._grp_n_vars)
+        )
 
         def task():
             result = self.tcm_service.configure_trigger(
@@ -140,6 +208,11 @@ class TcmTab:
                 mask=mask,
                 pulse_width=pulse_width,
                 debounce=debounce,
+                coincidence_enabled=coincidence_enabled,
+                grp_count=grp_count,
+                coinc_window=coinc_window,
+                group_masks=group_masks,
+                group_n=group_n,
             )
             if clear_sticky:
                 self.tcm_service.clear_trigger_sticky(
@@ -160,6 +233,11 @@ class TcmTab:
                     pending=False,
                     wide_pulse_active=False,
                     last_trigger_channels=0,
+                    coincidence_enabled=result.coincidence_enabled,
+                    grp_count=result.grp_count,
+                    coinc_window=result.coinc_window,
+                    group_masks=result.group_masks,
+                    group_n=result.group_n,
                 ).replace("TCM Trigger Config:", "TCM Trigger Config Written:")
             )
 

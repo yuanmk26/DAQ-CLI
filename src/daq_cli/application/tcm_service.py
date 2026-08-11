@@ -18,6 +18,16 @@ class TcmTriggerConfigReadResult:
     pending: bool
     wide_pulse_active: bool
     last_trigger_channels: int
+    # coincidence (v3)
+    coincidence_enabled: bool = False
+    grp_count: int = 0
+    coinc_window: int = 0
+    coinc_timeout_sticky: bool = False
+    collected_count: int = 0
+    collecting: bool = False
+    grp_ok: int = 0
+    group_masks: tuple[int, int, int, int] = (0, 0, 0, 0)
+    group_n: tuple[int, int, int, int] = (0, 0, 0, 0)
 
 
 @dataclass(slots=True)
@@ -28,6 +38,11 @@ class TcmTriggerConfigWriteResult:
     mask: int
     pulse_width: int
     debounce: int
+    coincidence_enabled: bool = False
+    grp_count: int = 0
+    coinc_window: int = 0
+    group_masks: tuple[int, int, int, int] = (0, 0, 0, 0)
+    group_n: tuple[int, int, int, int] = (0, 0, 0, 0)
 
 
 class TcmService:
@@ -69,6 +84,15 @@ class TcmService:
             pending=raw_result.pending,
             wide_pulse_active=raw_result.wide_pulse_active,
             last_trigger_channels=raw_result.last_trigger_channels,
+            coincidence_enabled=raw_result.coincidence_enabled,
+            grp_count=raw_result.grp_count,
+            coinc_window=raw_result.coinc_window,
+            coinc_timeout_sticky=raw_result.coinc_timeout_sticky,
+            collected_count=raw_result.collected_count,
+            collecting=raw_result.collecting,
+            grp_ok=raw_result.grp_ok,
+            group_masks=raw_result.group_masks,
+            group_n=raw_result.group_n,
         )
 
     def configure_trigger(
@@ -80,6 +104,11 @@ class TcmService:
         mask: int,
         pulse_width: int,
         debounce: int,
+        coincidence_enabled: bool = False,
+        grp_count: int = 0,
+        coinc_window: int = 0,
+        group_masks: tuple[int, int, int, int] = (0, 0, 0, 0),
+        group_n: tuple[int, int, int, int] = (0, 0, 0, 0),
     ) -> TcmTriggerConfigWriteResult:
         """Write the TCM trigger-link configuration and verify by readback."""
         profile, tcm = self._resolve_tcm(tcm_name, profile_path)
@@ -90,6 +119,11 @@ class TcmService:
             mask=mask,
             pulse_width=pulse_width,
             debounce=debounce,
+            coincidence_enabled=coincidence_enabled,
+            grp_count=grp_count,
+            coinc_window=coinc_window,
+            group_masks=group_masks,
+            group_n=group_n,
         )
         readback = adapter.read_trigger_config(tcm)
         if (
@@ -97,13 +131,23 @@ class TcmService:
             or readback.mask != mask
             or readback.pulse_width != pulse_width
             or readback.debounce != debounce
+            or readback.coincidence_enabled != coincidence_enabled
+            or readback.grp_count != grp_count
+            or readback.coinc_window != coinc_window
+            or tuple(readback.group_masks) != tuple(group_masks)
+            or tuple(readback.group_n) != tuple(group_n)
         ):
             raise RuntimeError(
                 "TCM trigger write verification failed: requested "
                 f"enable={enable} mask=0x{mask:02X} width={pulse_width} "
-                f"debounce={debounce}, read back enable={readback.enable} "
-                f"mask=0x{readback.mask:02X} width={readback.pulse_width} "
-                f"debounce={readback.debounce}."
+                f"debounce={debounce} coinc={coincidence_enabled} "
+                f"groups={grp_count} window={coinc_window} "
+                f"masks={group_masks} n={group_n}, read back "
+                f"enable={readback.enable} mask=0x{readback.mask:02X} "
+                f"width={readback.pulse_width} debounce={readback.debounce} "
+                f"coinc={readback.coincidence_enabled} groups={readback.grp_count} "
+                f"window={readback.coinc_window} masks={tuple(readback.group_masks)} "
+                f"n={tuple(readback.group_n)}."
             )
         return TcmTriggerConfigWriteResult(
             tcm=tcm,
@@ -112,6 +156,11 @@ class TcmService:
             mask=readback.mask,
             pulse_width=readback.pulse_width,
             debounce=readback.debounce,
+            coincidence_enabled=readback.coincidence_enabled,
+            grp_count=readback.grp_count,
+            coinc_window=readback.coinc_window,
+            group_masks=tuple(readback.group_masks),
+            group_n=tuple(readback.group_n),
         )
 
     def clear_trigger_sticky(
