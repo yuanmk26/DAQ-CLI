@@ -120,3 +120,9 @@ class TcmService:
         profile, tcm = self._resolve_tcm(tcm_name, profile_path)
         adapter = self._make_adapter(profile)
         adapter.clear_trigger_sticky(tcm)
+
+    def clear_align(self, tcm_name: str, profile_path: Path | str) -> None:
+        """Release a stuck alignment controller so trigger broadcasts resume."""
+        profile, tcm = self._resolve_tcm(tcm_name, profile_path)
+        adapter = self._make_adapter(profile)
+        adapter.clear_align(tcm)

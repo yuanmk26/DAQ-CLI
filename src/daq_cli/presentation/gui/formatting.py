@@ -15,6 +15,7 @@ from daq_cli.application.acquire_service import (
     SingleAcquireResult,
     SingleAcquireProgress,
 )
+from daq_cli.infrastructure.tcm_link_calibration import suggested_threshold_for
 from daq_cli.application.output_config import (
     AcquireOutputsConfig,
     OutputTargetConfig,
@@ -349,32 +350,36 @@ def merge_outputs_config(
 
 
 def format_tcm_link_calibration(result) -> str:
-    """Plain-text rendering of a TCM link calibration result."""
+    """Plain-text rendering of a TCM link calibration result (baseline only)."""
     calibration = result.calibration
     lines = [
         f"===== TCM Link Calibration: {calibration.device_name} =====",
         f"frames: {calibration.frames}  duration: {calibration.duration_s:.1f}s",
-        f"ch | samples | baseline | sigma | dir | peak | suggested thr | polarity",
+        f"ch | samples | baseline | sigma | dir | peak",
     ]
     for channel in calibration.channels:
         lines.append(
             f"{channel.channel:02d} | {channel.samples:7d} | {channel.baseline:8d} | "
-            f"{channel.sigma:5.1f} | {channel.direction:+3d} | {channel.peak_dev:4d} | "
-            f"{channel.suggested_threshold:14d} | {channel.suggested_polarity}"
+            f"{channel.sigma:5.1f} | {channel.direction:+3d} | {channel.peak_dev:4d}"
         )
-    lines.append(
-        f"suggested polarity mask: 0x{calibration.suggested_polarity_mask():04X}"
-    )
     lines.append(f"original send_mode restored: {result.original_send_mode}")
-    lines.append("建议值已填入面板阈值/极性，确认后点「应用全部并回读验证」。")
+    lines.append(
+        "已把 基线 ± 偏移量 填入各通道阈值（按当前极性：正极性=基线+偏移，"
+        "负极性=基线-偏移）。确认后点「应用全部并回读验证」。"
+    )
     return "\n".join(lines)
 
 
-def calibration_to_form_values(calibration) -> tuple[list[str], str]:
-    """Map a calibration to (threshold strings, polarity hex) for the panel."""
-    thresholds = [str(channel.suggested_threshold) for channel in calibration.channels]
-    polarity = f"0x{calibration.suggested_polarity_mask():04X}"
-    return thresholds, polarity
+def calibration_to_form_values(
+    calibration, offset: int, polarity_mask: int
+) -> list[str]:
+    """Threshold strings per channel: baseline +/- the user offset,
+    direction decided by the polarity mask bits."""
+    thresholds = [
+        str(suggested_threshold_for(channel, offset, polarity_mask))
+        for channel in calibration.channels
+    ]
+    return thresholds
 
 
 # ---------------------------------------------------------------- acquire

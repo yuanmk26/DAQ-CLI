@@ -165,9 +165,14 @@ class BoardTab:
         )
         refresh_button.pack(side=tk.LEFT, padx=(6, 0))
         self._task_buttons.append(refresh_button)
-        ttk.Label(action_row, text="自动标定(秒):").pack(side=tk.LEFT, padx=(12, 0))
+        ttk.Label(action_row, text="标定(秒):").pack(side=tk.LEFT, padx=(12, 0))
         self._measure_seconds_var = tk.StringVar(value="5")
-        ttk.Entry(action_row, textvariable=self._measure_seconds_var, width=5).pack(
+        ttk.Entry(action_row, textvariable=self._measure_seconds_var, width=4).pack(
+            side=tk.LEFT, padx=(4, 0)
+        )
+        ttk.Label(action_row, text="偏移量:").pack(side=tk.LEFT, padx=(12, 0))
+        self._measure_offset_var = tk.StringVar(value="100")
+        ttk.Entry(action_row, textvariable=self._measure_offset_var, width=5).pack(
             side=tk.LEFT, padx=(4, 0)
         )
         measure_button = ttk.Button(
@@ -180,6 +185,13 @@ class BoardTab:
             text="注：mode 9 下主触发阈值 (0x11~0x18) 不使用；EXT_Trigger_en 开启会覆盖触发源，mode 9 应保持关闭。",
             foreground="#666666",
         ).pack(side=tk.LEFT, padx=(12, 0))
+        ttk.Label(
+            self.frame.inner,
+            text="标定说明：自动标定只测量各通道基线；阈值 = 基线 ± 偏移量（按上方极性："
+            "极性 0=正脉冲→基线+偏移，1=负脉冲（SiPM 常见）→基线-偏移）。"
+            "请先设好 polarity，再点自动标定。",
+            foreground="#555555",
+        ).pack(anchor="w", padx=(8, 0))
 
     def _build_mode9_trigger_group(self, parent) -> None:
         group = ttk.LabelFrame(parent, text="A. 触发源", padding=(8, 4))
@@ -564,18 +576,24 @@ class BoardTab:
         self._run_task(task, render)
 
     def _run_tcm_measure(self) -> None:
-        """自动标定：采一段 send_mode=1 波形，建议各通道阈值+极性。
+        """自动标定：只测量各通道基线，阈值 = 基线 ± 偏移量（按当前极性）。
 
+        极性由用户先设好（SiPM 负脉冲=1，正脉冲=0），偏移量在标定参数里；
         建议值填入面板表单（不写寄存器），由用户确认后点「应用全部」。
         """
         device = self._selected_device()
         try:
             seconds = float(self._measure_seconds_var.get())
+            offset = int(self._measure_offset_var.get(), 0)
+            polarity = int(self._m9_polarity_var.get(), 0)
         except ValueError as exc:
-            self.result.show(f"参数错误: 秒数必须是数字 ({exc})")
+            self.result.show(f"参数错误: 秒数/偏移量/极性必须是数字 ({exc})")
             return
         if seconds < 0.1:
             self.result.show("参数错误: 秒数需 >= 0.1")
+            return
+        if offset < 1:
+            self.result.show("参数错误: 偏移量需 >= 1")
             return
 
         def task():
@@ -586,12 +604,11 @@ class BoardTab:
             )
 
         def render(result) -> None:
-            thresholds, polarity = formatting.calibration_to_form_values(
-                result.calibration
+            thresholds = formatting.calibration_to_form_values(
+                result.calibration, offset, polarity
             )
             for var, value in zip(self._m9_thr_vars, thresholds):
                 var.set(value)
-            self._m9_polarity_var.set(polarity)
             self.result.show(formatting.format_tcm_link_calibration(result))
 
         self._run_task(task, render)

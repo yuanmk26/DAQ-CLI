@@ -13,19 +13,22 @@ from daq_cli.infrastructure.adapters.legacy_runtime import (
     temporary_sys_path,
 )
 
-# FDU-TCM v2 trigger-link registers (docs/changes/2026-08-08):
+# FDU-TCM v2 trigger-link registers (docs/rbcp_timestamp_alignment_registers.md
+# — final firmware layout; note 0x25 = STATUS / 0x26 = CHAN, and debounce is
+# split LSB at 0x23 / MSB at 0x24):
 #   0x20 TRG_CTRL        bit0 = trigger-link enable, bit1 = clear sticky (write 1)
 #   0x21 TRG_IN_MASK     8-bit per-channel participation mask
 #   0x22 TRG_PULSE_WIDTH wide pulse width in 20M cycles (default 32 = 1.6us)
-#   0x23 TRG_DEBOUNCE    debounce in 20M cycles (default 20 = 1us)
-#   0x24 TRG_STATUS      bit0 = trig_sticky, bit1 = pending, bit2 = wide pulse active
-#   0x25 TRG_CHAN        channels of the most recent trigger event
+#   0x23 TRG_DEBOUNCE[7:0]   debounce low byte (default 20 = 1us)
+#   0x24 TRG_DEBOUNCE[15:8]  debounce high byte
+#   0x25 TRG_STATUS      bit0 = trig_sticky, bit1 = pending, bit2 = wide pulse active
+#   0x26 TRG_CHAN        channels of the most recent trigger event
 _TRG_CTRL_ADDR = 0x20
 _TRG_MASK_ADDR = 0x21
 _TRG_PULSE_WIDTH_ADDR = 0x22
 _TRG_DEBOUNCE_ADDR = 0x23
-_TRG_STATUS_ADDR = 0x24
-_TRG_CHAN_ADDR = 0x25
+_TRG_STATUS_ADDR = 0x25
+_TRG_CHAN_ADDR = 0x26
 
 _TRG_CTRL_ENABLE_BIT = 1 << 0
 _TRG_CTRL_CLEAR_STICKY_BIT = 1 << 1
@@ -72,7 +75,8 @@ class LegacyTcmAdapter:
             debounce_bytes = client.read(_TRG_DEBOUNCE_ADDR, 2)
             status = client.read(_TRG_STATUS_ADDR, 1)[0]
             last_trigger_channels = client.read(_TRG_CHAN_ADDR, 1)[0]
-        debounce = (debounce_bytes[0] << 8) | debounce_bytes[1]
+        # 0x23 = LSB, 0x24 = MSB (final firmware layout)
+        debounce = (debounce_bytes[1] << 8) | debounce_bytes[0]
         return LegacyTcmTriggerReadResult(
             enable=bool(ctrl & _TRG_CTRL_ENABLE_BIT),
             mask=int(mask),
@@ -103,9 +107,10 @@ class LegacyTcmAdapter:
         with self._rbcp_client(tcm) as client:
             client.write(_TRG_MASK_ADDR, bytes([mask]))
             client.write(_TRG_PULSE_WIDTH_ADDR, bytes([pulse_width]))
+            # 0x23 = LSB, 0x24 = MSB (final firmware layout)
             client.write(
                 _TRG_DEBOUNCE_ADDR,
-                bytes([(debounce >> 8) & 0xFF, debounce & 0xFF]),
+                bytes([debounce & 0xFF, (debounce >> 8) & 0xFF]),
             )
             ctrl = _TRG_CTRL_ENABLE_BIT if enable else 0
             client.write(_TRG_CTRL_ADDR, bytes([ctrl]))
@@ -116,3 +121,12 @@ class LegacyTcmAdapter:
             ctrl = client.read(_TRG_CTRL_ADDR, 1)[0]
             updated = ctrl | _TRG_CTRL_CLEAR_STICKY_BIT
             client.write(_TRG_CTRL_ADDR, bytes([updated]))
+
+    def clear_align(self, tcm: TcmConfig) -> None:
+        """Release a stuck TCM alignment controller (write ALIGN_CTRL_CLEAR).
+
+        A failed align (boards not ACKing) leaves ALIGN_BUSY set, which
+        blocks trigger-link wide-pulse broadcasts; clearing unblocks them.
+        """
+        with self._rbcp_client(tcm) as client:
+            client.write(0x18, bytes([0x02]))  # ALIGN_CTRL_CLEAR

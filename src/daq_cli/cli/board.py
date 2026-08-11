@@ -235,13 +235,36 @@ def board_tcm_link_measure(
         float,
         typer.Option("--tcp-timeout", min=0.1, help="TCP socket timeout in seconds."),
     ] = 1.0,
+    offset: Annotated[
+        int,
+        typer.Option(
+            "--offset",
+            min=1,
+            help="Threshold offset from the baseline (ADC counts); suggested "
+            "threshold = baseline +/- offset by polarity.",
+        ),
+    ] = 100,
+    polarity: Annotated[
+        str | None,
+        typer.Option(
+            "--polarity",
+            help="Polarity mask: 0=pos (thr above baseline), 1=neg (thr below "
+            "baseline). Omit to only report baselines.",
+        ),
+    ] = None,
     profile: RequiredProfileOption = ...,
 ) -> None:
-    """Capture a short waveform stream and suggest per-channel crossing
-    thresholds + polarities for the TCM trigger link (mode 9).
+    """Measure per-channel baselines and suggest crossing thresholds for the
+    TCM trigger link (mode 9).
 
+    The tool only measures baselines (reliable without catching pulses); the
+    suggested threshold is baseline +/- --offset, direction decided by
+    --polarity (SiPM negative pulses: polarity 1, threshold below baseline).
     Temporarily switches the board to send_mode=1 and restores it afterwards.
     """
+    parsed_polarity = 0
+    if polarity is not None:
+        parsed_polarity = int(polarity, 0)
     service = BoardService()
     result = service.measure_tcm_link(
         device_name=device,
@@ -249,7 +272,9 @@ def board_tcm_link_measure(
         seconds=seconds,
         tcp_timeout_s=tcp_timeout,
     )
-    print_tcm_link_calibration_result(result)
+    print_tcm_link_calibration_result(
+        result, offset=offset, polarity_mask=parsed_polarity
+    )
 
 
 @app.command("tcm-link-show")

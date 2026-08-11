@@ -28,14 +28,8 @@ class ChannelCalibration:
     samples: int
     baseline: int
     sigma: float
-    direction: int  # +1 = positive pulses, -1 = negative pulses
+    direction: int  # +1 = positive pulses, -1 = negative pulses (informational)
     peak_dev: int
-    suggested_threshold: int
-
-    @property
-    def suggested_polarity(self) -> int:
-        """0 = pos (adc > thr), 1 = neg (adc < thr)."""
-        return 1 if self.direction < 0 else 0
 
 
 @dataclass(slots=True)
@@ -45,12 +39,27 @@ class TcmLinkCalibration:
     frames: int
     channels: list[ChannelCalibration]
 
-    def suggested_polarity_mask(self) -> int:
-        mask = 0
-        for channel in self.channels:
-            if channel.suggested_polarity:
-                mask |= 1 << channel.channel
-        return mask
+    def baseline_for(self, channel: int) -> int:
+        return self.channels[channel].baseline
+
+
+def suggested_threshold_for(
+    channel: ChannelCalibration, offset: int, polarity_mask: int
+) -> int:
+    """Threshold = baseline + offset for positive polarity (bit 0),
+    baseline - offset for negative polarity (bit 1)."""
+    if (polarity_mask >> channel.channel) & 1:
+        return channel.baseline - offset
+    return channel.baseline + offset
+
+
+def suggested_thresholds(
+    calibration: TcmLinkCalibration, offset: int, polarity_mask: int
+) -> list[int]:
+    return [
+        suggested_threshold_for(channel, offset, polarity_mask)
+        for channel in calibration.channels
+    ]
 
 
 def analyze_channel_samples(values: list[int]) -> tuple[int, float, int, int]:
@@ -117,10 +126,6 @@ def calibrate_from_stream(
     for channel_index in range(16):
         values = per_channel[channel_index]
         baseline, sigma, direction, peak_dev = analyze_channel_samples(values)
-        if sigma <= 0 or peak_dev == 0:
-            suggested = baseline  # no signal seen; keep the baseline level
-        else:
-            suggested = baseline + direction * int(max(5 * sigma, 0.5 * peak_dev))
         calibrations.append(
             ChannelCalibration(
                 channel=channel_index,
@@ -129,7 +134,6 @@ def calibrate_from_stream(
                 sigma=sigma,
                 direction=direction,
                 peak_dev=peak_dev,
-                suggested_threshold=suggested,
             )
         )
     return TcmLinkCalibration(

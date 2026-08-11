@@ -14,6 +14,7 @@ from daq_cli.application.board_service import (
     TcpMode2ConfigReadResult,
     TriggerConfigReadResult,
 )
+from daq_cli.infrastructure.tcm_link_calibration import suggested_threshold_for
 from daq_cli.application.tcm_service import (
     TcmTriggerConfigReadResult,
     TcmTriggerConfigWriteResult,
@@ -372,7 +373,11 @@ def print_tcm_trigger_config_write_result(
     console.print(table)
 
 
-def print_tcm_link_calibration_result(result: TcmLinkCalibrationResult) -> None:
+def print_tcm_link_calibration_result(
+    result: TcmLinkCalibrationResult,
+    offset: int = 100,
+    polarity_mask: int = 0,
+) -> None:
     calibration = result.calibration
     table = Table(
         title=f"TCM Link Calibration: {result.device.name} "
@@ -384,9 +389,9 @@ def print_tcm_link_calibration_result(result: TcmLinkCalibrationResult) -> None:
     table.add_column("sigma", justify="right")
     table.add_column("dir", justify="right")
     table.add_column("peak", justify="right")
-    table.add_column("suggested thr", justify="right")
-    table.add_column("polarity", justify="right")
+    table.add_column(f"thr (base±{offset})", justify="right")
     for channel in calibration.channels:
+        suggested = suggested_threshold_for(channel, offset, polarity_mask)
         table.add_row(
             f"ch{channel.channel:02d}",
             str(channel.samples),
@@ -394,24 +399,15 @@ def print_tcm_link_calibration_result(result: TcmLinkCalibrationResult) -> None:
             f"{channel.sigma:.1f}",
             f"{channel.direction:+d}",
             str(channel.peak_dev),
-            str(channel.suggested_threshold),
-            str(channel.suggested_polarity),
+            str(suggested),
         )
-    table.add_row(
-        "mask",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "suggested polarity mask",
-        f"0x{calibration.suggested_polarity_mask():04X}",
-    )
     console.print(table)
     console.print(
         f"original send_mode restored: {result.original_send_mode}\n"
+        f"suggested threshold = baseline ± offset(={offset}) by polarity mask "
+        f"0x{polarity_mask:04X} (1 = neg → baseline-offset)\n"
         f"apply with: daq board tcm-link-config {result.device.name} "
-        f"--thr <16 values> --polarity 0x{calibration.suggested_polarity_mask():04X}"
+        f"--thr <16 values> --polarity 0x{polarity_mask:04X}"
     )
 
 

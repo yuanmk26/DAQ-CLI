@@ -23,6 +23,18 @@ def tcm_show(
     print_tcm_trigger_config_read_result(result)
 
 
+@app.command("align-clear")
+def tcm_align_clear(
+    name: Annotated[str, typer.Argument(help="TCM entry name from the profile.")],
+    profile: RequiredProfileOption = ...,
+) -> None:
+    """Release a stuck TCM alignment controller (recover after a failed
+    align blocks trigger broadcasts)."""
+    service = TcmService()
+    service.clear_align(tcm_name=name, profile_path=profile)
+    typer.echo(f"TCM '{name}' align controller cleared.")
+
+
 @app.command("config")
 def tcm_config(
     name: Annotated[str, typer.Argument(help="TCM entry name from the profile.")],

@@ -8,6 +8,8 @@ from unittest.mock import patch
 from daq_cli.infrastructure.tcm_link_calibration import (
     analyze_channel_samples,
     calibrate_from_stream,
+    suggested_threshold_for,
+    suggested_thresholds,
 )
 
 
@@ -109,15 +111,26 @@ class CalibrateFromStreamTests(unittest.TestCase):
 
         self.assertEqual(calibration.frames, 2)
         self.assertEqual(len(calibration.channels), 16)
-        ch0 = calibration.channels[0]
-        self.assertGreaterEqual(ch0.samples, 128)
-        self.assertEqual(ch0.baseline, 2048)
-        self.assertEqual(ch0.suggested_polarity, 0)  # positive pulse
-        self.assertGreater(ch0.suggested_threshold, 2048)
-        ch1 = calibration.channels[1]
-        self.assertEqual(ch1.suggested_polarity, 1)  # negative pulse
-        self.assertLess(ch1.suggested_threshold, 2048)
+        self.assertGreaterEqual(calibration.channels[0].samples, 128)
+        self.assertEqual(calibration.channels[0].baseline, 2048)
         self.assertTrue(fake_socket.closed)
+
+    def test_suggested_thresholds_apply_offset_by_polarity(self) -> None:
+        calibration = SimpleNamespace(
+            channels=[
+                SimpleNamespace(channel=0, baseline=1950),
+                SimpleNamespace(channel=1, baseline=1947),
+            ]
+        )
+        # polarity 0x0001: ch0 negative (below baseline), ch1 positive (above)
+        thresholds = suggested_thresholds(calibration, offset=100, polarity_mask=0x1)
+        self.assertEqual(thresholds, [1850, 2047])
+        self.assertEqual(
+            suggested_threshold_for(calibration.channels[0], 100, 0x1), 1850
+        )
+        self.assertEqual(
+            suggested_threshold_for(calibration.channels[1], 100, 0x0), 2047
+        )
 
     def test_raises_when_no_frames_received(self) -> None:
         device = SimpleNamespace(name="dev1", ip="192.168.10.10", tcp_port=24)
@@ -144,8 +157,7 @@ class MeasureTcmLinkServiceTests(unittest.TestCase):
             write_send_mode=lambda d, m: None,
         )
         calibration = SimpleNamespace(
-            device_name="dev1", duration_s=1.0, frames=10,
-            channels=[], suggested_polarity_mask=lambda: 0,
+            device_name="dev1", duration_s=1.0, frames=10, channels=[],
         )
         return service, profile, device, adapter, calibration
 

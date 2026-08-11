@@ -359,6 +359,7 @@ class LegacyMultiCaptureRunner:
                     )
             try:
                 app.start()
+                self._release_tcm_align_busy_after_start(app=app, config=config)
                 while not app.stop_event.is_set():
                     if (
                         (resolved_outputs.json.enabled or resolved_outputs.text.enabled)
@@ -582,6 +583,38 @@ class LegacyMultiCaptureRunner:
         )
         for receiver in app.receivers:
             receiver.frame_queue = _MultiBoardFrameQueueProxy(receiver.frame_queue, publisher)
+
+    def _release_tcm_align_busy_after_start(self, *, app: Any, config) -> None:
+        """Release a stuck TCM alignment controller after a failed align.
+
+        The vendored align waits for board ACKs; when boards do not ACK the
+        controller times out and leaves ALIGN_BUSY set, which blocks the
+        trigger-link wide-pulse broadcasts (triggers queue forever). The ACK
+        is intentionally not relied on in the lab workflow, so after the
+        align attempt we clear the controller to unblock broadcasts. The
+        align start itself has already reset the boards' timestamp counters.
+        """
+        snapshot = getattr(app, "align_snapshot", None)
+        if snapshot is not None and snapshot.status is not None:
+            if snapshot.status & 0x02:  # STATUS_DONE_STICKY_BIT
+                return  # align completed; nothing stuck
+        try:
+            rbcp_module = importlib.import_module("lib.rbcp")
+            client = rbcp_module.Rbcp(
+                device_ip=config.tcm_ip,
+                udp_port=config.tcm_rbcp_port,
+                timeout=max(int(getattr(config, "tcm_timeout_ms", 1000)), 100),
+            )
+            client.write(0x18, bytes([0x02]))  # ALIGN_CTRL_CLEAR
+            app.logger.log(
+                "WARN",
+                "TCM align ack not relied on; cleared align controller to "
+                "unblock trigger broadcasts",
+            )
+        except Exception as exc:  # noqa: BLE001 - best effort
+            app.logger.log(
+                "WARN", "failed to clear TCM align controller: %s" % exc
+            )
 
     def _attach_multi_watch_callback(
         self,
