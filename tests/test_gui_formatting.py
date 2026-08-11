@@ -213,6 +213,105 @@ class ResultFormattingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "不是有效整数"):
             formatting.parse_int_field("abc", "x")
 
+    def test_effective_output_dir_priority(self) -> None:
+        self.assertEqual(
+            formatting.effective_output_dir(r"  D:\raw  ", "out/raw"),
+            Path(r"D:\raw"),
+        )
+        self.assertEqual(
+            formatting.effective_output_dir("", "out/raw"), Path("out/raw")
+        )
+        self.assertIsNone(formatting.effective_output_dir("", None))
+
+    def test_default_output_base_dir_relative_to_profile(self) -> None:
+        profile = SimpleNamespace(
+            path=Path("profiles/example.yaml"),
+            defaults={"output_dir": "out"},
+        )
+        self.assertEqual(
+            formatting.default_output_base_dir(profile),
+            Path("profiles").parent.parent / "out",
+        )
+
+    def test_default_output_base_dir_absolute(self) -> None:
+        profile = SimpleNamespace(
+            path=Path("profiles/example.yaml"),
+            defaults={"output_dir": r"D:\data"},
+        )
+        self.assertEqual(formatting.default_output_base_dir(profile), Path(r"D:\data"))
+
+    def test_merge_outputs_config_uses_profile_dirs_and_params(self) -> None:
+        profile = SimpleNamespace(
+            path=Path("profiles/example.yaml"),
+            defaults={
+                "acquire_single": {
+                    "outputs": {
+                        "raw": {"enabled": True, "dir": "out/raw"},
+                        "json": {"enabled": False, "dir": "out/json"},
+                        "text": {
+                            "enabled": False,
+                            "dir": "out/text",
+                            "max_events_per_file": 250,
+                            "waveform_layout": "point_rows",
+                        },
+                        "log": {"enabled": False, "dir": "out/log"},
+                    }
+                }
+            },
+        )
+        outputs = formatting.merge_outputs_config(
+            profile,
+            "single",
+            raw_enabled=True,
+            json_enabled=True,
+            text_enabled=True,
+            log_enabled=True,
+        )
+        self.assertEqual(outputs.raw.dir, Path("out/raw"))
+        self.assertEqual(outputs.json.dir, Path("out/json"))
+        self.assertEqual(outputs.text.dir, Path("out/text"))
+        self.assertEqual(outputs.text.max_events_per_file, 250)
+        self.assertEqual(outputs.text.waveform_layout, "point_rows")
+        self.assertEqual(outputs.log.dir, Path("out/log"))
+
+    def test_merge_outputs_config_gui_overrides_profile(self) -> None:
+        profile = SimpleNamespace(
+            path=Path("profiles/example.yaml"),
+            defaults={
+                "acquire_multi": {
+                    "outputs": {"raw": {"enabled": True, "dir": "out/multi_raw"}}
+                }
+            },
+        )
+        outputs = formatting.merge_outputs_config(
+            profile,
+            "multi",
+            raw_enabled=True,
+            json_enabled=False,
+            text_enabled=False,
+            log_enabled=False,
+            raw_dir=r"D:\data\raw",
+        )
+        self.assertEqual(outputs.raw.dir, Path(r"D:\data\raw"))
+        self.assertFalse(outputs.json.enabled)
+        self.assertIsNone(outputs.json.dir)
+
+    def test_merge_outputs_config_missing_profile_uses_defaults(self) -> None:
+        profile = SimpleNamespace(
+            path=Path("profiles/example.yaml"), defaults={}
+        )
+        outputs = formatting.merge_outputs_config(
+            profile,
+            "single",
+            raw_enabled=True,
+            json_enabled=False,
+            text_enabled=True,
+            log_enabled=False,
+        )
+        self.assertIsNone(outputs.raw.dir)
+        self.assertEqual(outputs.text.max_events_per_file, 100)
+        self.assertEqual(outputs.text.waveform_layout, "channel_blocks")
+
     def test_board_config_options_from_form(self) -> None:
         options = formatting.board_config_options_from_form(
             adc_enabled=True,

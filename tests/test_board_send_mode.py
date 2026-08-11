@@ -298,6 +298,114 @@ class TcmLinkTests(unittest.TestCase):
                     enable=True,
                 )
 
+    def test_capture_single_passes_run_name_prefix(self) -> None:
+        from daq_cli.application.acquire_service import AcquireService as AS
+
+        profile = SimpleNamespace(
+            path=Path("profiles/example.yaml"),
+            legacy=SimpleNamespace(project_root=Path("legacy")),
+            defaults={"output_dir": "out"},
+            devices={"dev1": SimpleNamespace(name="dev1", ip="1.2.3.4", tcp_port=24, board_id=0)},
+            groups={},
+            tcm={},
+        )
+        service = AS()
+        with patch.object(service._profile_service, "load_profile", return_value=profile):
+            with patch(
+                "daq_cli.application.acquire_service.LegacyBoardAdapter"
+            ) as board_cls:
+                board_cls.return_value.read_tcp_mode2_config.return_value = (
+                    SimpleNamespace(send_mode=1)
+                )
+                with patch(
+                    "daq_cli.application.acquire_service.LegacySingleCaptureRunner"
+                ) as runner_cls:
+                    runner_cls.return_value.capture_single.return_value = SimpleNamespace(
+                        run_output_dir=Path("out/dev1_00001"),
+                        captured_events=10,
+                        send_mode=1,
+                        decode_enabled=False,
+                        json_output_enabled=False,
+                        decoded_output_dir=None,
+                        decoded_events=None,
+                        decode_errors=0,
+                        raw_output_dir=Path("out/dev1_00001/raw"),
+                        log_output_path=None,
+                        text_output_enabled=False,
+                        text_output_dir=None,
+                        text_output_events=0,
+                        text_output_files=0,
+                        watch_enabled=False,
+                        watch_every=None,
+                        watched_frames=0,
+                        log_output="",
+                    )
+                    service.capture_single(
+                        device_name="dev1",
+                        profile_path="profiles/example.yaml",
+                        events=10,
+                        timeout_s=1.0,
+                        run_name_prefix="expA",
+                    )
+                    runner_cls.return_value.capture_single.assert_called_once()
+                    kwargs = runner_cls.return_value.capture_single.call_args.kwargs
+                    self.assertEqual(kwargs["run_name_prefix"], "expA")
+
+    def test_capture_multi_passes_run_name_prefix(self) -> None:
+        from daq_cli.application.acquire_service import AcquireService as AS
+
+        profile = SimpleNamespace(
+            path=Path("profiles/example.yaml"),
+            legacy=SimpleNamespace(project_root=Path("legacy")),
+            defaults={"output_dir": "out", "adc_length": 64},
+            devices={
+                "dev1": SimpleNamespace(name="dev1", ip="1.2.3.4", tcp_port=24, board_id=0),
+                "dev2": SimpleNamespace(name="dev2", ip="1.2.3.5", tcp_port=24, board_id=1),
+            },
+            groups={
+                "two_board": SimpleNamespace(
+                    name="two_board", devices=["dev1", "dev2"], tcm="main"
+                )
+            },
+            tcm={"main": SimpleNamespace(name="main", ip="1.2.3.6", rbcp_port=4660)},
+        )
+        service = AS()
+        with patch.object(service._profile_service, "load_profile", return_value=profile):
+            with patch(
+                "daq_cli.application.acquire_service.LegacyMultiCaptureRunner"
+            ) as runner_cls:
+                runner_cls.return_value.capture_multi.return_value = SimpleNamespace(
+                    run_output_dir=Path("out/multi_run"),
+                    config_path=Path("cfg.json"),
+                    status="ok",
+                    log_path=None,
+                    meta_path=None,
+                    decode_enabled=False,
+                    decoded_output_dir=None,
+                    decoded_complete_events=0,
+                    decoded_partial_events=0,
+                    decode_errors=0,
+                    raw_output_dir=None,
+                    json_output_enabled=False,
+                    json_output_dir=None,
+                    log_output_dir=None,
+                    watch_waveforms=False,
+                    watch_every=None,
+                    watched_frames=0,
+                    stop_capture_on_watch_close=False,
+                    text_output_complete_events=0,
+                    text_output_partial_events=0,
+                    text_output_files=0,
+                )
+                service.capture_multi(
+                    group_name="two_board",
+                    profile_path="profiles/example.yaml",
+                    run_name_prefix="expMulti",
+                )
+                call = runner_cls.return_value.capture_multi.call_args
+                config = call.args[0]
+                self.assertEqual(config.run_name_prefix, "expMulti")
+
     def test_write_registers_passes_through(self) -> None:
         service, profile, device, adapter = self._patched_service()
         with patch.object(

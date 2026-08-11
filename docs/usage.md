@@ -775,7 +775,12 @@ The window has four tabs plus a shared log panel at the bottom:
   capture). Multi: group, aggregation key, match window, no-ack allowance,
   and an optional embedded multi-board monitor (「采集时监视波形」) with
   board selection and prev/next/latest event navigation. Result summaries
-  are compact strips so the waveforms get the remaining space.
+  are compact strips so the waveforms get the remaining space. Both pages
+  have a **存储** section: base output directory and run-name prefix
+  (empty = defaults), plus per-type parent directories for raw / json /
+  text / log — each type's files land under `<chosen dir>/<run name>/`,
+  GUI entries override the profile, empty falls back to the profile
+  configuration, then to the default leaf inside the run directory.
 - **监视**: waveform monitor with live / demo / replay sources and
   RUN / STOP / SINGLE buttons. Stopping the monitor restores the board's
   original `send_mode`. Use demo or replay to try it without hardware.

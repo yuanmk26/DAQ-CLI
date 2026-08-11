@@ -118,6 +118,7 @@ class AcquireService:
         watch_every: int | None = None,
         progress_callback: Callable[[SingleAcquireProgress], None] | None = None,
         watch_frame_callback: Callable[[bytes], None] | None = None,
+        run_name_prefix: str | None = None,
     ) -> SingleAcquireResult:
         profile = self._profile_service.load_profile(profile_path)
         try:
@@ -203,6 +204,7 @@ class AcquireService:
             watch_every=watch_every,
             progress_callback=on_progress,
             watch_frame_callback=watch_frame_callback,
+            run_name_prefix=run_name_prefix,
         )
         return SingleAcquireResult(
             device=device,
@@ -257,6 +259,7 @@ class AcquireService:
         watch_every: int | None = None,
         stop_capture_on_watch_close: bool = True,
         watch_update_callback: Callable[[object], None] | None = None,
+        run_name_prefix: str | None = None,
     ) -> MultiAcquireResult:
         profile = self._profile_service.load_profile(profile_path)
         try:
@@ -306,7 +309,7 @@ class AcquireService:
         runner = LegacyMultiCaptureRunner()
         raw_result = runner.capture_multi(
             LegacyMultiCaptureConfig(
-                run_name_prefix=group.name,
+                run_name_prefix=run_name_prefix or group.name,
                 output_base_dir=base_dir,
                 tcm_ip=tcm_config.ip,
                 tcm_rbcp_port=tcm_config.rbcp_port,

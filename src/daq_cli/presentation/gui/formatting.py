@@ -15,6 +15,11 @@ from daq_cli.application.acquire_service import (
     SingleAcquireResult,
     SingleAcquireProgress,
 )
+from daq_cli.application.output_config import (
+    AcquireOutputsConfig,
+    OutputTargetConfig,
+    TextOutputConfig,
+)
 from daq_cli.application.board_service import (
     BoardInfoResult,
     RegisterReadResult,
@@ -264,6 +269,80 @@ def parse_int_list(text: str, count: int, field_name: str) -> list[int]:
             f"{field_name} 需要 1 个值（广播）或 {count} 个值，收到 {len(values)} 个"
         )
     return values
+
+
+# ---------------------------------------------------------------- storage
+
+
+def default_output_base_dir(profile) -> Path:
+    """Resolve the profile's base output directory (same rule as the service)."""
+    configured = profile.defaults.get("output_dir", "out")
+    base = Path(str(configured))
+    if not base.is_absolute():
+        base = profile.path.parent.parent / base
+    return base
+
+
+def effective_output_dir(
+    gui_entry: str | None, profile_dir: object
+) -> Path | None:
+    """Per-type parent directory: GUI entry > profile dir > None (default leaf)."""
+    if gui_entry and gui_entry.strip():
+        return Path(gui_entry.strip())
+    if profile_dir is not None:
+        return Path(str(profile_dir))
+    return None
+
+
+def merge_outputs_config(
+    profile,
+    page: str,
+    *,
+    raw_enabled: bool,
+    json_enabled: bool,
+    text_enabled: bool,
+    log_enabled: bool,
+    raw_dir: str | None = None,
+    json_dir: str | None = None,
+    text_dir: str | None = None,
+    log_dir: str | None = None,
+) -> AcquireOutputsConfig:
+    """Build capture outputs from GUI switches + storage entries, honoring
+    the profile's per-type directories and text parameters.
+
+    Per-type parent directory resolution:
+    GUI entry > profile outputs.<type>.dir > default leaf inside the run dir.
+    """
+    configured = profile.defaults.get(f"acquire_{page}", {}) or {}
+    outputs = configured.get("outputs", {}) or {}
+    text_cfg = outputs.get("text", {}) or {}
+
+    def profile_dir(key: str) -> object:
+        item = outputs.get(key)
+        if isinstance(item, dict):
+            return item.get("dir")
+        return None
+
+    return AcquireOutputsConfig(
+        raw=OutputTargetConfig(
+            enabled=raw_enabled,
+            dir=effective_output_dir(raw_dir, profile_dir("raw")),
+        ),
+        json=OutputTargetConfig(
+            enabled=json_enabled,
+            dir=effective_output_dir(json_dir, profile_dir("json")),
+        ),
+        text=TextOutputConfig(
+            enabled=text_enabled,
+            dir=effective_output_dir(text_dir, profile_dir("text")),
+            max_events_per_file=int(text_cfg.get("max_events_per_file", 100)),
+            waveform_layout=str(text_cfg.get("waveform_layout", "channel_blocks")),
+        ),
+        log=OutputTargetConfig(
+            enabled=log_enabled,
+            dir=effective_output_dir(log_dir, profile_dir("log")),
+        ),
+    )
 
 
 # ---------------------------------------------------------------- acquire

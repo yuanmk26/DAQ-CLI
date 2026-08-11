@@ -5,14 +5,9 @@ from __future__ import annotations
 import queue
 import tkinter as tk
 from pathlib import Path
-from tkinter import ttk
+from tkinter import filedialog, ttk
 
 from daq_cli.application.acquire_service import AcquireService
-from daq_cli.application.output_config import (
-    AcquireOutputsConfig,
-    OutputTargetConfig,
-    TextOutputConfig,
-)
 from daq_cli.infrastructure.tcp_sent_decode import decode_tcp_sent_packet
 from daq_cli.infrastructure.wave_monitor import MultiBoardWaveUpdate, WaveMonitorFrame
 from daq_cli.presentation.gui import formatting, threads
@@ -64,6 +59,9 @@ class AcquireTab:
         self._inner_notebook.add(self._multi_page, text="多板采集")
 
         self._build_single_group(self._single_page)
+        self._single_storage = self._build_storage_section(
+            self._single_page, "single", "dev1"
+        )
         self._build_watch_host(self._single_page)
         self._ensure_watch_canvas("")  # canvas is always present
         self.single_result = ResultArea(self._single_page, text="单板结果", height=5)
@@ -71,6 +69,9 @@ class AcquireTab:
         self.single_result.pack(fill=tk.X)
 
         self._build_multi_group(self._multi_page)
+        self._multi_storage = self._build_storage_section(
+            self._multi_page, "multi", "two_board"
+        )
         self._build_multi_watch_host(self._multi_page)
         self._build_multi_watch_controls(self._multi_page)
         self._ensure_multi_watch_canvas()
@@ -242,11 +243,8 @@ class AcquireTab:
         except ValueError as exc:
             self.single_result.show(f"参数错误: {exc}")
             return
-        outputs = AcquireOutputsConfig(
-            raw=OutputTargetConfig(enabled=True),
-            json=OutputTargetConfig(enabled=self._json_enabled.get()),
-            text=TextOutputConfig(enabled=self._text_enabled.get()),
-            log=OutputTargetConfig(enabled=self._log_enabled.get()),
+        output_base_dir, run_name_prefix, outputs = self._collect_storage(
+            self._single_storage, "single"
         )
         self._single_busy = True  # set before scheduling the watch poll
         watch_every: int | None = None
@@ -278,10 +276,12 @@ class AcquireTab:
                 profile_path=self.app.profile_path,
                 events=events,
                 timeout_s=timeout_s,
+                output_base_dir=output_base_dir,
                 outputs=outputs,
                 progress_callback=self._progress_queue.put,
                 watch_every=watch_every,
                 watch_frame_callback=watch_callback,
+                run_name_prefix=run_name_prefix,
             )
 
         threads.run_in_background(
@@ -383,6 +383,107 @@ class AcquireTab:
         self.single_result.show(f"错误: {exc}")
         self._progress_label.configure(text="失败")
         self.app.log(f"单板采集失败: {exc}")
+
+    # ---------------------------------------------------------------- storage
+
+    def _browse_dir(self, var: tk.StringVar) -> None:
+        chosen = filedialog.askdirectory(title="选择目录")
+        if chosen:
+            var.set(chosen)
+
+    def _build_storage_section(self, parent, page: str, default_prefix: str):
+        """Build the storage row (base dir + run prefix + per-type dirs).
+
+        Returns a namespace with ``base`` / ``prefix`` StringVars and a
+        ``dirs`` dict of per-type StringVars. All entries start empty =
+        profile/service default.
+        """
+        from types import SimpleNamespace
+
+        group = ttk.LabelFrame(parent, text="存储", padding=(8, 4))
+        group.pack(fill=tk.X, pady=(6, 0))
+        grid = ttk.Frame(group)
+        grid.pack(fill=tk.X)
+
+        base_var = tk.StringVar(value="")
+        prefix_var = tk.StringVar(value=default_prefix)
+        dir_vars = {key: tk.StringVar(value="") for key in ("raw", "json", "text", "log")}
+
+        ttk.Label(grid, text="输出目录:").grid(row=0, column=0, sticky="w")
+        ttk.Entry(grid, textvariable=base_var, width=20).grid(
+            row=0, column=1, sticky="we", padx=(4, 2)
+        )
+        ttk.Button(grid, text="浏览", command=lambda: self._browse_dir(base_var)).grid(
+            row=0, column=2, padx=(0, 12)
+        )
+        ttk.Label(grid, text="run 名前缀:").grid(row=0, column=3, sticky="w", padx=(12, 0))
+        ttk.Entry(grid, textvariable=prefix_var, width=10).grid(
+            row=0, column=4, sticky="we", padx=(4, 0)
+        )
+        hint = ttk.Label(
+            group,
+            text=f"留空=默认（输出目录和四类目录均可用 浏览 选择，空则用 profile 配置）",
+            foreground="#666666",
+        )
+        hint.pack(anchor="w", pady=(2, 0))
+
+        for row_index in (1, 2):
+            for col_index, key in enumerate(("raw", "json") if row_index == 1 else ("text", "log")):
+                base_col = col_index * 3
+                ttk.Label(grid, text=f"{key}:").grid(
+                    row=row_index, column=base_col, sticky="w", pady=(4, 0)
+                )
+                ttk.Entry(grid, textvariable=dir_vars[key], width=16).grid(
+                    row=row_index, column=base_col + 1, sticky="we", padx=(4, 2), pady=(4, 0)
+                )
+                ttk.Button(
+                    grid, text="浏览", command=lambda var=dir_vars[key]: self._browse_dir(var)
+                ).grid(row=row_index, column=base_col + 2, padx=(0, 12), pady=(4, 0))
+
+        grid.columnconfigure(1, weight=1)
+        grid.columnconfigure(4, weight=1)
+        return SimpleNamespace(
+            base=base_var,
+            prefix=prefix_var,
+            dirs=dir_vars,
+            _last_default=default_prefix,
+        )
+
+    def _collect_storage(self, storage, page: str):
+        """Assemble service params from a storage section."""
+        outputs = formatting.merge_outputs_config(
+            self.app.profile,
+            page,
+            raw_enabled=True,
+            json_enabled=(
+                self._json_enabled.get() if page == "single" else self._multi_json_enabled.get()
+            ),
+            text_enabled=(
+                self._text_enabled.get() if page == "single" else self._multi_text_enabled.get()
+            ),
+            log_enabled=(
+                self._log_enabled.get() if page == "single" else True
+            ),
+            raw_dir=storage.dirs["raw"].get(),
+            json_dir=storage.dirs["json"].get(),
+            text_dir=storage.dirs["text"].get(),
+            log_dir=storage.dirs["log"].get(),
+        )
+        base_text = storage.base.get().strip()
+        prefix_text = storage.prefix.get().strip()
+        return (
+            Path(base_text) if base_text else None,
+            prefix_text or None,
+            outputs,
+        )
+
+    def _update_storage_prefix(self, storage, new_default: str) -> None:
+        """Follow device/group changes unless the user customized the prefix."""
+        if storage is None:
+            return
+        if storage.prefix.get() == getattr(storage, "_last_default", None):
+            storage.prefix.set(new_default)
+        storage._last_default = new_default
 
     # ---------------------------------------------------------------- multi
 
@@ -535,11 +636,8 @@ class AcquireTab:
         except ValueError as exc:
             self.multi_result.show(f"参数错误: {exc}")
             return
-        outputs = AcquireOutputsConfig(
-            raw=OutputTargetConfig(enabled=True),
-            json=OutputTargetConfig(enabled=self._multi_json_enabled.get()),
-            text=TextOutputConfig(enabled=self._multi_text_enabled.get()),
-            log=OutputTargetConfig(enabled=True),
+        output_base_dir, run_name_prefix, outputs = self._collect_storage(
+            self._multi_storage, "multi"
         )
         self._multi_busy = True  # set before scheduling the watch poll
         watch_every: int | None = None
@@ -582,7 +680,7 @@ class AcquireTab:
             return self.acquire_service.capture_multi(
                 group_name=group,
                 profile_path=self.app.profile_path,
-
+                output_base_dir=output_base_dir,
                 outputs=outputs,
                 aggregation_key=aggregation_key,
                 timestamp_match_window_ticks=match_window,
@@ -590,6 +688,7 @@ class AcquireTab:
                 watch_waveforms=watch_every is not None,
                 watch_every=watch_every,
                 watch_update_callback=watch_callback,
+                run_name_prefix=run_name_prefix,
             )
 
         threads.run_in_background(
@@ -632,6 +731,9 @@ class AcquireTab:
         self._group_combo.configure(values=groups)
         if groups and self._group_var.get() not in groups:
             self._group_var.set(groups[0])
+        # storage prefix defaults follow the selected device/group
+        self._update_storage_prefix(self._single_storage, self._device_var.get() or "dev1")
+        self._update_storage_prefix(self._multi_storage, self._group_var.get() or "group")
 
     def shutdown(self) -> None:
         self._teardown_watch_canvas()

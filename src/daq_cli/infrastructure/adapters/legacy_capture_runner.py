@@ -169,6 +169,7 @@ class LegacySingleCaptureRunner:
         watch_every: int | None = None,
         progress_callback: Callable[[LegacySingleCaptureProgress], None] | None = None,
         watch_frame_callback: Callable[[bytes], None] | None = None,
+        run_name_prefix: str | None = None,
     ) -> LegacySingleCaptureResult:
         resolved_outputs = outputs or AcquireOutputsConfig(
             raw=OutputTargetConfig(enabled=True),
@@ -185,7 +186,7 @@ class LegacySingleCaptureRunner:
         output_base_dir.mkdir(parents=True, exist_ok=True)
         run_output_dir = self._make_output_dir(
             output_base_dir,
-            prefix=str(getattr(device, "name", "acquire")),
+            prefix=run_name_prefix or str(getattr(device, "name", "acquire")),
         )
         work_raw_dir = run_output_dir / "raw"
         work_raw_dir.mkdir(parents=True, exist_ok=True)
