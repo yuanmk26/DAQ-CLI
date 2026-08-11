@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import queue
+import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, ttk
@@ -161,7 +162,11 @@ class AcquireTab:
         self._single_start_button = ttk.Button(
             group, text="开始单板采集", command=self._run_single
         )
-        self._single_start_button.pack(anchor="w", pady=(8, 0))
+        self._single_start_button.pack(side=tk.LEFT, anchor="w", pady=(8, 0))
+        self._single_stop_button = ttk.Button(
+            group, text="停止", command=self._stop_single, state=tk.DISABLED
+        )
+        self._single_stop_button.pack(side=tk.LEFT, padx=(8, 0), pady=(8, 0))
 
         self._progress = ttk.Progressbar(group, mode="determinate", maximum=1)
         self._progress.pack(fill=tk.X, pady=(6, 0))
@@ -225,7 +230,11 @@ class AcquireTab:
         self._multi_start_button = ttk.Button(
             group, text="开始多板采集", command=self._run_multi
         )
-        self._multi_start_button.pack(anchor="w", pady=(8, 0))
+        self._multi_start_button.pack(side=tk.LEFT, anchor="w", pady=(8, 0))
+        self._multi_stop_button = ttk.Button(
+            group, text="停止", command=self._stop_multi, state=tk.DISABLED
+        )
+        self._multi_stop_button.pack(side=tk.LEFT, padx=(8, 0), pady=(8, 0))
 
     # ---------------------------------------------------------------- single
 
@@ -247,6 +256,9 @@ class AcquireTab:
             self._single_storage, "single"
         )
         self._single_busy = True  # set before scheduling the watch poll
+        self._single_cancel = threading.Event()
+        self._single_start_button.configure(state=tk.DISABLED)
+        self._single_stop_button.configure(state=tk.NORMAL)
         watch_every: int | None = None
         watch_callback = None
         if self._watch_enabled.get():
@@ -282,6 +294,7 @@ class AcquireTab:
                 watch_every=watch_every,
                 watch_frame_callback=watch_callback,
                 run_name_prefix=run_name_prefix,
+                cancel_event=self._single_cancel,
             )
 
         threads.run_in_background(
@@ -364,9 +377,19 @@ class AcquireTab:
             self._watch_canvas.draw_idle()
         self.app.schedule(self._poll_watch_frames)
 
+    def _stop_single(self) -> None:
+        if not self._single_busy:
+            return
+        if getattr(self, "_single_cancel", None) is not None:
+            self._single_cancel.set()
+        self._single_stop_button.configure(state=tk.DISABLED)
+        self._progress_label.configure(text="正在停止...")
+        self.app.log("单板采集停止请求已发出（等待当前事件结束后停止）")
+
     def _single_done(self, result) -> None:
         self._single_busy = False
         self._single_start_button.configure(state=tk.NORMAL)
+        self._single_stop_button.configure(state=tk.DISABLED)
         self._progress_queue = None
         self._teardown_watch_canvas()
         self.single_result.show(formatting.format_single_acquire_result(result))
@@ -378,6 +401,7 @@ class AcquireTab:
     def _single_error(self, exc: BaseException) -> None:
         self._single_busy = False
         self._single_start_button.configure(state=tk.NORMAL)
+        self._single_stop_button.configure(state=tk.DISABLED)
         self._progress_queue = None
         self._teardown_watch_canvas()
         self.single_result.show(f"错误: {exc}")
@@ -668,7 +692,9 @@ class AcquireTab:
             self._ensure_multi_watch_canvas()
             self.app.schedule(self._poll_multi_watch)
 
+        self._multi_cancel = threading.Event()
         self._multi_start_button.configure(state=tk.DISABLED)
+        self._multi_stop_button.configure(state=tk.NORMAL)
         self._multi_status_label.configure(text="● 运行中...")
         self.multi_result.show("运行中...")
         # All form values are read on the GUI thread (tkinter variables are
@@ -689,6 +715,7 @@ class AcquireTab:
                 watch_every=watch_every,
                 watch_update_callback=watch_callback,
                 run_name_prefix=run_name_prefix,
+                cancel_event=self._multi_cancel,
             )
 
         threads.run_in_background(
@@ -698,9 +725,19 @@ class AcquireTab:
             schedule=self.app.schedule,
         )
 
+    def _stop_multi(self) -> None:
+        if not self._multi_busy:
+            return
+        if getattr(self, "_multi_cancel", None) is not None:
+            self._multi_cancel.set()
+        self._multi_stop_button.configure(state=tk.DISABLED)
+        self._multi_status_label.configure(text="正在停止...")
+        self.app.log("多板采集停止请求已发出（等待本轮事件聚合完成后停止）")
+
     def _multi_done(self, result) -> None:
         self._multi_busy = False
         self._multi_start_button.configure(state=tk.NORMAL)
+        self._multi_stop_button.configure(state=tk.DISABLED)
         self._multi_status_label.configure(text="")
         self._teardown_multi_watch_canvas()
         self.multi_result.show(formatting.format_multi_acquire_result(result))
@@ -709,6 +746,7 @@ class AcquireTab:
     def _multi_error(self, exc: BaseException) -> None:
         self._multi_busy = False
         self._multi_start_button.configure(state=tk.NORMAL)
+        self._multi_stop_button.configure(state=tk.DISABLED)
         self._multi_status_label.configure(text="失败")
         self._teardown_multi_watch_canvas()
         self.multi_result.show(f"错误: {exc}")

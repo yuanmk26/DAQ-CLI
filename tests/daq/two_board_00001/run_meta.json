@@ -1,0 +1,36 @@
+{
+  "adc_length": 64,
+  "aggregation_key": "timestamp",
+  "align_snapshot": {
+    "ack_mask": 0,
+    "missing_mask": 3,
+    "online_mask": 3,
+    "status": 5
+  },
+  "boards_expected": [
+    {
+      "board_id": 0,
+      "ip": "192.168.10.10",
+      "name": "dev1",
+      "tcp_port": 24
+    },
+    {
+      "board_id": 1,
+      "ip": "192.168.10.12",
+      "name": "dev2",
+      "tcp_port": 24
+    }
+  ],
+  "config_path": "E:\\projects\\1-hardware\\daq-cli\\tests\\daq\\.daq_cli_tmp\\multi_board_acquire.config.json",
+  "event_timeout_ms": 50,
+  "format_name": "FDU_ADC_AGGR",
+  "format_version": 2,
+  "run_dir": "E:\\projects\\1-hardware\\daq-cli\\tests\\daq\\two_board_00001",
+  "start_time": "2026-08-11T15:47:03+0800",
+  "status": "aligned_ack_bypassed",
+  "stop_time": null,
+  "tcm_allow_start_without_ack": true,
+  "tcm_ip": "192.168.10.16",
+  "tcm_rbcp_port": 4660,
+  "timestamp_match_window_ticks": 10
+}

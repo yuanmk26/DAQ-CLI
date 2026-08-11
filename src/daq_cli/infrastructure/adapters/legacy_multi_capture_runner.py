@@ -303,6 +303,7 @@ class LegacyMultiCaptureRunner:
         self,
         config: LegacyMultiCaptureConfig,
         watch_update_callback: "Callable[[MultiBoardSampledPacket], None] | None" = None,
+        cancel_event: threading.Event | None = None,
     ) -> LegacyMultiCaptureResult:
         run_output_dir = allocate_next_run_dir(
             config.output_base_dir,
@@ -361,6 +362,9 @@ class LegacyMultiCaptureRunner:
                 app.start()
                 self._release_tcm_align_busy_after_start(app=app, config=config)
                 while not app.stop_event.is_set():
+                    if cancel_event is not None and cancel_event.is_set():
+                        app.stop_event.set()
+                        break
                     if (
                         (resolved_outputs.json.enabled or resolved_outputs.text.enabled)
                         and decode_runtime is None

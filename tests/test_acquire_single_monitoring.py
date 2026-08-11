@@ -478,6 +478,38 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         finally:
             shutil.rmtree(base_dir, ignore_errors=True)
 
+    def test_parallel_runner_cancel_event_stops_capture(self) -> None:
+        import threading
+
+        packets = [
+            _build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=i)
+            for i in range(1, 50)
+        ]
+        runner = LegacySingleCaptureRunner("legacy")
+        base_dir = self._make_workspace_temp_dir()
+        cancel_event = threading.Event()
+        try:
+            with patch.object(
+                runner,
+                "_open_socket",
+                return_value=FakeSocket(packets, recv_delay_s=0.02),
+            ):
+                # Cancel after a short delay: the capture should stop well
+                # before all 50 requested events (49 packets at 20ms each
+                # would otherwise take ~1s).
+                threading.Timer(0.2, cancel_event.set).start()
+                result = runner.capture_single(
+                    device=SimpleNamespace(name="dev1", ip="192.168.10.10", tcp_port=24),
+                    output_base_dir=base_dir,
+                    events=50,
+                    timeout_s=1.0,
+                    send_mode=1,
+                    cancel_event=cancel_event,
+                )
+                self.assertTrue(result.captured_events < 50)
+        finally:
+            shutil.rmtree(base_dir, ignore_errors=True)
+
     def test_parallel_runner_raises_on_writer_error_after_partial_capture(self) -> None:
         packets = [
             _build_tcp_sent_packet(send_mode=2, hit_mask=0x0001, event_count=1),
@@ -1185,11 +1217,16 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
 
 
 class FakeSocket:
-    def __init__(self, chunks: list[bytes]) -> None:
+    def __init__(self, chunks: list[bytes], recv_delay_s: float = 0.0) -> None:
         self._chunks = list(chunks)
+        self._recv_delay_s = recv_delay_s
         self.closed = False
 
     def recv(self, _size: int) -> bytes:
+        import time
+
+        if self._recv_delay_s:
+            time.sleep(self._recv_delay_s)
         if self._chunks:
             return self._chunks.pop(0)
         return b""

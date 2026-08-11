@@ -1,3 +1,4 @@
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -119,6 +120,7 @@ class AcquireService:
         progress_callback: Callable[[SingleAcquireProgress], None] | None = None,
         watch_frame_callback: Callable[[bytes], None] | None = None,
         run_name_prefix: str | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> SingleAcquireResult:
         profile = self._profile_service.load_profile(profile_path)
         try:
@@ -205,6 +207,7 @@ class AcquireService:
             progress_callback=on_progress,
             watch_frame_callback=watch_frame_callback,
             run_name_prefix=run_name_prefix,
+            cancel_event=cancel_event,
         )
         return SingleAcquireResult(
             device=device,
@@ -260,6 +263,7 @@ class AcquireService:
         stop_capture_on_watch_close: bool = True,
         watch_update_callback: Callable[[object], None] | None = None,
         run_name_prefix: str | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> MultiAcquireResult:
         profile = self._profile_service.load_profile(profile_path)
         try:
@@ -331,6 +335,7 @@ class AcquireService:
                 stop_capture_on_watch_close=stop_capture_on_watch_close,
             ),
             watch_update_callback=watch_update_callback,
+            cancel_event=cancel_event,
         )
         return MultiAcquireResult(
             group=group,

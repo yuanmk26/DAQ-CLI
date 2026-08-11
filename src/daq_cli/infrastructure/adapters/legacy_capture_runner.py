@@ -170,6 +170,7 @@ class LegacySingleCaptureRunner:
         progress_callback: Callable[[LegacySingleCaptureProgress], None] | None = None,
         watch_frame_callback: Callable[[bytes], None] | None = None,
         run_name_prefix: str | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> LegacySingleCaptureResult:
         resolved_outputs = outputs or AcquireOutputsConfig(
             raw=OutputTargetConfig(enabled=True),
@@ -227,6 +228,16 @@ class LegacySingleCaptureRunner:
         )
         exception_queue: queue.Queue[BaseException] = queue.Queue()
         stop_event = threading.Event()
+        if cancel_event is not None:
+            # Map an external cancel request onto the internal stop event so
+            # the receive loop stops at the next event boundary.
+            def _watch_cancel() -> None:
+                cancel_event.wait()
+                stop_event.set()
+
+            threading.Thread(
+                target=_watch_cancel, name="capture_cancel_watcher", daemon=True
+            ).start()
         stats = ParallelCaptureStats(
             requested_events=events,
             decode_enabled=resolved_outputs.json.enabled,
