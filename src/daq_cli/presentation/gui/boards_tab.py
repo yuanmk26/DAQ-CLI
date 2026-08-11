@@ -165,6 +165,16 @@ class BoardTab:
         )
         refresh_button.pack(side=tk.LEFT, padx=(6, 0))
         self._task_buttons.append(refresh_button)
+        ttk.Label(action_row, text="自动标定(秒):").pack(side=tk.LEFT, padx=(12, 0))
+        self._measure_seconds_var = tk.StringVar(value="5")
+        ttk.Entry(action_row, textvariable=self._measure_seconds_var, width=5).pack(
+            side=tk.LEFT, padx=(4, 0)
+        )
+        measure_button = ttk.Button(
+            action_row, text="自动标定", command=self._run_tcm_measure
+        )
+        measure_button.pack(side=tk.LEFT, padx=(6, 12))
+        self._task_buttons.append(measure_button)
         ttk.Label(
             action_row,
             text="注：mode 9 下主触发阈值 (0x11~0x18) 不使用；EXT_Trigger_en 开启会覆盖触发源，mode 9 应保持关闭。",
@@ -550,6 +560,39 @@ class BoardTab:
                 )
             )
             self.app.log(board_result.log_output)
+
+        self._run_task(task, render)
+
+    def _run_tcm_measure(self) -> None:
+        """自动标定：采一段 send_mode=1 波形，建议各通道阈值+极性。
+
+        建议值填入面板表单（不写寄存器），由用户确认后点「应用全部」。
+        """
+        device = self._selected_device()
+        try:
+            seconds = float(self._measure_seconds_var.get())
+        except ValueError as exc:
+            self.result.show(f"参数错误: 秒数必须是数字 ({exc})")
+            return
+        if seconds < 0.1:
+            self.result.show("参数错误: 秒数需 >= 0.1")
+            return
+
+        def task():
+            return self.board_service.measure_tcm_link(
+                device_name=device,
+                profile_path=self.app.profile_path,
+                seconds=seconds,
+            )
+
+        def render(result) -> None:
+            thresholds, polarity = formatting.calibration_to_form_values(
+                result.calibration
+            )
+            for var, value in zip(self._m9_thr_vars, thresholds):
+                var.set(value)
+            self._m9_polarity_var.set(polarity)
+            self.result.show(formatting.format_tcm_link_calibration(result))
 
         self._run_task(task, render)
 

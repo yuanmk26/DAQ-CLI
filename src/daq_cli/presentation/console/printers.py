@@ -8,6 +8,7 @@ from daq_cli.application.board_service import (
     BoardInfoResult,
     RegisterReadResult,
     SendModeSetResult,
+    TcmLinkCalibrationResult,
     TcmLinkConfigReadResult,
     TcmLinkConfigWriteResult,
     TcpMode2ConfigReadResult,
@@ -369,6 +370,49 @@ def print_tcm_trigger_config_write_result(
     )
     table.add_row("profile", str(result.source_profile))
     console.print(table)
+
+
+def print_tcm_link_calibration_result(result: TcmLinkCalibrationResult) -> None:
+    calibration = result.calibration
+    table = Table(
+        title=f"TCM Link Calibration: {result.device.name} "
+        f"({calibration.frames} frames / {calibration.duration_s:.1f}s)"
+    )
+    table.add_column("ch", style="cyan", no_wrap=True)
+    table.add_column("samples", justify="right")
+    table.add_column("baseline", justify="right")
+    table.add_column("sigma", justify="right")
+    table.add_column("dir", justify="right")
+    table.add_column("peak", justify="right")
+    table.add_column("suggested thr", justify="right")
+    table.add_column("polarity", justify="right")
+    for channel in calibration.channels:
+        table.add_row(
+            f"ch{channel.channel:02d}",
+            str(channel.samples),
+            str(channel.baseline),
+            f"{channel.sigma:.1f}",
+            f"{channel.direction:+d}",
+            str(channel.peak_dev),
+            str(channel.suggested_threshold),
+            str(channel.suggested_polarity),
+        )
+    table.add_row(
+        "mask",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "suggested polarity mask",
+        f"0x{calibration.suggested_polarity_mask():04X}",
+    )
+    console.print(table)
+    console.print(
+        f"original send_mode restored: {result.original_send_mode}\n"
+        f"apply with: daq board tcm-link-config {result.device.name} "
+        f"--thr <16 values> --polarity 0x{calibration.suggested_polarity_mask():04X}"
+    )
 
 
 def print_send_mode_set_result(result: SendModeSetResult) -> None:

@@ -5,6 +5,10 @@ from daq_cli.application.config_models import BoardConfigOptions
 from daq_cli.application.profile_service import ProfileService
 from daq_cli.domain.device import DeviceConfig
 from daq_cli.infrastructure.adapters.legacy_board_adapter import LegacyBoardAdapter
+from daq_cli.infrastructure.tcm_link_calibration import (
+    TcmLinkCalibration,
+    calibrate_from_stream,
+)
 
 
 @dataclass(slots=True)
@@ -94,6 +98,14 @@ class TcmLinkConfigWriteResult:
     debounce: int
     enable: bool
     pulse_width: int
+
+
+@dataclass(slots=True)
+class TcmLinkCalibrationResult:
+    device: DeviceConfig
+    source_profile: Path
+    calibration: TcmLinkCalibration
+    original_send_mode: int
 
 
 @dataclass(slots=True)
@@ -265,6 +277,42 @@ class BoardService:
             device=device,
             source_profile=profile.path,
             send_mode=send_mode,
+        )
+
+    def measure_tcm_link(
+        self,
+        device_name: str,
+        profile_path: Path | str,
+        *,
+        seconds: float = 5.0,
+        tcp_timeout_s: float = 1.0,
+    ) -> TcmLinkCalibrationResult:
+        """Capture a short full-waveform stream and suggest per-channel
+        crossing thresholds + polarities.
+
+        Temporarily switches the board to send_mode=1 and restores the
+        original mode afterwards.
+        """
+        profile, device = self._resolve_device(device_name, profile_path)
+        adapter = self._make_adapter(profile)
+        original_send_mode = adapter.read_tcp_mode2_config(device).send_mode
+        try:
+            if original_send_mode != 1:
+                adapter.write_send_mode(device, 1)
+            calibration = calibrate_from_stream(
+                device, seconds=seconds, tcp_timeout_s=tcp_timeout_s
+            )
+        finally:
+            if original_send_mode != 1:
+                try:
+                    adapter.write_send_mode(device, original_send_mode)
+                except Exception as restore_exc:  # noqa: BLE001 - best effort
+                    print(f"Warning: failed to restore send_mode: {restore_exc}")
+        return TcmLinkCalibrationResult(
+            device=device,
+            source_profile=profile.path,
+            calibration=calibration,
+            original_send_mode=original_send_mode,
         )
 
     def read_tcm_link_config(

@@ -345,6 +345,38 @@ def merge_outputs_config(
     )
 
 
+# ---------------------------------------------------------------- calibration
+
+
+def format_tcm_link_calibration(result) -> str:
+    """Plain-text rendering of a TCM link calibration result."""
+    calibration = result.calibration
+    lines = [
+        f"===== TCM Link Calibration: {calibration.device_name} =====",
+        f"frames: {calibration.frames}  duration: {calibration.duration_s:.1f}s",
+        f"ch | samples | baseline | sigma | dir | peak | suggested thr | polarity",
+    ]
+    for channel in calibration.channels:
+        lines.append(
+            f"{channel.channel:02d} | {channel.samples:7d} | {channel.baseline:8d} | "
+            f"{channel.sigma:5.1f} | {channel.direction:+3d} | {channel.peak_dev:4d} | "
+            f"{channel.suggested_threshold:14d} | {channel.suggested_polarity}"
+        )
+    lines.append(
+        f"suggested polarity mask: 0x{calibration.suggested_polarity_mask():04X}"
+    )
+    lines.append(f"original send_mode restored: {result.original_send_mode}")
+    lines.append("建议值已填入面板阈值/极性，确认后点「应用全部并回读验证」。")
+    return "\n".join(lines)
+
+
+def calibration_to_form_values(calibration) -> tuple[list[str], str]:
+    """Map a calibration to (threshold strings, polarity hex) for the panel."""
+    thresholds = [str(channel.suggested_threshold) for channel in calibration.channels]
+    polarity = f"0x{calibration.suggested_polarity_mask():04X}"
+    return thresholds, polarity
+
+
 # ---------------------------------------------------------------- acquire
 
 

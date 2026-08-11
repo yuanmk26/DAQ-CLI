@@ -14,6 +14,7 @@ from daq_cli.presentation.console.printers import (
     print_send_mode_set_result,
     print_board_sysmon,
     print_register_read_result,
+    print_tcm_link_calibration_result,
     print_tcm_link_config_read_result,
     print_tcm_link_config_write_result,
     print_tcp_mode2_config_read_result,
@@ -221,6 +222,34 @@ def _parse_thr_list(text: str) -> list[int]:
             "--thr needs 1 value (broadcast to 16 channels) or 16 comma-separated values"
         )
     return values
+
+
+@app.command("tcm-link-measure")
+def board_tcm_link_measure(
+    device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
+    seconds: Annotated[
+        float,
+        typer.Option("--seconds", min=0.1, help="Capture duration for calibration."),
+    ] = 5.0,
+    tcp_timeout: Annotated[
+        float,
+        typer.Option("--tcp-timeout", min=0.1, help="TCP socket timeout in seconds."),
+    ] = 1.0,
+    profile: RequiredProfileOption = ...,
+) -> None:
+    """Capture a short waveform stream and suggest per-channel crossing
+    thresholds + polarities for the TCM trigger link (mode 9).
+
+    Temporarily switches the board to send_mode=1 and restores it afterwards.
+    """
+    service = BoardService()
+    result = service.measure_tcm_link(
+        device_name=device,
+        profile_path=profile,
+        seconds=seconds,
+        tcp_timeout_s=tcp_timeout,
+    )
+    print_tcm_link_calibration_result(result)
 
 
 @app.command("tcm-link-show")
