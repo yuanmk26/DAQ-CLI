@@ -63,26 +63,27 @@ class AcquireTab:
 
         self._build_single_group(self._single_page)
         self._build_watch_host(self._single_page)
-        self.single_result = ResultArea(self._single_page, text="单板结果", height=8)
+        self._ensure_watch_canvas("")  # canvas is always present
+        self.single_result = ResultArea(self._single_page, text="单板结果", height=5)
         # Fixed-height strip so the embedded waveform gets the remaining space.
         self.single_result.pack(fill=tk.X)
 
         self._build_multi_group(self._multi_page)
         self._build_multi_watch_host(self._multi_page)
         self._build_multi_watch_controls(self._multi_page)
-        self.multi_result = ResultArea(self._multi_page, text="多板结果", height=8)
+        self._ensure_multi_watch_canvas()
+        self.multi_result = ResultArea(self._multi_page, text="多板结果", height=5)
         self.multi_result.pack(fill=tk.X)
 
     def _build_watch_host(self, parent) -> None:
-        """Frame that hosts the embedded waveform canvas during capture.
-
-        Packed only while monitoring is active so it takes no space otherwise.
-        """
+        """Frame hosting the embedded waveform canvas; always visible."""
         self._watch_host = ttk.Frame(parent)
+        self._watch_host.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
 
     def _build_multi_watch_host(self, parent) -> None:
-        """Frame hosting the embedded multi-board waveform canvas."""
+        """Frame hosting the embedded multi-board waveform canvas; always visible."""
         self._multi_watch_host = ttk.Frame(parent)
+        self._multi_watch_host.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
 
     def _build_multi_watch_controls(self, parent) -> None:
         row = ttk.Frame(parent)
@@ -301,16 +302,20 @@ class AcquireTab:
         self.app.schedule(self._poll_progress)
 
     def _ensure_watch_canvas(self, device: str) -> None:
-        """Create (or keep) the embedded waveform canvas for this capture."""
-        if self._watch_canvas is not None:
-            return
+        """(Re)create the embedded waveform canvas for a capture.
+
+        The host frame is always visible; each capture gets a fresh figure
+        so the previous run's waveforms do not linger.
+        """
         from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-        self._watch_host.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
-        self._watch_device_name = device
+        if self._watch_canvas is not None:
+            self._watch_canvas.get_tk_widget().destroy()
+            self._watch_canvas = None
+        self._watch_device_name = device or "单板采集"
         self._watch_figure = WaveMonitorFigure(
-            source_label=f"{device} 采集监视",
-            help_text="采集过程中实时显示（每 N 帧采样）",
+            source_label=self._watch_device_name,
+            help_text="采集开始后实时滚动（每 N 帧采样）",
             figsize=(11.0, 6.5),
         )
         self._watch_canvas = FigureCanvasTkAgg(
@@ -320,12 +325,9 @@ class AcquireTab:
         self._watch_canvas.draw()
 
     def _teardown_watch_canvas(self) -> None:
-        if self._watch_canvas is not None:
-            self._watch_canvas.get_tk_widget().destroy()
-            self._watch_canvas = None
-        self._watch_figure = None
+        # Keep the canvas and last frame visible for inspection; only stop
+        # delivering new frames.
         self._watch_frame_queue = None
-        self._watch_host.pack_forget()
 
     def _poll_watch_frames(self) -> None:
         if (
@@ -382,15 +384,18 @@ class AcquireTab:
     # ---------------------------------------------------------------- multi
 
     def _ensure_multi_watch_canvas(self) -> None:
-        """Create (or keep) the embedded multi-board waveform canvas."""
-        if self._multi_watch_canvas is not None:
-            return
+        """(Re)create the embedded multi-board waveform canvas.
+
+        The host frame is always visible; each capture gets a fresh figure.
+        """
         from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-        self._multi_watch_host.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+        if self._multi_watch_canvas is not None:
+            self._multi_watch_canvas.get_tk_widget().destroy()
+            self._multi_watch_canvas = None
         self._multi_watch_figure = WaveMonitorFigure(
-            source_label=f"multi-watch:{self._multi_group_label}",
-            help_text="多板采集实时波形（板/事件可切换）",
+            source_label=f"multi-watch:{self._multi_group_label or '未开始'}",
+            help_text="采集开始后实时滚动（板/事件可切换）",
             figsize=(11.0, 6.5),
         )
         self._multi_watch_canvas = FigureCanvasTkAgg(
@@ -400,13 +405,10 @@ class AcquireTab:
         self._multi_watch_canvas.draw()
 
     def _teardown_multi_watch_canvas(self) -> None:
-        if self._multi_watch_canvas is not None:
-            self._multi_watch_canvas.get_tk_widget().destroy()
-            self._multi_watch_canvas = None
-        self._multi_watch_figure = None
+        # Keep the canvas and last frame visible for inspection; only stop
+        # delivering new frames.
         self._multi_watch_queue = None
         self._multi_viewer_state = None
-        self._multi_watch_host.pack_forget()
 
     def _render_multi_selected(self) -> None:
         viewer_state = self._multi_viewer_state
