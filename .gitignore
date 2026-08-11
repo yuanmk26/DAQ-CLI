@@ -55,3 +55,7 @@ dist-exe/
 # Local profile overrides
 profiles/*.local.yaml
 profiles/*.private.yaml
+
+# Stray vendored-script test run outputs
+tests/.daq_cli_tmp/
+tests/two_board_*/
