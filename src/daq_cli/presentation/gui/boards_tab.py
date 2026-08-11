@@ -322,7 +322,11 @@ class BoardTab:
         for button in self._task_buttons:
             button.configure(state=tk.NORMAL)
         if ok:
-            on_result(payload)
+            try:
+                on_result(payload)
+            except Exception as exc:  # noqa: BLE001 - keep the tab usable
+                self.result.show(f"结果渲染失败: {exc}")
+                self.app.log(f"结果渲染失败: {exc}")
         else:
             self.result.show(f"错误: {payload}")
             self.app.log(f"操作失败: {payload}")

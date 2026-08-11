@@ -12,6 +12,10 @@ import argparse
 import matplotlib
 
 matplotlib.use("TkAgg")  # must precede every other matplotlib import
+# Chinese labels in embedded figures (source labels / titles) need a CJK
+# font; DejaVu Sans renders them as tofu.
+matplotlib.rcParams["font.sans-serif"] = ["Microsoft YaHei", "DejaVu Sans"]
+matplotlib.rcParams["axes.unicode_minus"] = False
 
 
 def main() -> None:

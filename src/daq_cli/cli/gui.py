@@ -23,6 +23,8 @@ def gui(
     import matplotlib
 
     matplotlib.use("TkAgg")  # defensive: no-op if the backend is already set
+    matplotlib.rcParams["font.sans-serif"] = ["Microsoft YaHei", "DejaVu Sans"]
+    matplotlib.rcParams["axes.unicode_minus"] = False
 
     import tkinter as tk
 

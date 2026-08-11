@@ -168,6 +168,7 @@ class LegacySingleCaptureRunner:
         text_waveform_layout: str = "channel_blocks",
         watch_every: int | None = None,
         progress_callback: Callable[[LegacySingleCaptureProgress], None] | None = None,
+        watch_frame_callback: Callable[[bytes], None] | None = None,
     ) -> LegacySingleCaptureResult:
         resolved_outputs = outputs or AcquireOutputsConfig(
             raw=OutputTargetConfig(enabled=True),
@@ -250,7 +251,10 @@ class LegacySingleCaptureRunner:
         if resolved_log_output_path is not None:
             log_lines.append(f"Log output path: {resolved_log_output_path}")
         if watch_every is not None:
-            log_lines.append(f"Wave watch every: {watch_every}")
+            if watch_frame_callback is not None:
+                log_lines.append(f"Embedded frame watch every: {watch_every}")
+            else:
+                log_lines.append(f"Wave watch every: {watch_every}")
         decode_backend = (
             self._start_decode_backend()
             if resolved_outputs.json.enabled or resolved_outputs.text.enabled
@@ -258,7 +262,7 @@ class LegacySingleCaptureRunner:
         )
         watch_backend = (
             self._start_watch_backend(device_name=getattr(device, "name", "acquire"))
-            if watch_every is not None
+            if watch_every is not None and watch_frame_callback is None
             else None
         )
 
@@ -301,6 +305,7 @@ class LegacySingleCaptureRunner:
                 watch_every,
                 watch_backend.task_queue if watch_backend is not None else None,
                 progress_callback,
+                watch_frame_callback,
             ),
         )
 
@@ -459,6 +464,7 @@ class LegacySingleCaptureRunner:
         watch_every: int | None,
         watch_task_queue: queue.Queue[WatchWorkItem | None] | None,
         progress_callback: Callable[[LegacySingleCaptureProgress], None] | None,
+        watch_frame_callback: Callable[[bytes], None] | None = None,
     ) -> None:
         try:
             while True:
@@ -491,17 +497,20 @@ class LegacySingleCaptureRunner:
                     stats.decode_submitted += 1
                 if (
                     watch_every is not None
-                    and watch_task_queue is not None
                     and stats.captured_events % watch_every == 0
                 ):
-                    self._try_publish_watch_item(
-                        task_queue=watch_task_queue,
-                        item=WatchWorkItem(
-                            raw_event_path=raw_event_path,
-                            expected_send_mode=send_mode,
-                            adc_length=ADC_LENGTH,
-                        ),
-                    )
+                    if watch_frame_callback is not None:
+                        watch_frame_callback(item.packet)
+                        stats.watched_frames += 1
+                    elif watch_task_queue is not None:
+                        self._try_publish_watch_item(
+                            task_queue=watch_task_queue,
+                            item=WatchWorkItem(
+                                raw_event_path=raw_event_path,
+                                expected_send_mode=send_mode,
+                                adc_length=ADC_LENGTH,
+                            ),
+                        )
                 if progress_callback is not None:
                     progress_callback(
                         LegacySingleCaptureProgress(

@@ -64,9 +64,16 @@ class MultiBoardViewerStepResult:
 
 
 class WaveMonitorFigure:
-    def __init__(self, source_label: str, help_text: str | None = None) -> None:
+    def __init__(
+        self,
+        source_label: str,
+        help_text: str | None = None,
+        figsize: tuple[float, float] | None = None,
+    ) -> None:
         self._source_label = source_label
-        figsize = _compute_default_figsize()
+        # Embedded GUIs pass an explicit figsize; standalone windows default
+        # to a screen-derived size.
+        figsize = figsize if figsize is not None else _compute_default_figsize()
         self._figure, axes = plt.subplots(4, 4, figsize=figsize, sharex=True)
         self._axes = list(axes.flatten())
         self._lines = []

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import queue
 import tkinter as tk
+from pathlib import Path
 from tkinter import ttk
 
 from daq_cli.application.acquire_service import AcquireService
@@ -12,8 +13,14 @@ from daq_cli.application.output_config import (
     OutputTargetConfig,
     TextOutputConfig,
 )
+from daq_cli.infrastructure.tcp_sent_decode import decode_tcp_sent_packet
+from daq_cli.infrastructure.wave_monitor import WaveMonitorFrame
 from daq_cli.presentation.gui import formatting, threads
 from daq_cli.presentation.gui.widgets import ResultArea
+from daq_cli.presentation.wave_monitor_viewer import (
+    WaveMonitorFigure,
+    WaveMonitorRunState,
+)
 
 
 class AcquireTab:
@@ -24,11 +31,22 @@ class AcquireTab:
         self._single_busy = False
         self._multi_busy = False
         self._progress_queue: queue.Queue[object] | None = None
+        self._watch_frame_queue: queue.Queue[bytes] | None = None
+        self._watch_figure: WaveMonitorFigure | None = None
+        self._watch_canvas = None  # FigureCanvasTkAgg
 
         self._build_single_group()
+        self._build_watch_host()
         self._build_multi_group()
         self.result = ResultArea(self.frame, text="结果")
         self.result.pack(fill=tk.BOTH, expand=True)
+
+    def _build_watch_host(self) -> None:
+        """Frame that hosts the embedded waveform canvas during capture.
+
+        Packed only while monitoring is active so it takes no space otherwise.
+        """
+        self._watch_host = ttk.Frame(self.frame)
 
     # ---------------------------------------------------------------- forms
 
@@ -68,6 +86,17 @@ class AcquireTab:
             ttk.Checkbutton(output_row, text=text, variable=var).pack(
                 side=tk.LEFT, padx=(0, 10)
             )
+        watch_row = ttk.Frame(group)
+        watch_row.pack(fill=tk.X, pady=(6, 0))
+        self._watch_enabled = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            watch_row, text="采集时监视波形", variable=self._watch_enabled
+        ).pack(side=tk.LEFT)
+        ttk.Label(watch_row, text="每 N 帧:").pack(side=tk.LEFT, padx=(12, 0))
+        self._watch_every_var = tk.StringVar(value="1")
+        ttk.Entry(watch_row, textvariable=self._watch_every_var, width=5).pack(
+            side=tk.LEFT, padx=(4, 0)
+        )
         self._single_start_button = ttk.Button(
             group, text="开始单板采集", command=self._run_single
         )
@@ -147,7 +176,25 @@ class AcquireTab:
             text=TextOutputConfig(enabled=self._text_enabled.get()),
             log=OutputTargetConfig(enabled=self._log_enabled.get()),
         )
-        self._single_busy = True
+        self._single_busy = True  # set before scheduling the watch poll
+        watch_every: int | None = None
+        watch_callback = None
+        if self._watch_enabled.get():
+            try:
+                watch_every = int(self._watch_every_var.get())
+            except ValueError as exc:
+                self._single_busy = False
+                self.result.show(f"参数错误: 每 N 帧必须是整数 ({exc})")
+                return
+            if watch_every < 1:
+                self._single_busy = False
+                self.result.show("参数错误: 每 N 帧需 >= 1")
+                return
+            self._watch_frame_queue = queue.Queue()
+            watch_callback = self._watch_frame_queue.put
+            self._ensure_watch_canvas(device)
+            self.app.schedule(self._poll_watch_frames)
+
         self._single_start_button.configure(state=tk.DISABLED)
         self._progress.configure(value=0)
         self._progress_label.configure(text="连接中...")
@@ -161,6 +208,8 @@ class AcquireTab:
                 timeout_s=timeout_s,
                 outputs=outputs,
                 progress_callback=self._progress_queue.put,
+                watch_every=watch_every,
+                watch_frame_callback=watch_callback,
             )
 
         threads.run_in_background(
@@ -182,10 +231,70 @@ class AcquireTab:
             )
         self.app.schedule(self._poll_progress)
 
+    def _ensure_watch_canvas(self, device: str) -> None:
+        """Create (or keep) the embedded waveform canvas for this capture."""
+        if self._watch_canvas is not None:
+            return
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+        self._watch_host.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+        self._watch_device_name = device
+        self._watch_figure = WaveMonitorFigure(
+            source_label=f"{device} 采集监视",
+            help_text="采集过程中实时显示（每 N 帧采样）",
+            figsize=(8.0, 4.6),
+        )
+        self._watch_canvas = FigureCanvasTkAgg(
+            self._watch_figure.figure, master=self._watch_host
+        )
+        self._watch_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self._watch_canvas.draw()
+
+    def _teardown_watch_canvas(self) -> None:
+        if self._watch_canvas is not None:
+            self._watch_canvas.get_tk_widget().destroy()
+            self._watch_canvas = None
+        self._watch_figure = None
+        self._watch_frame_queue = None
+        self._watch_host.pack_forget()
+
+    def _poll_watch_frames(self) -> None:
+        if (
+            not self._single_busy
+            or self._watch_frame_queue is None
+            or self._watch_figure is None
+            or self._watch_canvas is None
+        ):
+            return
+        if not self.app.root.winfo_exists():
+            return
+        for packet in threads.drain_queue(self._watch_frame_queue):
+            try:
+                decoded = decode_tcp_sent_packet(
+                    packet, source_file=Path("gui_watch.bin")
+                )
+            except Exception:  # noqa: BLE001 - partial frames are skipped
+                continue
+            frame = WaveMonitorFrame(
+                device_name=self._watch_device_name,
+                event_count=decoded.event_count,
+                timestamp=decoded.timestamp,
+                hit_mask=decoded.hit_mask,
+                send_mode=decoded.send_mode,
+                channels=[
+                    list(channel) if channel is not None else []
+                    for channel in decoded.channels
+                ],
+            )
+            self._watch_figure.update(frame, WaveMonitorRunState.RUN)
+            self._watch_canvas.draw_idle()
+        self.app.schedule(self._poll_watch_frames)
+
     def _single_done(self, result) -> None:
         self._single_busy = False
         self._single_start_button.configure(state=tk.NORMAL)
         self._progress_queue = None
+        self._teardown_watch_canvas()
         self.result.show(formatting.format_single_acquire_result(result))
         self._progress_label.configure(
             text=f"完成: {result.captured_events} 个事件"
@@ -196,6 +305,7 @@ class AcquireTab:
         self._single_busy = False
         self._single_start_button.configure(state=tk.NORMAL)
         self._progress_queue = None
+        self._teardown_watch_canvas()
         self.result.show(f"错误: {exc}")
         self._progress_label.configure(text="失败")
         self.app.log(f"单板采集失败: {exc}")
@@ -276,4 +386,4 @@ class AcquireTab:
             self._group_var.set(groups[0])
 
     def shutdown(self) -> None:
-        pass
+        self._teardown_watch_canvas()

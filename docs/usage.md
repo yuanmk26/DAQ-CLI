@@ -769,8 +769,10 @@ The window has four tabs plus a shared log panel at the bottom:
   differ — use the broadcast-fill only when they match. The register reader
   shows hex dumps.
 - **采集**: single capture (device, events, timeout, output switches) with a
-  live progress bar, and multi capture (group, aggregation key, match
-  window, no-ack allowance) with a busy indicator and result summary.
+  live progress bar and an optional embedded waveform monitor (「采集时监视
+  波形」+ 每 N 帧 sampling — the waveform renders inline next to the
+  progress bar during capture), and multi capture (group, aggregation key,
+  match window, no-ack allowance) with a busy indicator and result summary.
 - **监视**: waveform monitor with live / demo / replay sources and
   RUN / STOP / SINGLE buttons. Stopping the monitor restores the board's
   original `send_mode`. Use demo or replay to try it without hardware.

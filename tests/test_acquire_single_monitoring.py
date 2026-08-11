@@ -436,6 +436,48 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         finally:
             shutil.rmtree(base_dir, ignore_errors=True)
 
+    def test_parallel_runner_watch_frame_callback_skips_viewer_process(self) -> None:
+        packets = [
+            _build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=1),
+            _build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=2),
+            _build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=3),
+            _build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=4),
+        ]
+        runner = LegacySingleCaptureRunner("legacy")
+        base_dir = self._make_workspace_temp_dir()
+        sampled: list[bytes] = []
+        try:
+            with patch.object(
+                runner,
+                "_open_socket",
+                return_value=FakeSocket(packets),
+            ):
+                with patch.object(
+                    runner,
+                    "_start_watch_backend",
+                    side_effect=AssertionError(
+                        "watch backend must not spawn with a frame callback"
+                    ),
+                ):
+                    result = runner.capture_single(
+                        device=SimpleNamespace(name="dev1", ip="192.168.10.10", tcp_port=24),
+                        output_base_dir=base_dir,
+                        events=4,
+                        timeout_s=1.0,
+                        send_mode=1,
+                        watch_every=2,
+                        watch_frame_callback=sampled.append,
+                    )
+
+            self.assertTrue(result.watch_enabled)
+            self.assertEqual(len(sampled), 2)  # events 2 and 4
+            for packet in sampled:
+                self.assertEqual(packet[:3], b"\xFF\xFE\x01")
+            self.assertEqual(result.watched_frames, 2)
+            self.assertIn("Embedded frame watch every: 2", result.log_output)
+        finally:
+            shutil.rmtree(base_dir, ignore_errors=True)
+
     def test_parallel_runner_raises_on_writer_error_after_partial_capture(self) -> None:
         packets = [
             _build_tcp_sent_packet(send_mode=2, hit_mask=0x0001, event_count=1),

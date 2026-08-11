@@ -117,6 +117,7 @@ class AcquireService:
         text_waveform_layout: str = "channel_blocks",
         watch_every: int | None = None,
         progress_callback: Callable[[SingleAcquireProgress], None] | None = None,
+        watch_frame_callback: Callable[[bytes], None] | None = None,
     ) -> SingleAcquireResult:
         profile = self._profile_service.load_profile(profile_path)
         try:
@@ -201,6 +202,7 @@ class AcquireService:
             text_waveform_layout=text_waveform_layout,
             watch_every=watch_every,
             progress_callback=on_progress,
+            watch_frame_callback=watch_frame_callback,
         )
         return SingleAcquireResult(
             device=device,
