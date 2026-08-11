@@ -27,21 +27,47 @@ class ScrollableFrame(ttk.Frame):
         self._canvas.configure(yscrollcommand=self._scrollbar.set)
         self._canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self._scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self._wheel_bound: set[int] = set()
 
         self.inner.bind("<Configure>", self._on_inner_configure)
         self._canvas.bind("<Configure>", self._on_canvas_configure)
-        self._canvas.bind("<MouseWheel>", self._on_mousewheel)
-        self.inner.bind("<MouseWheel>", self._on_mousewheel)
+        self.bind_wheel(self._canvas)
+        self.bind_wheel(self.inner)
+
+    def bind_wheel(self, widget) -> None:
+        """Let the mouse wheel over ``widget`` scroll this frame.
+
+        Idempotent: each widget is bound at most once, so widgets created
+        after construction (embedded canvases, tab pages) can safely call
+        this again.
+        """
+        if id(widget) in self._wheel_bound:
+            return
+        self._wheel_bound.add(id(widget))
+        widget.bind("<MouseWheel>", self._on_mousewheel, add="+")
+
+    def _bind_wheel_recursive(self, widget) -> None:
+        for child in widget.winfo_children():
+            # Text widgets (including ScrolledText) scroll themselves; the
+            # wheel over them must not also scroll the page.
+            if isinstance(child, tk.Text):
+                continue
+            self.bind_wheel(child)
+            self._bind_wheel_recursive(child)
 
     def _on_inner_configure(self, _event) -> None:
         self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+        # Children created after construction (tab pages, embedded canvases)
+        # get the wheel binding once they appear.
+        self._bind_wheel_recursive(self.inner)
 
     def _on_canvas_configure(self, event) -> None:
         # Keep the inner frame at the canvas width so children fill it.
         self._canvas.itemconfigure(self._window, width=event.width)
 
-    def _on_mousewheel(self, event) -> None:
+    def _on_mousewheel(self, event) -> str:
         self._canvas.yview_scroll(int(-event.delta / 120), "units")
+        return "break"
 
 
 class ResultArea(ttk.LabelFrame):

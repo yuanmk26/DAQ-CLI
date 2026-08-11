@@ -325,6 +325,7 @@ class AcquireTab:
         )
         self._watch_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self._watch_canvas.draw()
+        self.frame.bind_wheel(self._watch_canvas.get_tk_widget())
 
     def _teardown_watch_canvas(self) -> None:
         # Keep the canvas and last frame visible for inspection; only stop
@@ -405,6 +406,7 @@ class AcquireTab:
         )
         self._multi_watch_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self._multi_watch_canvas.draw()
+        self.frame.bind_wheel(self._multi_watch_canvas.get_tk_widget())
 
     def _teardown_multi_watch_canvas(self) -> None:
         # Keep the canvas and last frame visible for inspection; only stop
