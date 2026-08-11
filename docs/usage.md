@@ -773,8 +773,9 @@ The window has four tabs plus a shared log panel at the bottom:
   progress bar and an optional embedded waveform monitor (「采集时监视波形」
   + 每 N 帧 sampling — the waveform renders inline, full-size, during
   capture). Multi: group, aggregation key, match window, no-ack allowance,
-  busy indicator and result summary (multi-board waveform monitoring is a
-  CLI-only feature in this version: `daq acquire multi --watch-waveforms`).
+  and an optional embedded multi-board monitor (「采集时监视波形」) with
+  board selection and prev/next/latest event navigation. Result summaries
+  are compact strips so the waveforms get the remaining space.
 - **监视**: waveform monitor with live / demo / replay sources and
   RUN / STOP / SINGLE buttons. Stopping the monitor restores the board's
   original `send_mode`. Use demo or replay to try it without hardware.
