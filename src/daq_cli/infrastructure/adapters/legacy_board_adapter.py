@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import io
+import time
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
@@ -93,22 +94,37 @@ class LegacyBoardAdapter:
         options: BoardConfigOptions | None = None,
     ) -> LegacyBoardConfigResult:
         options = options or BoardConfigOptions()
-        with temporary_sys_path(self._script_dir), device_environment(
-            device, send_start_delay_us=send_start_delay_us
-        ):
-            clear_legacy_modules()
-            module = importlib.import_module("start_16CH_two_board")
-            module.CONFIG_ADC = options.adc_enabled
-            module.CONFIG_CLOCK = options.clock_enabled
-            module.CONFIG_TRIGGER = options.trigger_enabled
-            module.CONFIG_TCP_MODE2 = options.tcp_mode2_enabled
-            captured = io.StringIO()
-            with self._patched_trigger_behavior(options), redirect_stdout(captured):
-                success = bool(module.configure_device())
-            return LegacyBoardConfigResult(
-                success=success,
-                log_output=captured.getvalue(),
-            )
+        # The legacy configure_device() issues many RBCP requests (I2C
+        # register writes for the ADC/clock chips); occasional UDP drops
+        # surface as RbcpTimeout. Retry the whole run a few times — the
+        # configuration is idempotent, so a re-run is safe.
+        last_error: BaseException | None = None
+        for attempt in range(3):
+            try:
+                with temporary_sys_path(self._script_dir), device_environment(
+                    device, send_start_delay_us=send_start_delay_us
+                ):
+                    clear_legacy_modules()
+                    module = importlib.import_module("start_16CH_two_board")
+                    module.CONFIG_ADC = options.adc_enabled
+                    module.CONFIG_CLOCK = options.clock_enabled
+                    module.CONFIG_TRIGGER = options.trigger_enabled
+                    module.CONFIG_TCP_MODE2 = options.tcp_mode2_enabled
+                    captured = io.StringIO()
+                    with self._patched_trigger_behavior(options), redirect_stdout(
+                        captured
+                    ):
+                        success = bool(module.configure_device())
+                    return LegacyBoardConfigResult(
+                        success=success,
+                        log_output=captured.getvalue(),
+                    )
+            except Exception as exc:  # noqa: BLE001 - retry any RBCP/I2C failure
+                last_error = exc
+                time.sleep(1.0 * (attempt + 1))
+        raise RuntimeError(
+            f"board configuration failed after 3 attempts: {last_error}"
+        ) from last_error
 
     def read_registers(
         self, device: DeviceConfig, address: int, length: int
