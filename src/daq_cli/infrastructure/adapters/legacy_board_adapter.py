@@ -188,25 +188,34 @@ class LegacyBoardAdapter:
         self.write_registers(device, 0x42, bytes([updated]))
 
     def read_tcm_link_config(self, device: DeviceConfig) -> LegacyTcmLinkReadResult:
-        """Read the TCM trigger-link registers (0x45..0x6C) without writing."""
+        """Read the TCM trigger-link registers (0x45..0x6C) without writing.
+
+        Thresholds are read from the *effective* comparator registers
+        (0x63-2N for channel N): the firmware TCM_THR concatenation
+        ``{x45..x64}`` places channel 0 at the MSB while the comparator
+        indexes ``thr[ch*16 +: 16]`` from the LSB, so the documented
+        0x45+2N positions are not what the crossing detector reads.
+        """
         with temporary_sys_path(self._script_dir), device_environment(device):
             clear_legacy_modules()
-            fpga_ctrl_module = importlib.import_module("FPGA_CTRL")
-            controller = fpga_ctrl_module.FPGAControl()
-            (
-                thresholds,
-                mask,
-                polarity,
-                debounce,
-                enable,
-                pulse_width,
-            ) = controller.read_tcm_config()
+            rbcp_module = importlib.import_module("lib.rbcp")
+            client = rbcp_module.Rbcp(device_ip=device.ip, udp_port=device.rbcp_port)
+            data = bytes(client.read(0x45, 0x28))  # 0x45..0x6C
+            thresholds = [
+                (data[0x1E - i * 2] << 8) | data[0x1F - i * 2]
+                for i in range(16)
+            ]
+            mask = (data[0x20] << 8) | data[0x21]
+            polarity = (data[0x22] << 8) | data[0x23]
+            debounce = (data[0x24] << 8) | data[0x25]
+            enable = data[0x26] & 0x01
+            pulse_width = data[0x27]
             return LegacyTcmLinkReadResult(
-                thresholds=[int(value) for value in thresholds],
+                thresholds=thresholds,
                 mask=int(mask),
                 polarity=int(polarity),
                 debounce=int(debounce),
-                enable=bool(enable & 0x01),
+                enable=bool(enable),
                 pulse_width=int(pulse_width),
             )
 
@@ -223,8 +232,10 @@ class LegacyBoardAdapter:
     ) -> None:
         """Write the TCM trigger-link configuration (0x45..0x6C).
 
-        Thresholds/mask/polarity are written before the enable bit so the
-        pulse output is only activated once everything is in place.
+        Thresholds are written to the effective comparator registers
+        (0x63-2N for channel N, see read_tcm_link_config) before the
+        enable bit so the pulse output is only activated once everything
+        is in place.
         """
         if len(thresholds) != 16:
             raise ValueError("TCM link needs exactly 16 channel thresholds")
@@ -240,9 +251,14 @@ class LegacyBoardAdapter:
             raise ValueError("TCM link pulse width must stay in range 0..0xFF")
         with temporary_sys_path(self._script_dir), device_environment(device):
             clear_legacy_modules()
+            rbcp_module = importlib.import_module("lib.rbcp")
+            client = rbcp_module.Rbcp(device_ip=device.ip, udp_port=device.rbcp_port)
+            for i, threshold in enumerate(thresholds):
+                addr = 0x63 - i * 2
+                client.write(addr, bytes([(threshold >> 8) & 0xFF]))
+                client.write(addr + 1, bytes([threshold & 0xFF]))
             fpga_ctrl_module = importlib.import_module("FPGA_CTRL")
             controller = fpga_ctrl_module.FPGAControl()
-            controller.set_tcm_thresholds(thresholds)
             controller.set_tcm_config(
                 mask=mask,
                 polarity=polarity,
