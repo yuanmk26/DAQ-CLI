@@ -1,0 +1,123 @@
+# daq-cli 示例配置 —— TCM 触发联动（mode 9）工作流
+#
+# 场景：3 块 ADC 板（dev1/dev2/dev3）+ 1 块 TCM 板（main）。
+#   - dev1、dev2 参与触发（TCM mask 通道 0、1）
+#   - dev3 只接收 TCM 广播触发，不发起
+#   - 每块板的 TCM 链路阈值/极性按各自基线配置（用 `daq board tcm-link-measure`
+#     自动标定后填入）
+#
+# 使用：
+#   daq-gui --profile profiles/example.tcm-trigger.yaml
+#   或 CLI（见 profiles/../docs/usage.md）
+
+devices:
+  dev1:
+    ip: 192.168.10.10
+    rbcp_port: 4660
+    tcp_port: 24
+    board_id: 0
+    role: adc
+
+  dev2:
+    ip: 192.168.10.11
+    rbcp_port: 4660
+    tcp_port: 24
+    board_id: 1
+    role: adc
+
+  dev3:
+    ip: 192.168.10.12
+    rbcp_port: 4660
+    tcp_port: 24
+    board_id: 2
+    role: adc
+
+tcm:
+  main:
+    ip: 192.168.10.16
+    rbcp_port: 4660
+
+groups:
+  three_board:
+    devices: [dev1, dev2, dev3]
+    tcm: main
+
+defaults:
+  output_dir: out          # 数据根目录（GUI 可覆盖）
+  adc_length: 64
+
+  # ---- 单板采集默认输出布局（GUI 存储区留空时使用）----
+  acquire_single:
+    events: 1000
+    timeout_s: 10.0
+    watch_every: 1
+    outputs:
+      raw:
+        enabled: true
+        dir: out/single_raw     # 父目录语义：文件落 out/single_raw/<run名>/
+      json:
+        enabled: true
+        dir: out/single_json
+      text:
+        enabled: false
+        dir: out/single_text
+        max_events_per_file: 1000
+        waveform_layout: point_rows
+      log:
+        enabled: true
+        dir: out/single_log
+
+  # ---- 多板采集默认输出布局 ----
+  acquire_multi:
+    aggregation_key: timestamp
+    timestamp_match_window_ticks: 10
+    event_timeout_ms: 50
+    tcp_timeout_s: 1.0
+    allow_start_without_ack: true
+    outputs:
+      raw:
+        enabled: true
+        dir: out/multi_raw
+      json:
+        enabled: true
+        dir: out/multi_json
+      text:
+        enabled: false
+        dir: out/multi_text
+        max_events_per_file: 1000
+        waveform_layout: point_rows
+      log:
+        enabled: true
+        dir: out/multi_log
+
+# ---------------------------------------------------------------------------
+# TCM 触发联动（mode 9）配置提示 —— 这些不是程序读取的字段，而是每块板
+# 需要执行的操作清单（GUI 板卡 tab「TCM 触发 (mode 9) 寄存器」面板或 CLI）：
+#
+# 1. 每块 ADC 板（dev1/dev2/dev3）：
+#      Trigger_model=9（0x10）、Trigger_position=0~10（0x19）、EXT_Trigger 关
+#      Send_mode 按需（0x42）
+#    CLI:
+#      daq board config devN --trigger --trigger-mode 9 --trigger-position 5 \
+#        --no-ext-trigger --send-mode 1 --profile profiles/example.tcm-trigger.yaml
+#
+# 2. TCM 链路阈值/极性（每块板各自，0x45~0x6C）—— 自动标定：
+#      daq board tcm-link-measure devN --seconds 5 \
+#        --profile profiles/example.tcm-trigger.yaml
+#    结果填入：
+#      daq board tcm-link-config devN --mask 0x0001 --polarity <建议> \
+#        --thr <16 个建议值> --debounce 200 --width 20 --enable \
+#        --profile profiles/example.tcm-trigger.yaml
+#    （dev3 不发起触发：不执行 --enable，或 mask=0x0000）
+#
+# 3. TCM 板（main，0x20~0x25）—— 参与掩码 = 发起触发的板：
+#      daq tcm config main --enable --mask 0x03 --width 32 --debounce 20 \
+#        --profile profiles/example.tcm-trigger.yaml
+#    mask=0b00000011 → 只有通道 0、1（dev1、dev2）能发起；dev3 仍会收到广播
+#
+# 4. 验证：
+#      daq tcm show main --profile profiles/example.tcm-trigger.yaml
+#      # mask/trig_sticky/TRG_CHAN：最近一次触发来自哪块板
+
+legacy:
+  project_root: E:\projects\1-hardware\FDU-ADC-250M-16ch

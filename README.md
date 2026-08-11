@@ -44,6 +44,28 @@ Install in editable mode:
 pip install -e .
 ```
 
+### Standalone executables (no Python needed on the target PC)
+
+Build two one-file executables (`daq-gui.exe` GUI console + `daq.exe` CLI)
+with PyInstaller:
+
+```powershell
+.\scripts\build_exe.ps1
+```
+
+Outputs land in `dist-exe\`. The executables bundle Python, matplotlib,
+tkinter, and the vendored legacy scripts, so they run directly on another
+Windows PC without installing anything:
+
+```bash
+dist-exe\daq-gui.exe --profile profiles\example.tcm-trigger.yaml
+dist-exe\daq.exe --help
+```
+
+A ready-to-use TCM trigger-link example profile ships at
+`profiles/example.tcm-trigger.yaml` (3 ADC boards + TCM, mode 9 workflow,
+per-type output directories, step-by-step configuration notes).
+
 Install from a GitHub Releases offline package on a new PC:
 
 ```bash

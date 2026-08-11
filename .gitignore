@@ -48,6 +48,10 @@ tmp_test_decode/
 captures/
 artifacts/
 
+# PyInstaller executable builds
+dist-exe/
+.tmp-pyinstaller/
+
 # Local profile overrides
 profiles/*.local.yaml
 profiles/*.private.yaml
