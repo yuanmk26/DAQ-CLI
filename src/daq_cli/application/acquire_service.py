@@ -256,6 +256,7 @@ class AcquireService:
         watch_waveforms: bool = False,
         watch_every: int | None = None,
         stop_capture_on_watch_close: bool = True,
+        watch_update_callback: Callable[[object], None] | None = None,
     ) -> MultiAcquireResult:
         profile = self._profile_service.load_profile(profile_path)
         try:
@@ -325,7 +326,8 @@ class AcquireService:
                 watch_waveforms=watch_waveforms,
                 watch_every=watch_every,
                 stop_capture_on_watch_close=stop_capture_on_watch_close,
-            )
+            ),
+            watch_update_callback=watch_update_callback,
         )
         return MultiAcquireResult(
             group=group,

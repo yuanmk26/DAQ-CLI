@@ -165,6 +165,7 @@ class _MultiBoardWatchPublisher:
         timestamp_match_window_ticks: int,
         event_timeout_ms: int,
         task_queue: Any,
+        frame_callback: "Callable[[MultiBoardSampledPacket], None] | None" = None,
     ) -> None:
         self._board_order = board_order
         self._watch_every = watch_every
@@ -172,6 +173,7 @@ class _MultiBoardWatchPublisher:
         self._timestamp_match_window_ticks = max(int(timestamp_match_window_ticks), 0)
         self._event_timeout_s = max(float(event_timeout_ms) / 1000.0, 0.001)
         self._task_queue = task_queue
+        self._frame_callback = frame_callback
         self._board_counts: dict[int, int] = {board_id: 0 for board_id in board_order}
         self._next_aggregate_event_id = 1
         self._buckets: dict[int, _ViewerAggregateBucket] = {}
@@ -208,6 +210,11 @@ class _MultiBoardWatchPublisher:
             self._close_viewer_bucket(bucket_key)
 
     def _enqueue_sampled_packet(self, sampled_packet: MultiBoardSampledPacket) -> None:
+        if self._frame_callback is not None:
+            # embedded mode: deliver to the caller instead of the viewer
+            # process queue
+            self._frame_callback(sampled_packet)
+            return
         try:
             self._task_queue.put_nowait(sampled_packet)
         except queue.Full:
@@ -295,6 +302,7 @@ class LegacyMultiCaptureRunner:
     def capture_multi(
         self,
         config: LegacyMultiCaptureConfig,
+        watch_update_callback: "Callable[[MultiBoardSampledPacket], None] | None" = None,
     ) -> LegacyMultiCaptureResult:
         run_output_dir = allocate_next_run_dir(
             config.output_base_dir,
@@ -331,13 +339,24 @@ class LegacyMultiCaptureRunner:
             app_config = module.AppConfig.from_json_file(str(config_path))
             app = module.AcquisitionApp(app_config, str(config_path))
             decode_runtime: MultiBoardDecodeRuntime | None = None
-            watch_runtime = (
-                self._start_multi_watch_backend(config)
-                if config.watch_waveforms
-                else None
-            )
-            if watch_runtime is not None:
-                self._attach_multi_watch_proxy(app=app, config=config, watch_runtime=watch_runtime)
+            watch_callback_count = [0]
+            watch_runtime = None
+            if config.watch_waveforms:
+                if watch_update_callback is not None:
+                    # embedded mode: sampled updates go to the caller, no
+                    # separate viewer process
+                    def wrapped_update(packet):
+                        watch_callback_count[0] += 1
+                        watch_update_callback(packet)
+
+                    self._attach_multi_watch_callback(
+                        app=app, config=config, frame_callback=wrapped_update
+                    )
+                else:
+                    watch_runtime = self._start_multi_watch_backend(config)
+                    self._attach_multi_watch_proxy(
+                        app=app, config=config, watch_runtime=watch_runtime
+                    )
             try:
                 app.start()
                 while not app.stop_event.is_set():
@@ -386,6 +405,8 @@ class LegacyMultiCaptureRunner:
                     text_output_dir = decode_runtime.text_output_dir
                 if watch_runtime is not None:
                     watched_frames += self._stop_multi_watch_backend(watch_runtime)
+                else:
+                    watched_frames += watch_callback_count[0]
                 if decode_runtime is not None:
                     decode_drain = self._stop_multi_decode_backend(decode_runtime)
                     decoded_complete_events += decode_drain.decoded_complete_events
@@ -558,6 +579,29 @@ class LegacyMultiCaptureRunner:
             timestamp_match_window_ticks=config.timestamp_match_window_ticks,
             event_timeout_ms=config.event_timeout_ms,
             task_queue=watch_runtime.task_queue,
+        )
+        for receiver in app.receivers:
+            receiver.frame_queue = _MultiBoardFrameQueueProxy(receiver.frame_queue, publisher)
+
+    def _attach_multi_watch_callback(
+        self,
+        *,
+        app: Any,
+        config: LegacyMultiCaptureConfig,
+        frame_callback: "Callable[[MultiBoardSampledPacket], None]",
+    ) -> None:
+        board_order = {
+            board.board_id: (board.name, index)
+            for index, board in enumerate(config.boards)
+        }
+        publisher = _MultiBoardWatchPublisher(
+            board_order=board_order,
+            watch_every=int(config.watch_every or 100),
+            aggregation_key=config.aggregation_key,
+            timestamp_match_window_ticks=config.timestamp_match_window_ticks,
+            event_timeout_ms=config.event_timeout_ms,
+            task_queue=None,
+            frame_callback=frame_callback,
         )
         for receiver in app.receivers:
             receiver.frame_queue = _MultiBoardFrameQueueProxy(receiver.frame_queue, publisher)

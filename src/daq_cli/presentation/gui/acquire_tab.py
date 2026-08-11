@@ -14,12 +14,22 @@ from daq_cli.application.output_config import (
     TextOutputConfig,
 )
 from daq_cli.infrastructure.tcp_sent_decode import decode_tcp_sent_packet
-from daq_cli.infrastructure.wave_monitor import WaveMonitorFrame
+from daq_cli.infrastructure.wave_monitor import MultiBoardWaveUpdate, WaveMonitorFrame
 from daq_cli.presentation.gui import formatting, threads
 from daq_cli.presentation.gui.widgets import ResultArea
 from daq_cli.presentation.wave_monitor_viewer import (
+    DEFAULT_MULTI_BOARD_HISTORY_LIMIT,
+    MultiBoardViewerState,
     WaveMonitorFigure,
     WaveMonitorRunState,
+    _advance_multi_board_viewer_state,
+    _can_navigate_multi_board_history,
+    _format_multi_board_title,
+    _get_selected_multi_board_aggregate_timestamp,
+    _get_selected_multi_board_frame,
+    _jump_to_latest_multi_board_event,
+    _select_next_multi_board_event,
+    _select_previous_multi_board_event,
 )
 
 
@@ -34,6 +44,13 @@ class AcquireTab:
         self._watch_frame_queue: queue.Queue[bytes] | None = None
         self._watch_figure: WaveMonitorFigure | None = None
         self._watch_canvas = None  # FigureCanvasTkAgg
+        # multi-board embedded watch state
+        self._multi_watch_queue: queue.Queue[object] | None = None
+        self._multi_watch_figure: WaveMonitorFigure | None = None
+        self._multi_watch_canvas = None  # FigureCanvasTkAgg
+        self._multi_viewer_state = None  # MultiBoardViewerState
+        self._multi_board_names: list[str] = []
+        self._multi_group_label = ""
 
         # The acquire tab splits into two pages so each capture mode gets
         # the full height (the embedded waveform monitor in particular).
@@ -46,12 +63,15 @@ class AcquireTab:
 
         self._build_single_group(self._single_page)
         self._build_watch_host(self._single_page)
-        self.single_result = ResultArea(self._single_page, text="单板结果")
-        self.single_result.pack(fill=tk.BOTH, expand=True)
+        self.single_result = ResultArea(self._single_page, text="单板结果", height=8)
+        # Fixed-height strip so the embedded waveform gets the remaining space.
+        self.single_result.pack(fill=tk.X)
 
         self._build_multi_group(self._multi_page)
-        self.multi_result = ResultArea(self._multi_page, text="多板结果")
-        self.multi_result.pack(fill=tk.BOTH, expand=True)
+        self._build_multi_watch_host(self._multi_page)
+        self._build_multi_watch_controls(self._multi_page)
+        self.multi_result = ResultArea(self._multi_page, text="多板结果", height=8)
+        self.multi_result.pack(fill=tk.X)
 
     def _build_watch_host(self, parent) -> None:
         """Frame that hosts the embedded waveform canvas during capture.
@@ -59,6 +79,31 @@ class AcquireTab:
         Packed only while monitoring is active so it takes no space otherwise.
         """
         self._watch_host = ttk.Frame(parent)
+
+    def _build_multi_watch_host(self, parent) -> None:
+        """Frame hosting the embedded multi-board waveform canvas."""
+        self._multi_watch_host = ttk.Frame(parent)
+
+    def _build_multi_watch_controls(self, parent) -> None:
+        row = ttk.Frame(parent)
+        row.pack(fill=tk.X, pady=(4, 0))
+        ttk.Label(row, text="显示板:").pack(side=tk.LEFT)
+        self._multi_board_var = tk.StringVar()
+        self._multi_board_combo = ttk.Combobox(
+            row, textvariable=self._multi_board_var, state="readonly", width=14
+        )
+        self._multi_board_combo.pack(side=tk.LEFT, padx=(4, 12))
+        self._multi_board_combo.bind("<<ComboboxSelected>>", self._on_multi_board_select)
+        for text, callback in (
+            ("上一事件", self._multi_prev_event),
+            ("下一事件", self._multi_next_event),
+            ("最新", self._multi_latest_event),
+        ):
+            ttk.Button(row, text=text, command=callback).pack(
+                side=tk.LEFT, padx=(0, 6)
+            )
+        self._multi_watch_status_label = ttk.Label(row, text="")
+        self._multi_watch_status_label.pack(side=tk.LEFT, padx=(12, 0))
 
     # ---------------------------------------------------------------- forms
 
@@ -122,6 +167,18 @@ class AcquireTab:
     def _build_multi_group(self, parent) -> None:
         group = ttk.LabelFrame(parent, text="多板采集", padding=(8, 4))
         group.pack(fill=tk.X, pady=(0, 6))
+
+        watch_row = ttk.Frame(group)
+        watch_row.pack(fill=tk.X, pady=(6, 0))
+        self._multi_watch_enabled = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            watch_row, text="采集时监视波形", variable=self._multi_watch_enabled
+        ).pack(side=tk.LEFT)
+        ttk.Label(watch_row, text="每 N 帧:").pack(side=tk.LEFT, padx=(12, 0))
+        self._multi_watch_every_var = tk.StringVar(value="1")
+        ttk.Entry(watch_row, textvariable=self._multi_watch_every_var, width=5).pack(
+            side=tk.LEFT, padx=(4, 0)
+        )
 
         row = ttk.Frame(group)
         row.pack(fill=tk.X)
@@ -324,6 +381,141 @@ class AcquireTab:
 
     # ---------------------------------------------------------------- multi
 
+    def _ensure_multi_watch_canvas(self) -> None:
+        """Create (or keep) the embedded multi-board waveform canvas."""
+        if self._multi_watch_canvas is not None:
+            return
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+        self._multi_watch_host.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+        self._multi_watch_figure = WaveMonitorFigure(
+            source_label=f"multi-watch:{self._multi_group_label}",
+            help_text="多板采集实时波形（板/事件可切换）",
+            figsize=(11.0, 6.5),
+        )
+        self._multi_watch_canvas = FigureCanvasTkAgg(
+            self._multi_watch_figure.figure, master=self._multi_watch_host
+        )
+        self._multi_watch_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self._multi_watch_canvas.draw()
+
+    def _teardown_multi_watch_canvas(self) -> None:
+        if self._multi_watch_canvas is not None:
+            self._multi_watch_canvas.get_tk_widget().destroy()
+            self._multi_watch_canvas = None
+        self._multi_watch_figure = None
+        self._multi_watch_queue = None
+        self._multi_viewer_state = None
+        self._multi_watch_host.pack_forget()
+
+    def _render_multi_selected(self) -> None:
+        viewer_state = self._multi_viewer_state
+        if viewer_state is None or self._multi_watch_figure is None:
+            return
+        board_name = self._multi_board_names[viewer_state.selected_board_index]
+        current_frame = _get_selected_multi_board_frame(viewer_state)
+        title = _format_multi_board_title(
+            group_label=self._multi_group_label,
+            board_name=board_name,
+            board_index=viewer_state.selected_board_index,
+            board_count=len(self._multi_board_names),
+            run_state=viewer_state.run_state,
+            selected_aggregate_event_id=viewer_state.selected_aggregate_event_id,
+            aggregate_timestamp=_get_selected_multi_board_aggregate_timestamp(
+                viewer_state
+            ),
+            frame=current_frame,
+        )
+        if current_frame is None:
+            self._multi_watch_figure.set_custom_title(title)
+        else:
+            self._multi_watch_figure.update_custom(current_frame, title)
+        self._multi_watch_status_label.configure(
+            text=f"事件 #{viewer_state.selected_aggregate_event_id}"
+            if viewer_state.selected_aggregate_event_id is not None
+            else ""
+        )
+
+    def _poll_multi_watch(self) -> None:
+        if (
+            not self._multi_busy
+            or self._multi_watch_queue is None
+            or self._multi_watch_figure is None
+            or self._multi_watch_canvas is None
+        ):
+            return
+        if not self.app.root.winfo_exists():
+            return
+        for item in threads.drain_queue(self._multi_watch_queue):
+            try:
+                decoded = decode_tcp_sent_packet(
+                    item.packet, source_file=Path("gui_multi_watch.bin")
+                )
+            except Exception:  # noqa: BLE001 - partial frames are skipped
+                continue
+            frame = WaveMonitorFrame(
+                device_name=item.board_name,
+                event_count=decoded.event_count,
+                timestamp=decoded.timestamp,
+                hit_mask=decoded.hit_mask,
+                send_mode=decoded.send_mode,
+                channels=[
+                    list(channel) if channel is not None else []
+                    for channel in decoded.channels
+                ],
+            )
+            update = MultiBoardWaveUpdate(
+                board_name=item.board_name,
+                board_index=item.board_index,
+                aggregate_event_id=item.aggregate_event_id,
+                aggregate_timestamp=item.aggregate_timestamp,
+                board_event_count=item.board_event_count,
+                board_timestamp=item.board_timestamp,
+                frame=frame,
+            )
+            step_result = _advance_multi_board_viewer_state(
+                viewer_state=self._multi_viewer_state,
+                update=update,
+                history_limit=DEFAULT_MULTI_BOARD_HISTORY_LIMIT,
+            )
+            self._multi_viewer_state = step_result.viewer_state
+            if step_result.should_render:
+                self._render_multi_selected()
+        self.app.schedule(self._poll_multi_watch)
+
+    def _on_multi_board_select(self, _event=None) -> None:
+        if self._multi_viewer_state is None:
+            return
+        try:
+            index = self._multi_board_names.index(self._multi_board_var.get())
+        except ValueError:
+            return
+        self._multi_viewer_state.selected_board_index = index
+        _jump_to_latest_multi_board_event(self._multi_viewer_state)
+        self._render_multi_selected()
+
+    def _multi_prev_event(self) -> None:
+        if self._multi_viewer_state is None:
+            return
+        if _can_navigate_multi_board_history(
+            self._multi_viewer_state
+        ) and _select_previous_multi_board_event(self._multi_viewer_state):
+            self._render_multi_selected()
+
+    def _multi_next_event(self) -> None:
+        if self._multi_viewer_state is None:
+            return
+        if _can_navigate_multi_board_history(
+            self._multi_viewer_state
+        ) and _select_next_multi_board_event(self._multi_viewer_state):
+            self._render_multi_selected()
+
+    def _multi_latest_event(self) -> None:
+        if self._multi_viewer_state is None:
+            return
+        _jump_to_latest_multi_board_event(self._multi_viewer_state)
+        self._render_multi_selected()
+
     def _run_multi(self) -> None:
         if self.app.profile is None:
             self.multi_result.show("请先加载 profile")
@@ -343,19 +535,55 @@ class AcquireTab:
             text=TextOutputConfig(enabled=self._multi_text_enabled.get()),
             log=OutputTargetConfig(enabled=True),
         )
-        self._multi_busy = True
+        self._multi_busy = True  # set before scheduling the watch poll
+        watch_every: int | None = None
+        watch_callback = None
+        if self._multi_watch_enabled.get():
+            try:
+                watch_every = int(self._multi_watch_every_var.get())
+            except ValueError as exc:
+                self._multi_busy = False
+                self.multi_result.show(f"参数错误: 每 N 帧必须是整数 ({exc})")
+                return
+            if watch_every < 1:
+                self._multi_busy = False
+                self.multi_result.show("参数错误: 每 N 帧需 >= 1")
+                return
+            group_cfg = self.app.profile.groups[group]
+            self._multi_board_names = [
+                self.app.profile.devices[device_name].name
+                for device_name in group_cfg.devices
+            ]
+            self._multi_group_label = group
+            self._multi_viewer_state = MultiBoardViewerState()
+            self._multi_board_combo.configure(values=self._multi_board_names)
+            if self._multi_board_names:
+                self._multi_board_var.set(self._multi_board_names[0])
+            self._multi_watch_queue = queue.Queue()
+            watch_callback = self._multi_watch_queue.put
+            self._ensure_multi_watch_canvas()
+            self.app.schedule(self._poll_multi_watch)
+
         self._multi_start_button.configure(state=tk.DISABLED)
         self._multi_status_label.configure(text="● 运行中...")
         self.multi_result.show("运行中...")
+        # All form values are read on the GUI thread (tkinter variables are
+        # not thread-safe); the task closure only uses captured values.
+        aggregation_key = self._aggregation_var.get()
+        allow_start_without_ack = self._allow_no_ack.get()
 
         def task():
             return self.acquire_service.capture_multi(
                 group_name=group,
                 profile_path=self.app.profile_path,
+
                 outputs=outputs,
-                aggregation_key=self._aggregation_var.get(),
+                aggregation_key=aggregation_key,
                 timestamp_match_window_ticks=match_window,
-                allow_start_without_ack=self._allow_no_ack.get(),
+                allow_start_without_ack=allow_start_without_ack,
+                watch_waveforms=watch_every is not None,
+                watch_every=watch_every,
+                watch_update_callback=watch_callback,
             )
 
         threads.run_in_background(
@@ -369,6 +597,7 @@ class AcquireTab:
         self._multi_busy = False
         self._multi_start_button.configure(state=tk.NORMAL)
         self._multi_status_label.configure(text="")
+        self._teardown_multi_watch_canvas()
         self.multi_result.show(formatting.format_multi_acquire_result(result))
         self.app.log(f"多板采集完成: {result.run_output_dir}")
 
@@ -376,6 +605,7 @@ class AcquireTab:
         self._multi_busy = False
         self._multi_start_button.configure(state=tk.NORMAL)
         self._multi_status_label.configure(text="失败")
+        self._teardown_multi_watch_canvas()
         self.multi_result.show(f"错误: {exc}")
         self.app.log(f"多板采集失败: {exc}")
 
@@ -399,3 +629,4 @@ class AcquireTab:
 
     def shutdown(self) -> None:
         self._teardown_watch_canvas()
+        self._teardown_multi_watch_canvas()
