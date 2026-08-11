@@ -1,5 +1,6 @@
-# 真机联调配置：2 块 ADC（192.168.10.10 / .12）+ TCM（192.168.10.16）
-# 两块板 ch0 均接塑闪。
+# 真机联调配置：4 块 ADC（.10/.12/.13/.14）+ TCM（192.168.10.16）
+# 四块板 ch0 均接负脉冲塑闪；M21 → TCM: dev1=ch0, dev2=ch1, dev3=ch2, dev4=ch3
+# 目标触发: (dev1|dev2) AND (dev3|dev4)
 
 devices:
   dev1:
@@ -16,6 +17,20 @@ devices:
     board_id: 1
     role: adc
 
+  dev3:
+    ip: 192.168.10.13
+    rbcp_port: 4660
+    tcp_port: 24
+    board_id: 2
+    role: adc
+
+  dev4:
+    ip: 192.168.10.14
+    rbcp_port: 4660
+    tcp_port: 24
+    board_id: 3
+    role: adc
+
 tcm:
   main:
     ip: 192.168.10.16
@@ -24,6 +39,9 @@ tcm:
 groups:
   two_board:
     devices: [dev1, dev2]
+    tcm: main
+  four_board:
+    devices: [dev1, dev2, dev3, dev4]
     tcm: main
 
 defaults:
