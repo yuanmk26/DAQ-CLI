@@ -768,11 +768,13 @@ The window has four tabs plus a shared log panel at the bottom:
   current registers. Per-channel thresholds exist because channel baselines
   differ — use the broadcast-fill only when they match. The register reader
   shows hex dumps.
-- **采集**: single capture (device, events, timeout, output switches) with a
-  live progress bar and an optional embedded waveform monitor (「采集时监视
-  波形」+ 每 N 帧 sampling — the waveform renders inline next to the
-  progress bar during capture), and multi capture (group, aggregation key,
-  match window, no-ack allowance) with a busy indicator and result summary.
+- **采集**: split into two sub-pages (单板采集 / 多板采集) so each mode gets
+  the full height. Single: device, events, timeout, output switches, a live
+  progress bar and an optional embedded waveform monitor (「采集时监视波形」
+  + 每 N 帧 sampling — the waveform renders inline, full-size, during
+  capture). Multi: group, aggregation key, match window, no-ack allowance,
+  busy indicator and result summary (multi-board waveform monitoring is a
+  CLI-only feature in this version: `daq acquire multi --watch-waveforms`).
 - **监视**: waveform monitor with live / demo / replay sources and
   RUN / STOP / SINGLE buttons. Stopping the monitor restores the board's
   original `send_mode`. Use demo or replay to try it without hardware.

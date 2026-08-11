@@ -35,23 +35,35 @@ class AcquireTab:
         self._watch_figure: WaveMonitorFigure | None = None
         self._watch_canvas = None  # FigureCanvasTkAgg
 
-        self._build_single_group()
-        self._build_watch_host()
-        self._build_multi_group()
-        self.result = ResultArea(self.frame, text="结果")
-        self.result.pack(fill=tk.BOTH, expand=True)
+        # The acquire tab splits into two pages so each capture mode gets
+        # the full height (the embedded waveform monitor in particular).
+        self._inner_notebook = ttk.Notebook(self.frame)
+        self._inner_notebook.pack(fill=tk.BOTH, expand=True)
+        self._single_page = ttk.Frame(self._inner_notebook, padding=8)
+        self._multi_page = ttk.Frame(self._inner_notebook, padding=8)
+        self._inner_notebook.add(self._single_page, text="单板采集")
+        self._inner_notebook.add(self._multi_page, text="多板采集")
 
-    def _build_watch_host(self) -> None:
+        self._build_single_group(self._single_page)
+        self._build_watch_host(self._single_page)
+        self.single_result = ResultArea(self._single_page, text="单板结果")
+        self.single_result.pack(fill=tk.BOTH, expand=True)
+
+        self._build_multi_group(self._multi_page)
+        self.multi_result = ResultArea(self._multi_page, text="多板结果")
+        self.multi_result.pack(fill=tk.BOTH, expand=True)
+
+    def _build_watch_host(self, parent) -> None:
         """Frame that hosts the embedded waveform canvas during capture.
 
         Packed only while monitoring is active so it takes no space otherwise.
         """
-        self._watch_host = ttk.Frame(self.frame)
+        self._watch_host = ttk.Frame(parent)
 
     # ---------------------------------------------------------------- forms
 
-    def _build_single_group(self) -> None:
-        group = ttk.LabelFrame(self.frame, text="单板采集", padding=(8, 4))
+    def _build_single_group(self, parent) -> None:
+        group = ttk.LabelFrame(parent, text="单板采集", padding=(8, 4))
         group.pack(fill=tk.X, pady=(0, 6))
 
         row = ttk.Frame(group)
@@ -107,8 +119,8 @@ class AcquireTab:
         self._progress_label = ttk.Label(group, text="")
         self._progress_label.pack(anchor="w")
 
-    def _build_multi_group(self) -> None:
-        group = ttk.LabelFrame(self.frame, text="多板采集", padding=(8, 4))
+    def _build_multi_group(self, parent) -> None:
+        group = ttk.LabelFrame(parent, text="多板采集", padding=(8, 4))
         group.pack(fill=tk.X, pady=(0, 6))
 
         row = ttk.Frame(group)
@@ -158,7 +170,7 @@ class AcquireTab:
 
     def _run_single(self) -> None:
         if self.app.profile is None:
-            self.result.show("请先加载 profile")
+            self.single_result.show("请先加载 profile")
             return
         if self._single_busy:
             self.app.log("单板采集进行中")
@@ -168,7 +180,7 @@ class AcquireTab:
             events = int(self._events_var.get(), 0)
             timeout_s = float(self._timeout_var.get())
         except ValueError as exc:
-            self.result.show(f"参数错误: {exc}")
+            self.single_result.show(f"参数错误: {exc}")
             return
         outputs = AcquireOutputsConfig(
             raw=OutputTargetConfig(enabled=True),
@@ -184,11 +196,11 @@ class AcquireTab:
                 watch_every = int(self._watch_every_var.get())
             except ValueError as exc:
                 self._single_busy = False
-                self.result.show(f"参数错误: 每 N 帧必须是整数 ({exc})")
+                self.single_result.show(f"参数错误: 每 N 帧必须是整数 ({exc})")
                 return
             if watch_every < 1:
                 self._single_busy = False
-                self.result.show("参数错误: 每 N 帧需 >= 1")
+                self.single_result.show("参数错误: 每 N 帧需 >= 1")
                 return
             self._watch_frame_queue = queue.Queue()
             watch_callback = self._watch_frame_queue.put
@@ -242,7 +254,7 @@ class AcquireTab:
         self._watch_figure = WaveMonitorFigure(
             source_label=f"{device} 采集监视",
             help_text="采集过程中实时显示（每 N 帧采样）",
-            figsize=(8.0, 4.6),
+            figsize=(11.0, 6.5),
         )
         self._watch_canvas = FigureCanvasTkAgg(
             self._watch_figure.figure, master=self._watch_host
@@ -295,7 +307,7 @@ class AcquireTab:
         self._single_start_button.configure(state=tk.NORMAL)
         self._progress_queue = None
         self._teardown_watch_canvas()
-        self.result.show(formatting.format_single_acquire_result(result))
+        self.single_result.show(formatting.format_single_acquire_result(result))
         self._progress_label.configure(
             text=f"完成: {result.captured_events} 个事件"
         )
@@ -306,7 +318,7 @@ class AcquireTab:
         self._single_start_button.configure(state=tk.NORMAL)
         self._progress_queue = None
         self._teardown_watch_canvas()
-        self.result.show(f"错误: {exc}")
+        self.single_result.show(f"错误: {exc}")
         self._progress_label.configure(text="失败")
         self.app.log(f"单板采集失败: {exc}")
 
@@ -314,7 +326,7 @@ class AcquireTab:
 
     def _run_multi(self) -> None:
         if self.app.profile is None:
-            self.result.show("请先加载 profile")
+            self.multi_result.show("请先加载 profile")
             return
         if self._multi_busy:
             self.app.log("多板采集进行中")
@@ -323,7 +335,7 @@ class AcquireTab:
             group = self._selected("group", self._group_var)
             match_window = int(self._match_window_var.get(), 0)
         except ValueError as exc:
-            self.result.show(f"参数错误: {exc}")
+            self.multi_result.show(f"参数错误: {exc}")
             return
         outputs = AcquireOutputsConfig(
             raw=OutputTargetConfig(enabled=True),
@@ -334,7 +346,7 @@ class AcquireTab:
         self._multi_busy = True
         self._multi_start_button.configure(state=tk.DISABLED)
         self._multi_status_label.configure(text="● 运行中...")
-        self.result.show("运行中...")
+        self.multi_result.show("运行中...")
 
         def task():
             return self.acquire_service.capture_multi(
@@ -357,14 +369,14 @@ class AcquireTab:
         self._multi_busy = False
         self._multi_start_button.configure(state=tk.NORMAL)
         self._multi_status_label.configure(text="")
-        self.result.show(formatting.format_multi_acquire_result(result))
+        self.multi_result.show(formatting.format_multi_acquire_result(result))
         self.app.log(f"多板采集完成: {result.run_output_dir}")
 
     def _multi_error(self, exc: BaseException) -> None:
         self._multi_busy = False
         self._multi_start_button.configure(state=tk.NORMAL)
         self._multi_status_label.configure(text="失败")
-        self.result.show(f"错误: {exc}")
+        self.multi_result.show(f"错误: {exc}")
         self.app.log(f"多板采集失败: {exc}")
 
     # ---------------------------------------------------------------- helpers
