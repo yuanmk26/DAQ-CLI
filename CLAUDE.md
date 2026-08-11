@@ -125,11 +125,16 @@ Full reference: `docs/firmware-compatibility.md`. Key rules:
   mask, polarity, debounce (5ns units), enable, M21 pulse width —
   `daq board tcm-link-show/config`. `Trigger_model = 9` is the TCM-trigger
   source; keep `Trigger_position` 0..10 (link delay D ≈ 397ns).
-- TCM trigger link, TCM board side (FDU-TCM v2 `0x20..0x25`): TRG_CTRL
+- TCM trigger link, TCM board side (FDU-TCM v3 `0x20..0x2F`): TRG_CTRL
   (enable/clear-sticky), 8-bit TRG_IN_MASK, pulse width + debounce in 20M
-  cycles (50ns units, NOT 5ns like the ADC side), TRG_STATUS, TRG_CHAN —
-  `daq tcm show/config`. The profile `tcm:` section holds ip/rbcp_port
-  (`domain/tcm.py` TcmConfig).
+  cycles (50ns units, NOT 5ns like the ADC side), TRG_STATUS (bit0 sticky /
+  bit1 pending / bit2 wide / bit3 collecting / bit7:4 grp_ok), TRG_CHAN, and
+  the 4-group coincidence block 0x27..0x2F (enable+grp count / window /
+  4 group masks / Ns in nibbles) — `daq tcm show/config` with
+  `--coincidence/--coinc-groups/--coinc-window/--coinc-masks/--coinc-ns`.
+  The profile `tcm:` section holds ip/rbcp_port (`domain/tcm.py` TcmConfig).
+  Coincidence semantics: `trigger = AND over enabled groups of (count >= N)`;
+  mask 0 group = always satisfied; all groups disabled = classic mask-OR.
 - `tcp-mode2-*` command names are historical labels for the TCP_SENT
   registers — keep them for compatibility; plan a rename toward
   `tcp-sent`/`packet-mode`.

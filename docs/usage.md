@@ -525,18 +525,29 @@ TCM-link notes:
 
 ### 11.3 TCM Board Trigger-Link Commands
 
-The TCM board (FDU-TCM v2 firmware `5550276`+) receives the M21 threshold
-pulses from up to 8 ADC boards, applies a mask-OR decision, and broadcasts a
-wide trigger pulse back. Its trigger-link registers live at `0x20..0x25`:
+The TCM board (FDU-TCM v3 firmware `5fc2bbc`+) receives the M21 threshold
+pulses from up to 8 ADC boards, applies a mask-OR (or 4-group coincidence)
+decision, and broadcasts a wide trigger pulse back. Its trigger-link
+registers live at `0x20..0x2F`:
 
 | Address | Content |
 | --- | --- |
 | `0x20` | TRG_CTRL: bit0 = enable, bit1 = clear trigger sticky (write 1) |
 | `0x21` | TRG_IN_MASK: 8-bit channel participation mask |
 | `0x22` | TRG_PULSE_WIDTH: wide pulse width in 20M cycles (default 32 = 1.6us) |
-| `0x23` | TRG_DEBOUNCE: debounce in 20M cycles (default 20 = 1us) |
-| `0x24` | TRG_STATUS: bit0 = trig_sticky, bit1 = pending, bit2 = wide pulse active |
-| `0x25` | TRG_CHAN: channels of the most recent trigger event |
+| `0x23/0x24` | TRG_DEBOUNCE LSB/MSB: debounce in 20M cycles (default 20 = 1us) |
+| `0x25` | TRG_STATUS: bit0 = trig_sticky, bit1 = pending, bit2 = wide pulse active, bit3 = collecting, bit7:4 = grp_ok |
+| `0x26` | TRG_CHAN: channels of the most recent trigger event |
+| `0x27` | TRG_COINC_CTRL: bit0 = coincidence enable, bit3:1 = group count (0=default 2) |
+| `0x28` | TRG_COINC_WINDOW: coincidence window in 20M cycles (default 4 = 200ns) |
+| `0x29` | COINC_STATUS: bit0 = collecting, bit1 = timeout sticky, bit5:2 = collected count |
+| `0x2A..0x2D` | group 0..3 participation masks (8-bit each) |
+| `0x2E/0x2F` | group 0/1 and group 2/3 threshold counts N (nibbles, 0=default 1) |
+
+Coincidence mode: `trigger = AND over enabled groups of (group count >= N)`.
+A group with mask 0 is always satisfied; a channel edge is counted once per
+event even if it appears in multiple group masks. The classic mask-OR mode is
+coincidence mode with all groups disabled.
 
 Read the current configuration and status:
 
@@ -559,10 +570,25 @@ Options:
 - `--debounce`: debounce in 20M cycles, 0..65535 (default 20)
 - `--clear-sticky/--keep-sticky`: clear the trigger sticky status bit after
   writing (default keep)
+- `--coincidence/--no-coincidence`: enable 4-group coincidence mode
+  (default off; all groups disabled = classic mask-OR)
+- `--coinc-groups`: enabled group count, 0..4 (0 = default 2)
+- `--coinc-window`: coincidence window in 20M cycles, 0..255 (0 = default 4)
+- `--coinc-masks`: 4 group participation masks, comma-separated hex,
+  e.g. `--coinc-masks 0x03,0x0C,0,0`
+- `--coinc-ns`: 4 group N values (0..8, 0 = default 1), comma-separated,
+  e.g. `--coinc-ns 1,1,0,0`
 
-`tcm show` also reports `trig_sticky` / `pending` / `wide_pulse_active` and
-the `last_trigger_channels` mask — useful during TCM-link bring-up to confirm
-the trigger actually arrived and which board channel fired.
+Example — two-board AND: board A and board B both must fire within the
+window: `--coincidence --coinc-groups 2 --coinc-window 4
+--coinc-masks 0x01,0x02 --coinc-ns 1,1` (group 0 = board A, group 1 = board B).
+
+`tcm show` also reports `trig_sticky` / `pending` / `wide_pulse_active` /
+`collecting` / `grp_ok` and the `last_trigger_channels` mask — useful during
+TCM-link bring-up to confirm the trigger actually arrived and which board
+channel fired. In coincidence mode it additionally reports per-group
+`group_masks`, `group_n`, `coinc_window` and the `coinc_timeout_sticky` /
+`collected_count` status.
 
 TCM-link integration notes:
 

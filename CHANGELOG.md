@@ -32,6 +32,24 @@ surface.
 - GUI helpers (background task marshalling, result formatting) are
   tkinter-free pure functions with unit tests (19 new tests).
 
+## [v0.3.0+] TCM coincidence trigger (unreleased)
+
+4-group coincidence mode on the TCM board, matching FDU-TCM firmware
+`5fc2bbc`+ (registers `0x27..0x2F`): `trigger = AND over enabled groups of
+(group channel count >= N)`.
+
+### Added
+
+- `daq tcm config` options: `--coincidence/--no-coincidence`,
+  `--coinc-groups` (0..4, 0 = default 2), `--coinc-window` (0..255,
+  0 = default 4), `--coinc-masks` / `--coinc-ns` (4 comma-separated values).
+- `daq tcm show` / `tcm config` readback: coincidence enable, group count,
+  window, per-group masks/Ns, `grp_ok`, `collecting`, `collected_count`,
+  `coinc_timeout_sticky`.
+- GUI TCM tab: 符合触发 section with enable / group count / window /
+  4× group mask + N entries, shown in readback.
+- Tests extended for the new read/write paths (167 passing).
+
 ## [v0.2.0] - 2026-08-10
 
 Frame format upgrade (28-byte header + fine timestamps) and TCM trigger-link

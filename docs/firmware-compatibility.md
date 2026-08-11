@@ -152,11 +152,16 @@ Rules:
 - measured full-chain delay D ≈ 397ns; keep `Trigger_position` <= 10 when
   using the TCM link so the crossing point stays inside the window
 - `Trigger_model = 9` is the TCM-trigger source; values 0..8 unchanged
-- TCM board side (FDU-TCM v2) exposes its own trigger-link registers at
-  `0x20..0x25` (TRG_CTRL / TRG_IN_MASK / TRG_PULSE_WIDTH / TRG_DEBOUNCE /
-  TRG_STATUS / TRG_CHAN) — different address space, not conflicting; driven
-  by `daq tcm show/config` since v0.2.0. Note the units: TCM-side width and
-  debounce are in 20M cycles (50ns), unlike the ADC-side 5ns units.
+- TCM board side (FDU-TCM v3, `5fc2bbc`+) exposes its own trigger-link
+  registers at `0x20..0x2F` (TRG_CTRL / TRG_IN_MASK / TRG_PULSE_WIDTH /
+  TRG_DEBOUNCE / TRG_STATUS / TRG_CHAN / coincidence 0x27..0x2F) — different
+  address space, not conflicting; driven by `daq tcm show/config` since
+  v0.2.0, coincidence config since v0.3.0. Note the units: TCM-side width
+  and debounce are in 20M cycles (50ns), unlike the ADC-side 5ns units.
+- TCM coincidence mode (v3 firmware): `trigger = AND over enabled groups of
+  (group count >= N)` with a configurable window; groups are configured via
+  `--coinc-groups/--coinc-window/--coinc-masks/--coinc-ns`; all groups
+  disabled = classic mask-OR mode
 
 ### 2.7 Multi-board acquisition already has a legacy workflow
 
