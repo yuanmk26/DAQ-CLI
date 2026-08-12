@@ -1,0 +1,100 @@
+# 缪子成像生产配置：4 块 ADC（.10/.12/.13/.14）+ TCM（192.168.10.16）
+# 五层映射：L1=dev1 ch0-11、L2=dev2 ch0-11、L3=dev3 ch0-11、L4=dev4 ch0-11、
+#           中间层=dev1/2/3 ch12-15（参考层，不参与触发）
+# M21 → TCM EXT_TRG_IN[0..3]（dev1=ch0..dev4=ch3）
+# 目标触发: (dev1|dev2) AND (dev3|dev4)（GUI TCM tab 配置重合）
+# 阈值建议：基线-100（四层≥1 命中 65%、有效事件率最高）；
+#           高纯度可选基线-150（四层≥1 命中 80%，事件率相同）。
+# 已知标记条：scint37/48（中间层两端，效率 ~50%）。
+
+devices:
+  dev1:
+    ip: 192.168.10.10
+    rbcp_port: 4660
+    tcp_port: 24
+    board_id: 0
+    role: adc
+
+  dev2:
+    ip: 192.168.10.12
+    rbcp_port: 4660
+    tcp_port: 24
+    board_id: 1
+    role: adc
+
+  dev3:
+    ip: 192.168.10.13
+    rbcp_port: 4660
+    tcp_port: 24
+    board_id: 2
+    role: adc
+
+  dev4:
+    ip: 192.168.10.14
+    rbcp_port: 4660
+    tcp_port: 24
+    board_id: 3
+    role: adc
+
+tcm:
+  main:
+    ip: 192.168.10.16
+    rbcp_port: 4660
+
+groups:
+  two_board:
+    devices: [dev1, dev2]
+    tcm: main
+  four_board:
+    devices: [dev1, dev2, dev3, dev4]
+    tcm: main
+
+defaults:
+  # 固件 ADC_LENGTH=256（3.2us 窗口）；事件帧每通道 256 采样（解码为 512 值 A/B）
+  adc_length: 256
+  output_dir: out
+  trigger_mode: 9        # TCM 触发返回
+  trigger_position: 74   # 实测标定：信号居中（换拓扑后需重新标定）
+  thresholds: [1838, 1846, 1849, 1939]
+  acquire_single:
+    events: 1000
+    timeout_s: 10.0
+    progress_every: 50
+    watch_every: 50
+    outputs:
+      raw:
+        enabled: true
+        dir: out/raw
+      json:
+        enabled: true
+        dir: out/json
+      text:
+        enabled: false
+        dir: out/text
+        max_events_per_file: 100
+        waveform_layout: point_rows
+      log:
+        enabled: false
+        dir: out/log
+  acquire_multi:
+    aggregation_key: timestamp
+    timestamp_match_window_ticks: 10
+    event_timeout_ms: 50
+    tcp_timeout_s: 1.0
+    allow_start_without_ack: true    # TCM MISO ack 物理链路未全通时放行
+    watch_waveforms: false
+    outputs:
+      raw:
+        enabled: true
+        dir: out/multi_raw
+      json:
+        enabled: true
+        dir: out/multi_json
+      text:
+        enabled: false
+        dir: out/multi_text
+        max_events_per_file: 100
+        waveform_layout: point_rows
+      log:
+        enabled: true
+        dir: out/multi_log

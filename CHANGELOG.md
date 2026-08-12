@@ -6,6 +6,22 @@ Each version is tagged as `v<version>` on the `main` branch. The detailed
 snapshot of the v0.1.x line (commands, firmware contract, architecture,
 release flow) is archived in `docs/version-snapshot-v0.1.4.md`.
 
+## [v0.3.2] - 2026-08-12
+
+缪子成像测试驱动的 GUI 与稳定性改进。
+
+### Added
+
+- GUI mode 9 面板：每通道新增**偏移量输入框**（标定基线 ± 值，偏移优先
+  于绝对阈值），自动标定后填入建议偏移，无需重跑标定即可微调阈值。
+
+### Fixed
+
+- `measure_tcm_link` 的 mode/send_mode 切换加 RBCP 重试（SiTCP UDP 丢包
+  曾使自动标定整体失败）。
+- `calibrate_from_stream` TCP 连接失败重建 socket 重试（复用超时 socket
+  触发 WSAEISCONN）。
+
 ## [v0.3.1] - 2026-08-12
 
 TCM 触发链路修复与 GUI 配置流程改进（四板联调实测驱动）。
