@@ -94,10 +94,29 @@ def calibrate_from_stream(
     """
     per_channel: list[list[int]] = [[] for _ in range(16)]
     frames = 0
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(tcp_timeout_s)
+    sock: socket.socket | None = None
     try:
-        sock.connect((device.ip, device.tcp_port))
+        # SiTCP keeps a single TCP session; a previous capture's session may
+        # still be draining, so retry the connect a few times.  A timed-out
+        # connect leaves the socket half-open, so build a fresh socket for
+        # each attempt (WSAEISCONN otherwise on the second try).
+        last_connect_error: OSError | None = None
+        for attempt in range(3):
+            if sock is not None:
+                sock.close()
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(tcp_timeout_s)
+            try:
+                sock.connect((device.ip, device.tcp_port))
+                break
+            except OSError as exc:
+                last_connect_error = exc
+                time.sleep(1.0 * (attempt + 1))
+        else:
+            raise RuntimeError(
+                f"TCP 连接 {device.ip}:{device.tcp_port} 失败（重试 3 次）: {last_connect_error}"
+            ) from last_connect_error
+        assert sock is not None
         reader = _TcpSentRawStreamReader(sock=sock, expected_send_mode=1)
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:

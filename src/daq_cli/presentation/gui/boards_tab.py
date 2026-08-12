@@ -264,14 +264,19 @@ class BoardTab:
         group.pack(fill=tk.X, pady=(6, 0))
 
         # 16 per-channel threshold fields (4 columns x 4 rows; registers
-        # 0x45..0x64, high byte first). Each channel has its own register,
-        # because baselines/gains differ per channel.
+        # 0x45..0x64). Each channel has its own register, because
+        # baselines/gains differ per channel.  Each cell carries the
+        # absolute threshold plus an optional offset (baseline + offset):
+        # after 自动标定 the baselines are known and a non-empty offset
+        # wins over the absolute field on apply.
         ttk.Label(
-            group, text="0x45..0x64 阈值（每通道独立，参考各自基线）:"
+            group, text="0x45..0x64 阈值（每通道；偏移=标定基线±值，偏移优先于绝对阈值）:"
         ).pack(anchor="w")
         thr_frame = ttk.Frame(group)
         thr_frame.pack(fill=tk.X, pady=(2, 0))
         self._m9_thr_vars: list[tk.StringVar] = []
+        self._m9_offset_vars: list[tk.StringVar] = []
+        self._m9_baselines: list[int] | None = None
         for row_index in range(4):
             for col_index in range(4):
                 channel = col_index * 4 + row_index
@@ -280,7 +285,12 @@ class BoardTab:
                 ttk.Label(cell, text=f"ch{channel:02d}").pack(side=tk.LEFT)
                 var = tk.StringVar(value="0")
                 self._m9_thr_vars.append(var)
-                ttk.Entry(cell, textvariable=var, width=6).pack(side=tk.LEFT, padx=(4, 0))
+                ttk.Entry(cell, textvariable=var, width=5).pack(side=tk.LEFT, padx=(4, 0))
+                offset_var = tk.StringVar(value="")
+                self._m9_offset_vars.append(offset_var)
+                ttk.Entry(cell, textvariable=offset_var, width=5).pack(
+                    side=tk.LEFT, padx=(2, 0)
+                )
 
         # control + broadcast-fill helpers on one row (convenience only;
         # thresholds stay per-channel)
@@ -498,8 +508,10 @@ class BoardTab:
         )
         integ_pre = formatting.parse_int_field(self._m9_integ_pre_var.get(), "Integ_pre")
         integ_post = formatting.parse_int_field(self._m9_integ_post_var.get(), "Integ_post")
-        thr = formatting.mode9_thresholds_from_fields(
-            [var.get() for var in self._m9_thr_vars]
+        thr = formatting.resolve_mode9_thresholds(
+            [var.get() for var in self._m9_thr_vars],
+            [var.get() for var in self._m9_offset_vars],
+            self._m9_baselines,
         )
         mask = formatting.parse_int_field(self._m9_mask_var.get(), "mask")
         polarity = formatting.parse_int_field(self._m9_polarity_var.get(), "polarity")
@@ -621,11 +633,26 @@ class BoardTab:
             )
 
         def render(result) -> None:
+            # Remember the per-channel baselines so the offset fields can
+            # resolve to absolute thresholds on apply.
+            self._m9_baselines = [
+                channel.baseline for channel in result.calibration.channels
+            ]
             thresholds = formatting.calibration_to_form_values(
                 result.calibration, offset, polarity
             )
             for var, value in zip(self._m9_thr_vars, thresholds):
                 var.set(value)
+            # Suggested offsets (threshold - baseline), polarity-aware; the
+            # user can tweak them without re-running the calibration.
+            suggested_offsets = [
+                int(value) - baseline
+                for value, baseline in zip(
+                    thresholds, self._m9_baselines, strict=True
+                )
+            ]
+            for var, value in zip(self._m9_offset_vars, suggested_offsets):
+                var.set(f"{value:+d}")
             self.result.show(formatting.format_tcm_link_calibration(result))
 
         self._run_task(task, render)
@@ -660,6 +687,10 @@ class BoardTab:
             apply_var(self._m9_start_delay_var, values["start_delay"])
             for var, value in zip(self._m9_thr_vars, values["thr"]):
                 var.set(str(value))
+            # Readback shows the absolute thresholds; clear the offset
+            # fields so they do not override the readback values on apply.
+            for var in self._m9_offset_vars:
+                var.set("")
             apply_var(self._m9_mask_var, values["mask"])
             apply_var(self._m9_polarity_var, values["polarity"])
             apply_var(self._m9_debounce_var, values["debounce"])

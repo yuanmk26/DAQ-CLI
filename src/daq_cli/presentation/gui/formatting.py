@@ -231,6 +231,39 @@ def mode9_thresholds_from_fields(texts: list[str]) -> list[int]:
     return values
 
 
+def resolve_mode9_thresholds(
+    thr_texts: list[str], offset_texts: list[str], baselines: list[int] | None
+) -> list[int]:
+    """Resolve per-channel thresholds, offset entry taking priority.
+
+    Each channel has an absolute threshold field and an optional offset
+    field (baseline + offset, e.g. "-100").  A non-empty offset is used
+    when the calibration baselines are available; otherwise the absolute
+    field wins.  Empty offset fields fall back to the absolute field.
+    """
+    if len(thr_texts) != 16 or len(offset_texts) != 16:
+        raise ValueError("需要 16 个通道阈值与偏移字段")
+    if baselines is not None and len(baselines) != 16:
+        raise ValueError("基线列表需要 16 个值")
+    values: list[int] = []
+    for channel, (thr_text, offset_text) in enumerate(zip(thr_texts, offset_texts)):
+        if offset_text.strip() and baselines is not None:
+            offset = parse_int_field(offset_text, f"ch{channel:02d} 偏移")
+            value = baselines[channel] + offset
+            if value < 0 or value > 0xFFFF:
+                raise ValueError(
+                    f"ch{channel:02d} 基线{baselines[channel]}{offset:+d} "
+                    f"超出范围 0..0xFFFF: {value}"
+                )
+            values.append(value)
+        else:
+            values.append(parse_int_field(thr_text, f"ch{channel:02d} 阈值"))
+    for channel, value in enumerate(values):
+        if value < 0 or value > 0xFFFF:
+            raise ValueError(f"ch{channel:02d} 阈值超出范围 0..0xFFFF: {value}")
+    return values
+
+
 def mode9_readback_to_values(
     trigger, tcm, tcp
 ) -> dict[str, object]:

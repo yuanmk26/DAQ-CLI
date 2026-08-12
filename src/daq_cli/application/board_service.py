@@ -1,3 +1,4 @@
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -297,15 +298,38 @@ class BoardService:
         """
         profile, device = self._resolve_device(device_name, profile_path)
         adapter = self._make_adapter(profile)
-        original_send_mode = adapter.read_tcp_mode2_config(device).send_mode
-        original_trigger_model = adapter.read_trigger_config(device).trigger_mode
-        original_m21_en = adapter.read_registers(device, 0x6B, 1).data[0] & 0x01
+
+        def _retry(fn, attempts=3, what="RBCP 操作"):
+            last_error: BaseException | None = None
+            for attempt in range(attempts):
+                try:
+                    return fn()
+                except Exception as exc:  # noqa: BLE001 - retry any RBCP loss
+                    last_error = exc
+                    time.sleep(0.5 * (attempt + 1))
+            raise RuntimeError(f"{what}失败（重试 {attempts} 次）: {last_error}") from last_error
+
+        original_send_mode = _retry(
+            lambda: adapter.read_tcp_mode2_config(device).send_mode, what="读取 send_mode"
+        )
+        original_trigger_model = _retry(
+            lambda: adapter.read_trigger_config(device).trigger_mode, what="读取触发配置"
+        )
+        original_m21_en = (
+            _retry(
+                lambda: adapter.read_registers(device, 0x6B, 1).data[0], what="读取 M21 enable"
+            )
+            & 0x01
+        )
         switched_trigger = original_trigger_model != 7
         try:
             if original_send_mode != 1:
-                adapter.write_send_mode(device, 1)
+                _retry(lambda: adapter.write_send_mode(device, 1), what="切换 send_mode=1")
             if switched_trigger:
-                adapter.write_registers(device, 0x10, bytes([7]))
+                _retry(
+                    lambda: adapter.write_registers(device, 0x10, bytes([7])),
+                    what="切换 mode 7",
+                )
             calibration = calibrate_from_stream(
                 device, seconds=seconds, tcp_timeout_s=tcp_timeout_s
             )

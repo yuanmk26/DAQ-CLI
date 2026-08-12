@@ -172,6 +172,38 @@ class ResultFormattingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "ch00 阈值 不是有效整数"):
             formatting.mode9_thresholds_from_fields(texts)
 
+    def test_resolve_offsets_win_over_absolute(self) -> None:
+        baselines = [2000 + channel for channel in range(16)]
+        thr_texts = ["0"] * 16
+        offset_texts = [f"{-100 + channel}" for channel in range(16)]
+        values = formatting.resolve_mode9_thresholds(thr_texts, offset_texts, baselines)
+        self.assertEqual(values, [1900 + 2 * channel for channel in range(16)])
+
+    def test_resolve_empty_offsets_fall_back_to_absolute(self) -> None:
+        baselines = [2000] * 16
+        thr_texts = ["1850"] * 16
+        offset_texts = [""] * 16
+        values = formatting.resolve_mode9_thresholds(thr_texts, offset_texts, baselines)
+        self.assertEqual(values, [1850] * 16)
+
+    def test_resolve_offsets_without_baselines_fall_back(self) -> None:
+        # No calibration baselines yet -> offsets are ignored.
+        thr_texts = ["1850"] * 16
+        offset_texts = ["-100"] * 16
+        values = formatting.resolve_mode9_thresholds(thr_texts, offset_texts, None)
+        self.assertEqual(values, [1850] * 16)
+
+    def test_resolve_offset_out_of_range_rejected(self) -> None:
+        baselines = [2000] * 16
+        thr_texts = ["0"] * 16
+        offset_texts = [""] * 16
+        offset_texts[5] = "5000"  # 2000 + 5000 > 0xFFFF? no, 7000 ok... use big
+        values = formatting.resolve_mode9_thresholds(thr_texts, offset_texts, baselines)
+        self.assertEqual(values[5], 7000)
+        offset_texts[5] = "70000"
+        with self.assertRaisesRegex(ValueError, "超出范围"):
+            formatting.resolve_mode9_thresholds(thr_texts, offset_texts, baselines)
+
     def test_mode9_readback_to_values_maps_all_fields(self) -> None:
         trigger = SimpleNamespace(
             trigger_mode=9,
