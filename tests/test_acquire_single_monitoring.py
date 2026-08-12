@@ -1418,3 +1418,108 @@ def _make_fake_watch_backend() -> WatchBackendRuntime:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OutputsConfigDrivesDecodeTests(unittest.TestCase):
+    """GUI passes an outputs config; its json/text switches must drive the
+    standalone decode/text params the legacy runner reads."""
+
+    def _service_and_profile(self):
+        from daq_cli.infrastructure.adapters.legacy_capture_runner import (
+            LegacySingleCaptureRunner,
+        )
+
+        from daq_cli.domain.device import DeviceConfig
+
+        profile = SimpleNamespace(
+            path=Path("profiles/example.yaml"),
+            defaults={},
+            devices={
+                "dev1": DeviceConfig(
+                    name="dev1", ip="192.168.10.10", rbcp_port=4660,
+                    tcp_port=24, board_id=0, role="adc",
+                )
+            },
+        )
+        service = AcquireService()
+        service._profile_service = SimpleNamespace(load_profile=lambda p: profile)
+        captured = {}
+
+        class FakeRunner:
+            def capture_single(self, **kwargs):
+                captured.update(kwargs)
+                return SimpleNamespace(
+                    run_output_dir=Path("out/t"),
+                    captured_events=1,
+                    send_mode=1,
+                    decode_enabled=kwargs.get("decode_json", False),
+                    decoded_output_dir=Path("out/t/json"),
+                    decoded_events=1,
+                    decode_errors=0,
+                    json_output_enabled=kwargs.get("decode_json", False),
+                    json_output_dir=kwargs.get("decoded_output_dir"),
+                    text_output_enabled=kwargs.get("text_output_enabled", False),
+                    text_output_files=0,
+                    text_output_events=0,
+                    raw_output_dir=Path("out/t/raw"),
+                    watch_enabled=False,
+                    watch_every=None,
+                    watched_frames=0,
+                    log_output="",
+                    log_output_path=None,
+                )
+
+        board_adapter = SimpleNamespace(
+            read_tcp_mode2_config=lambda d: SimpleNamespace(send_mode=1)
+        )
+        p1 = patch(
+            "daq_cli.application.acquire_service.LegacyBoardAdapter",
+            return_value=board_adapter,
+        )
+        p2 = patch(
+            "daq_cli.application.acquire_service.LegacySingleCaptureRunner",
+            return_value=FakeRunner(),
+        )
+        p1.start()
+        p2.start()
+        self.addCleanup(p1.stop)
+        self.addCleanup(p2.stop)
+        return service, captured
+
+    def test_json_text_switches_from_outputs(self):
+        from daq_cli.application.output_config import (
+            AcquireOutputsConfig,
+            OutputTargetConfig,
+            TextOutputConfig,
+        )
+
+        service, captured = self._service_and_profile()
+        outputs = AcquireOutputsConfig(
+            raw=OutputTargetConfig(enabled=True),
+            json=OutputTargetConfig(enabled=True, dir=Path("out/j")),
+            text=TextOutputConfig(enabled=True, dir=Path("out/t"), max_events_per_file=50),
+            log=OutputTargetConfig(enabled=False),
+        )
+        service.capture_single(
+            device_name="dev1",
+            profile_path="profiles/example.yaml",
+            events=10,
+            timeout_s=5.0,
+            outputs=outputs,
+        )
+        self.assertTrue(captured["decode_json"])
+        self.assertTrue(captured["text_output_enabled"])
+        self.assertEqual(captured["decoded_output_dir"], Path("out/j"))
+        self.assertEqual(captured["text_output_dir"], Path("out/t"))
+        self.assertEqual(captured["text_max_events_per_file"], 50)
+
+    def test_defaults_kept_when_no_outputs(self):
+        service, captured = self._service_and_profile()
+        service.capture_single(
+            device_name="dev1",
+            profile_path="profiles/example.yaml",
+            events=10,
+            timeout_s=5.0,
+        )
+        self.assertFalse(captured["decode_json"])
+        self.assertFalse(captured["text_output_enabled"])

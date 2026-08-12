@@ -145,6 +145,16 @@ class AcquireService:
             ),
             log=OutputTargetConfig(enabled=False),
         )
+        # When a caller supplies an outputs config (e.g. the GUI), its
+        # json/text switches are authoritative: the legacy runner keys the
+        # decode/text outputs off these standalone params.
+        if outputs is not None:
+            decode_json = resolved_outputs.json.enabled
+            decoded_output_dir = decoded_output_dir or resolved_outputs.json.dir
+            text_output_enabled = resolved_outputs.text.enabled
+            text_output_dir = text_output_dir or resolved_outputs.text.dir
+            text_max_events_per_file = resolved_outputs.text.max_events_per_file
+            text_waveform_layout = resolved_outputs.text.waveform_layout
         board_adapter = LegacyBoardAdapter()
         tcp_config = board_adapter.read_tcp_mode2_config(device)
         runner = LegacySingleCaptureRunner()
@@ -298,6 +308,15 @@ class AcquireService:
             ),
             log=OutputTargetConfig(enabled=True),
         )
+        if outputs is not None:
+            # Same as capture_single: an explicit outputs config (GUI) owns
+            # the json/text switches; the runner reads these standalone
+            # params, so mirror the config into them.
+            decode_json = resolved_outputs.json.enabled
+            text_output_enabled = resolved_outputs.text.enabled
+            text_output_dir = text_output_dir or resolved_outputs.text.dir
+            text_max_events_per_file = resolved_outputs.text.max_events_per_file
+            text_waveform_layout = resolved_outputs.text.waveform_layout
         if watch_waveforms:
             board_adapter = LegacyBoardAdapter()
             unsupported = []
