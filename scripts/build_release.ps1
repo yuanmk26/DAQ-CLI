@@ -54,6 +54,7 @@ Copy-Item $mainWheel $offlineRoot
 Copy-Item .\scripts\install_offline.ps1 $offlineRoot
 Copy-Item .\profiles\example.template.yaml $offlineRoot
 Copy-Item .\docs\install-on-new-pc.md $offlineRoot
+Copy-Item .\docs\gui-quickstart.md $offlineRoot
 Copy-Item .\README.md $offlineRoot
 
 Write-Host "Downloading dependency wheels..."
