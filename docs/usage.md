@@ -817,6 +817,28 @@ The window has four tabs plus a shared log panel at the bottom:
 All operations run in background threads; the UI never blocks. The shared
 log panel keeps the last 5000 lines.
 
+### 13.1 TCM 触发链路 GUI 配置流程（推荐顺序）
+
+实测驱动（2026-08-12 四板联调）的顺畅配置顺序：
+
+1. 板卡 tab 选设备 → **板卡配置**勾选 **ADC + 时钟** → 配置板卡。
+   **固件重烧/断电后配置丢失**（ADC 数据全 0），必须先做这一步，否则
+   自动标定无效、hit 恒 1 无脉冲。
+2. mode 9 面板确认 `mask=0x0FFF`（ch0..ch11 或逻辑）、
+   `polarity=0x0FFF`（负脉冲，SiPM）、`Trigger_position=74`（实测标定
+   信号居中）、`debounce=200`、`width=20`、enable 勾选——默认值已按
+   生产配置预置。
+3. 点 **自动标定**（偏移量默认 100 = 基线-100）→ 建议阈值填入表单。
+4. 点 **应用全部并回读验证**（阈值全 0 时拒绝应用并提示先标定）。
+5. 每块板重复 1-4；全部完成后在 TCM tab 配置重合
+   `(dev1|dev2) AND (dev3|dev4)`（组0 mask=0x03、组1 mask=0x0C、N=1/1、
+   window=4）。
+6. 采集 tab 多板采集选 `four_board` 组（无 ack 放行默认开启——TCM MISO
+   ack 物理链路未全通时不会卡在 align）。
+
+陷阱细节（阈值字节序 0x45=低字节、hit 沿需 enable=1 时发生、
+Trigger_position 标定表）见 `docs/2026-08-12_tcm-link-config-traps.md`。
+
 ## 14. Suggested Workflow
 
 A simple single-board workflow looks like this:

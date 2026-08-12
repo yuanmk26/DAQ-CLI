@@ -190,10 +190,11 @@ class LegacyBoardAdapter:
     def read_tcm_link_config(self, device: DeviceConfig) -> LegacyTcmLinkReadResult:
         """Read the TCM trigger-link registers (0x45..0x6C) without writing.
 
-        Thresholds are read from the documented channel mapping
-        (0x45+2N for channel N, high byte first). Firmware fix
-        (RBCP.v TCM_THR concatenation) restores this mapping; the earlier
-        reversed-mapping workaround (0x63-2N) is no longer needed.
+        Thresholds use the measured channel mapping (0x45+2N for channel N,
+        low byte first: 0x45 holds the low byte, 0x46 the high byte, matching
+        the firmware RBCP.v TCM_THR concatenation {x64..x46,x45} where x45
+        lands in [7:0]).  mask/polarity/debounce are high byte first
+        (TCM_MASK = {x65,x66} etc.), as in the firmware.
         """
         with temporary_sys_path(self._script_dir), device_environment(device):
             clear_legacy_modules()
@@ -201,7 +202,7 @@ class LegacyBoardAdapter:
             client = rbcp_module.Rbcp(device_ip=device.ip, udp_port=device.rbcp_port)
             data = bytes(client.read(0x45, 0x28))  # 0x45..0x6C
             thresholds = [
-                (data[i * 2] << 8) | data[i * 2 + 1]
+                (data[i * 2 + 1] << 8) | data[i * 2]
                 for i in range(16)
             ]
             mask = (data[0x20] << 8) | data[0x21]
@@ -231,10 +232,11 @@ class LegacyBoardAdapter:
     ) -> None:
         """Write the TCM trigger-link configuration (0x45..0x6C).
 
-        Thresholds are written to the documented channel mapping
-        (0x45+2N for channel N, high byte first; see read_tcm_link_config)
-        before the enable bit so the pulse output is only activated once
-        everything is in place.
+        Thresholds use the measured channel mapping (0x45+2N for channel N,
+        low byte first: 0x45 holds the low byte, 0x46 the high byte; see
+        read_tcm_link_config).  mask/polarity/debounce are high byte first.
+        Thresholds are written before the enable bit so the pulse output is
+        only activated once everything is in place.
         """
         if len(thresholds) != 16:
             raise ValueError("TCM link needs exactly 16 channel thresholds")
@@ -252,10 +254,26 @@ class LegacyBoardAdapter:
             clear_legacy_modules()
             rbcp_module = importlib.import_module("lib.rbcp")
             client = rbcp_module.Rbcp(device_ip=device.ip, udp_port=device.rbcp_port)
+
+            def _write_retry(address: int, data: bytes) -> None:
+                # 32 threshold bytes plus the control registers means many
+                # back-to-back RBCP writes; occasional UDP drops surface as
+                # RbcpTimeout. Retry each write so a single loss does not
+                # abort the whole configuration.
+                last_error: BaseException | None = None
+                for attempt in range(3):
+                    try:
+                        client.write(address, data)
+                        return
+                    except Exception as exc:  # noqa: BLE001 - retry any RBCP loss
+                        last_error = exc
+                        time.sleep(0.3 * (attempt + 1))
+                raise RuntimeError(f"RBCP write 0x{address:02X} failed after 3 attempts") from last_error
+
             for i, threshold in enumerate(thresholds):
                 addr = 0x45 + i * 2
-                client.write(addr, bytes([(threshold >> 8) & 0xFF]))
-                client.write(addr + 1, bytes([threshold & 0xFF]))
+                _write_retry(addr, bytes([threshold & 0xFF]))
+                _write_retry(addr + 1, bytes([(threshold >> 8) & 0xFF]))
             fpga_ctrl_module = importlib.import_module("FPGA_CTRL")
             controller = fpga_ctrl_module.FPGAControl()
             controller.set_tcm_config(

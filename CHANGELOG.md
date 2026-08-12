@@ -6,6 +6,33 @@ Each version is tagged as `v<version>` on the `main` branch. The detailed
 snapshot of the v0.1.x line (commands, firmware contract, architecture,
 release flow) is archived in `docs/version-snapshot-v0.1.4.md`.
 
+## [v0.3.1] - 2026-08-12
+
+TCM 触发链路修复与 GUI 配置流程改进（四板联调实测驱动）。
+
+### Fixed
+
+- **TCM 链路阈值字节序**：固件 `RBCP.v` 的 `TCM_THR = {x64..x46,x45}` 拼接使
+  0x45 落在低字节（0x46=高字节），与早期文档"高字节在前"相反。此前所有
+  经 daq-cli/手动 RBCP 配置的阈值都错位（写 1700 实际 0xA406=42054）→
+  负极性恒满足 → hit 恒 1 → 无上升沿 → M21 永无脉冲。`read/write_tcm_link_config`
+  已按实测字节序修复（mask/polarity/debounce 仍为高字节在前）。
+- **`write_tcm_link_config` RBCP 写入重试**：16 通道×2 字节=32 次连续写入，
+  偶发 UDP 丢包曾导致整个配置中止；现每字节写重试 3 次（带 backoff）。
+- **GUI 板卡 tab mode 9 面板默认值**：`Trigger_position` 5→74（实测标定：
+  窗口 256 采样/512 值下信号居中）；`mask`/`polarity` 0x0003/0x0000 →
+  **0x0FFF**（ch0..ch11 或逻辑，负脉冲 SiPM）。
+- **GUI 配置流程**：应用全部前检查阈值全 0（负极性永不触发）并提示先
+  自动标定；面板加推荐配置顺序提示（固件重烧后先配 ADC/时钟 → 标定 → 应用）。
+
+### Changed
+
+- `profiles/example.template.yaml` 更新为四板生产模板（dev1-4 + TCM、
+  `four_board` 组、`adc_length: 256`、`trigger_position: 74`、timestamp
+  聚合放行无 ack）。
+- 陷阱文档 `docs/2026-08-12_tcm-link-config-traps.md` 补充实测字节序与
+  Trigger_position 标定表。
+
 ## [v0.3.0] - 2026-08-10
 
 Desktop GUI console (tkinter, zero new dependencies) wrapping the full CLI

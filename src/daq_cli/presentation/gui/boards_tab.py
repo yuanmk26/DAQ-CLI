@@ -192,6 +192,13 @@ class BoardTab:
             "请先设好 polarity，再点自动标定。",
             foreground="#555555",
         ).pack(anchor="w", padx=(8, 0))
+        ttk.Label(
+            self.frame.inner,
+            text="推荐配置顺序：① 重烧固件/断电后，先在『板卡配置』勾选 ADC+时钟 并点配置板卡"
+            "（否则 ADC 数据为 0，标定无效）；② 设好 polarity/mask/偏移量后点自动标定；"
+            "③ 点应用全部并回读验证。阈值默认 0 时应用会给出警告。",
+            foreground="#8a6d00",
+        ).pack(anchor="w", padx=(8, 0))
 
     def _build_mode9_trigger_group(self, parent) -> None:
         group = ttk.LabelFrame(parent, text="A. 触发源", padding=(8, 4))
@@ -200,7 +207,9 @@ class BoardTab:
         grid = ttk.Frame(group)
         grid.pack(fill=tk.X)
         self._m9_model_var = tk.StringVar(value="9")
-        self._m9_position_var = tk.StringVar(value="5")
+        # 74 = 实测标定值：窗口 256 采样（512 值 A/B）下信号居中；
+        # 换链路拓扑后需重新标定（见 docs/2026-08-12_tcm-link-config-traps.md §1.5）
+        self._m9_position_var = tk.StringVar(value="74")
         self._m9_start_delay_var = tk.StringVar(value="0")
         ttk.Label(grid, text="0x10 Trigger_model").grid(row=0, column=0, sticky="w")
         ttk.Entry(grid, textvariable=self._m9_model_var, width=6).grid(
@@ -277,8 +286,9 @@ class BoardTab:
         # thresholds stay per-channel)
         control_row = ttk.Frame(group)
         control_row.pack(fill=tk.X, pady=(6, 0))
-        self._m9_mask_var = tk.StringVar(value="0x0003")
-        self._m9_polarity_var = tk.StringVar(value="0x0000")
+        # 默认 mask/polarity = ch0..ch11（12 通道或逻辑，负脉冲 SiPM）
+        self._m9_mask_var = tk.StringVar(value="0x0FFF")
+        self._m9_polarity_var = tk.StringVar(value="0x0FFF")
         self._m9_debounce_var = tk.StringVar(value="200")
         self._m9_width_var = tk.StringVar(value="20")
         self._m9_enable_var = tk.BooleanVar(value=True)
@@ -498,6 +508,13 @@ class BoardTab:
         time_clean = self._m9_time_clean_var.get()
         ext_trigger = self._m9_ext_trigger_var.get()
         enable = self._m9_enable_var.get()
+
+        if enable and not any(thr):
+            self.result.show(
+                "警告: 阈值全为 0（负极性 adc<0 永不满足 → M21 无脉冲）。"
+                "请先点『自动标定』生成建议阈值（基线 ± 偏移），再应用。"
+            )
+            return
 
         def task():
             # A. 触发源

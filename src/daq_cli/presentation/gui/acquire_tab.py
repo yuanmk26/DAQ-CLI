@@ -214,7 +214,9 @@ class AcquireTab:
 
         option_row = ttk.Frame(group)
         option_row.pack(fill=tk.X, pady=(6, 0))
-        self._allow_no_ack = tk.BooleanVar(value=False)
+        # 默认放行：TCM MISO ack 物理链路未全通时（仅部分板回 ack）
+        # 强制要求 ack 会导致采集卡在 align
+        self._allow_no_ack = tk.BooleanVar(value=True)
         self._multi_json_enabled = tk.BooleanVar(value=False)
         self._multi_text_enabled = tk.BooleanVar(value=False)
         for text, var in (

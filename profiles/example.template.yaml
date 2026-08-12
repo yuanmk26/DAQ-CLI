@@ -1,34 +1,57 @@
+# 生产模板：4 块 ADC（.10/.12/.13/.14）+ TCM（192.168.10.16）
+# 四块板 ch0..ch11 接负脉冲塑闪；M21 → TCM EXT_TRG_IN[0..3]（dev1=ch0..dev4=ch3）
+# 目标触发: (dev1|dev2) AND (dev3|dev4)（在 GUI TCM tab 配置重合）
+# 复制本文件为 profiles/<你的配置>.yaml 后按需修改 IP。
+
 devices:
   dev1:
-    ip: 192.168.10.10  # change for your lab network
+    ip: 192.168.10.10
     rbcp_port: 4660
     tcp_port: 24
     board_id: 0
     role: adc
 
   dev2:
-    ip: 192.168.10.11  # change for your lab network
+    ip: 192.168.10.12
     rbcp_port: 4660
     tcp_port: 24
     board_id: 1
     role: adc
 
+  dev3:
+    ip: 192.168.10.13
+    rbcp_port: 4660
+    tcp_port: 24
+    board_id: 2
+    role: adc
+
+  dev4:
+    ip: 192.168.10.14
+    rbcp_port: 4660
+    tcp_port: 24
+    board_id: 3
+    role: adc
+
 tcm:
   main:
-    ip: 192.168.10.20  # change for your TCM
+    ip: 192.168.10.16
     rbcp_port: 4660
 
 groups:
   two_board:
     devices: [dev1, dev2]
     tcm: main
+  four_board:
+    devices: [dev1, dev2, dev3, dev4]
+    tcm: main
 
 defaults:
-  adc_length: 64
+  # 固件 ADC_LENGTH=256（3.2us 窗口）；事件帧每通道 256 采样（解码为 512 值 A/B）
+  adc_length: 256
   output_dir: out
-  trigger_mode: 1
-  trigger_position: 40
-  thresholds: [1950, 2400, 2300, 2300]
+  trigger_mode: 9        # TCM 触发返回
+  trigger_position: 74   # 实测标定：信号居中（换拓扑后需重新标定）
+  thresholds: [1838, 1846, 1849, 1939]
   acquire_single:
     events: 1000
     timeout_s: 10.0
@@ -54,10 +77,8 @@ defaults:
     timestamp_match_window_ticks: 10
     event_timeout_ms: 50
     tcp_timeout_s: 1.0
-    allow_start_without_ack: true
-    watch_waveforms: true
-    watch_every: 100
-    stop_on_watch_close: true
+    allow_start_without_ack: true    # TCM MISO ack 物理链路未全通时放行
+    watch_waveforms: false
     outputs:
       raw:
         enabled: true
