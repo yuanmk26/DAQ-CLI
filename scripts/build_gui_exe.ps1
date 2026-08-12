@@ -20,8 +20,19 @@ Set-Location $repoRoot
 $version = (Get-Content .\pyproject.toml | Select-String '^version = "([^"]+)"$').Matches[0].Groups[1].Value
 $name = "daq-gui-$version"
 
-Write-Host "Building $name.exe ..."
-python -m PyInstaller --noconfirm --onefile --windowed --name $name `
+# Prefer the Python with PyInstaller installed; fall back to `python`.
+$pythons = @(
+    "$env:USERPROFILE\AppData\Local\Programs\Python\Python313\python.exe",
+    "C:\Python313\python.exe"
+)
+$py = $null
+foreach ($candidate in $pythons) {
+    if (Test-Path $candidate) { $py = $candidate; break }
+}
+if (-not $py) { $py = "python" }
+
+Write-Host "Building $name.exe with $py ..."
+& $py -m PyInstaller --noconfirm --onefile --windowed --name $name `
   --paths src `
   --paths src/daq_cli/_vendor/fdu_legacy `
   --paths src/daq_cli/_vendor/fdu_legacy/lib `
