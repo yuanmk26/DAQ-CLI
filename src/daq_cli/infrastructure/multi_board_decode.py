@@ -34,11 +34,15 @@ EVENT_HEADER_FMT = "<IHHQQQQIIIIQQ"
 BOARD_HEADER_FMT = "<IHHIIQHHHHIIQ"
 # v2 board chunk (56 bytes): + crossing_fine, accept_fine.
 BOARD_HEADER_FMT_V2 = "<IHHIIQHHHHIIQII"
+# Index entry written alongside complete_events.dat; read/written by the
+# multi-board writer and used by offline tooling to seek into the event file.
+INDEX_ENTRY_FMT = "<QQQIIII"
 
 FILE_HEADER_SIZE = struct.calcsize(FILE_HEADER_FMT)
 EVENT_HEADER_SIZE = struct.calcsize(EVENT_HEADER_FMT)
 BOARD_HEADER_SIZE = struct.calcsize(BOARD_HEADER_FMT)
 BOARD_HEADER_SIZE_V2 = struct.calcsize(BOARD_HEADER_FMT_V2)
+INDEX_ENTRY_SIZE = struct.calcsize(INDEX_ENTRY_FMT)
 
 
 @dataclass(slots=True)

@@ -45,3 +45,12 @@ def frame_total_size(
     if send_mode == 3:
         return header_bytes + (hit_count * feature_bytes) + (hit_count * adc_length * 4)
     raise ValueError(f"Unsupported send_mode {send_mode}")
+
+
+def bit_count(value: int) -> int:
+    """Population count (number of set bits) — used for hit-mask fan-out."""
+    count = 0
+    while value:
+        count += value & 1
+        value >>= 1
+    return count

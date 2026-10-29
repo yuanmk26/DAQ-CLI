@@ -56,4 +56,16 @@ Write-Host "Building $name.exe with $py ..."
   --collect-submodules daq_cli `
   src/daq_cli/gui_main.py
 
+$bundle = Join-Path $repoRoot "dist\daq-gui-$version-win64"
+if (Test-Path $bundle) {
+    Remove-Item -Recurse -Force $bundle
+}
+New-Item -ItemType Directory -Force (Join-Path $bundle "profiles") | Out-Null
+Copy-Item (Join-Path $repoRoot "dist\$name.exe") $bundle
+Copy-Item (Join-Path $repoRoot "profiles\example.template.yaml") `
+    (Join-Path $bundle "profiles\daq.yaml")
+Copy-Item (Join-Path $repoRoot "docs\deploy-exe.md") `
+    (Join-Path $bundle "README.md")
+
 Write-Host "Build complete: dist\$name.exe"
+Write-Host "Deployment bundle: dist\daq-gui-$version-win64"

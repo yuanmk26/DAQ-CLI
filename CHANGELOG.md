@@ -6,6 +6,49 @@ Each version is tagged as `v<version>` on the `main` branch. The detailed
 snapshot of the v0.1.x line (commands, firmware contract, architecture,
 release flow) is archived in `docs/version-snapshot-v0.1.4.md`.
 
+## [v0.4.0] - 2026-10-28
+
+多板采集原生化（采集内核 + 输出格式字节级兼容）+ 可部署 exe。
+
+### Added
+
+- GUI/exe 启动时自动发现 profile：`DAQ_PROFILE` 环境变量 → exe 同级
+  `daq-profile.yaml` / `profile.yaml` → `profiles/` 下唯一的 YAML。
+  便于把 exe 和一份配置拷到新电脑后直接双击运行。
+- 两个入口（`daq-gui` / `daq`）在启动最前面调用
+  `multiprocessing.freeze_support()`，修复 PyInstaller onefile 下
+  spawn 后端（JSON/TXT 解码、波形 watch）重复执行入口的问题。
+- GUI 标题显示当前版本号。
+- `infrastructure/rbcp.py`：原生 SiTCP RBCP（UDP）客户端，线格式与
+  vendored `lib/rbcp.py` 逐字节一致（8 字节头、packet_id 回环、bus-error
+  位、毫秒超时）。
+- `infrastructure/multi_board_acquire/`：原生多板采集内核（TCM 对齐、
+  每板接收线程、按 `timestamp`/`event_count` 聚合、聚合写盘、monitor
+  jsonl、run_meta 状态机）。落盘格式与 `multi_board_acquire.py` 字节级相同。
+- `infrastructure/adapters/multi_capture_runner.py` +
+  `multi_board_watch.py` + `multi_board_decode_backend.py`：原生 runner、
+  波形 watch 发布器/后端进程、tail-read 解码后端。
+- `DAQ_MULTI_VENDOR=1` 环境变量：临时切回 vendored 多板路径，便于上机
+  A/B 对比；该路径计划删除。
+
+### Changed
+
+- 相对 `output_dir` 的解析：profile 位于 `profiles/` 目录时保持原行为
+  （`<profile>/../out`）；profile 不在 `profiles/` 下时改为解析到 profile
+  同级目录，方便 exe 部署。
+- `_TcpSentRawStreamReader` 增加 `adc_length` 参数与 `read_frame()`（返回
+  解析出的头部字段），`read_packet()` 行为不变。多板接收此前无法正确解析
+  `adc_length != 256` 的配置（历史 run 中实测有 64）。
+- watch 路径不再重编码帧：直接把接收到的原始 wire 字节交给
+  `decode_tcp_sent_packet`，删除了 `_legacy_frame_to_tcp_sent_packet`。
+- `multi_board_decode.py` 新增 `INDEX_ENTRY_FMT`/`INDEX_ENTRY_SIZE`，writer
+  与 reader 共用同一份 struct 定义。
+
+### Fixed
+
+- 多板 watch publisher 在多个接收线程并发调用下会无锁改字典（可能触发
+  `dictionary changed size during iteration`）；现已加锁。
+
 ## [v0.3.2] - 2026-08-12
 
 缪子成像测试驱动的 GUI 与稳定性改进。

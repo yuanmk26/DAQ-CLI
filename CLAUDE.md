@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `daq-cli` is a Python CLI (typer + rich) for DAQ boards (FDU-ADC-250M-16ch
 hardware): board configuration, telemetry, single/multi-board capture,
 TCP_SENT packet decoding, and waveform monitoring. Current version line:
-v0.2.0 (see `CHANGELOG.md`).
+v0.4.0 (see `CHANGELOG.md`).
 
 Hardware access is NOT native: it runs through vendored legacy scripts
 (`src/daq_cli/_vendor/fdu_legacy/`) wrapped by adapters in
@@ -89,9 +89,13 @@ Key workflow facts:
   switches and directories (text output supports
   `waveform_layout: channel_blocks | point_rows` and
   `max_events_per_file` segmentation).
-- Multi-board capture wraps the vendored `multi_board_acquire.py`: TCM
-  alignment, aggregation by `timestamp` or `event_count`, streamed decode,
-  wave watch, monitor.jsonl snapshots.
+- Multi-board capture is native (`infrastructure/multi_board_acquire/` +
+  `infrastructure/adapters/multi_capture_runner.py`): TCM alignment,
+  aggregation by `timestamp` or `event_count`, streamed decode,
+  wave watch, monitor.jsonl snapshots. It reproduces the aggregated
+  `complete_events.dat` / `partial_events.dat` / `complete_events.idx` layout
+  byte for byte; the vendored `multi_board_acquire.py` path is still reachable
+  with `DAQ_MULTI_VENDOR=1` for A/B comparison and is slated for deletion.
 - `monitoring_samples/` holds demo/replay data for the viewer
   (`daq monitor wave demo`, `daq monitor wave --replay ...`).
 - Tests are hardware-free: they use the sample dumps and temp dirs.
@@ -156,6 +160,7 @@ Full reference: `docs/firmware-compatibility.md`. Key rules:
 ## Docs map
 
 - `docs/usage.md` — user guide: commands, profile format, troubleshooting
+- `docs/deploy-exe.md` — standalone exe deployment (profile auto-discovery, paths)
 - `docs/architecture.md` / `docs/cli-design.md` — design intent, layering, command design
 - `docs/firmware-compatibility.md` — firmware contract details and gaps
 - `docs/version-snapshot-v0.1.4.md` — archived snapshot of the v0.1.x line

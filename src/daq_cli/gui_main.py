@@ -8,6 +8,9 @@ the TkAgg backend as the very first action, which is required before any
 """
 
 import argparse
+import multiprocessing
+import sys
+from pathlib import Path
 
 import matplotlib
 
@@ -19,6 +22,12 @@ matplotlib.rcParams["axes.unicode_minus"] = False
 
 
 def main() -> None:
+    # PyInstaller + multiprocessing spawn on Windows: the frozen child
+    # re-executes this entry point, so this must run before argparse or any
+    # GUI construction.  Without it, capture backends (decode / wave watch)
+    # would spawn extra GUI windows or hang.
+    multiprocessing.freeze_support()
+
     parser = argparse.ArgumentParser(description="daq-cli GUI console")
     parser.add_argument(
         "--profile",
@@ -28,12 +37,25 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    profile_path = args.profile
+    if profile_path is None:
+        from daq_cli.presentation.gui.startup import discover_profile
+
+        base_dir = (
+            Path(sys.executable).resolve().parent
+            if getattr(sys, "frozen", False)
+            else Path.cwd()
+        )
+        discovered = discover_profile(base_dir)
+        if discovered is not None:
+            profile_path = str(discovered)
+
     import tkinter as tk
 
     from daq_cli.presentation.gui.app import DaqGuiApp
 
     root = tk.Tk()
-    DaqGuiApp(root, profile_path=args.profile)
+    DaqGuiApp(root, profile_path=profile_path)
     root.mainloop()
 
 

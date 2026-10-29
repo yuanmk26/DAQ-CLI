@@ -272,6 +272,18 @@ class ResultFormattingTests(unittest.TestCase):
         )
         self.assertEqual(formatting.default_output_base_dir(profile), Path(r"D:\data"))
 
+    def test_default_output_base_dir_next_to_non_profiles_profile(self) -> None:
+        # A deployment profile placed beside the exe (not under a
+        # "profiles" directory) keeps its relative outputs beside itself.
+        profile = SimpleNamespace(
+            path=Path(r"D:\daq\daq-profile.yaml"),
+            defaults={"output_dir": "out"},
+        )
+        self.assertEqual(
+            formatting.default_output_base_dir(profile),
+            Path(r"D:\daq\out"),
+        )
+
     def test_merge_outputs_config_uses_profile_dirs_and_params(self) -> None:
         profile = SimpleNamespace(
             path=Path("profiles/example.yaml"),

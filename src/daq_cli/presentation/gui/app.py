@@ -11,6 +11,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, ttk
 
+from daq_cli import __version__
 from daq_cli.application.profile_service import ProfileService
 
 _LOG_MAX_LINES = 5000
@@ -23,7 +24,7 @@ class DaqGuiApp:
 
     def __init__(self, root: tk.Tk, profile_path: str | Path | None = None) -> None:
         self.root = root
-        root.title("daq-cli 控制台")
+        root.title(f"daq-cli 控制台 v{__version__}")
         root.option_add("*Font", (_FONT_FAMILY, _FONT_SIZE))
         root.geometry("1100x760")
 

@@ -46,19 +46,28 @@ pip install -e .
 
 ### Standalone executables (no Python needed on the target PC)
 
-Build two one-file executables (`daq-gui.exe` GUI console + `daq.exe` CLI)
-with PyInstaller:
+Build the versioned, one-file GUI executable with PyInstaller:
+
+```powershell
+.\scripts\build_gui_exe.ps1
+```
+
+Output: `dist\daq-gui-<version>.exe`. It bundles Python, matplotlib,
+tkinter, and the vendored legacy scripts, so it runs on another Windows PC
+without installing anything. On startup it auto-discovers a profile next to
+the exe (`DAQ_PROFILE`, `daq-profile.yaml`, or a single
+`profiles\*.yaml`) — see `docs/deploy-exe.md` for the deployment layout.
+
+To build both the GUI and the CLI as one-file executables instead:
 
 ```powershell
 .\scripts\build_exe.ps1
 ```
 
-Outputs land in `dist-exe\`. The executables bundle Python, matplotlib,
-tkinter, and the vendored legacy scripts, so they run directly on another
-Windows PC without installing anything:
+Outputs land in `dist-exe\` (`daq-gui.exe` + `daq.exe`).
 
 ```bash
-dist-exe\daq-gui.exe --profile profiles\example.tcm-trigger.yaml
+dist\daq-gui-0.4.0.exe --profile profiles\example.tcm-trigger.yaml
 dist-exe\daq.exe --help
 ```
 

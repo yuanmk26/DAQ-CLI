@@ -152,7 +152,7 @@ This command uses the legacy `lib/sysmon.py` path and currently reports:
 If this command fails, the likely causes are:
 
 - Wrong device IP
-- Wrong RBCP port
+<!-- - Wrong RBCP port -->
 - Board not powered or not reachable
 
 ## 8. Configuring a Board
@@ -657,11 +657,14 @@ daq acquire multi two_board --watch-waveforms --watch-every 100
 
 Current behavior:
 
-- The command generates a temporary JSON config for the legacy
-  `multi_board_acquire.py` script
+- The command writes a run config under `<output-dir>/.daq_cli_tmp/` and runs
+  the native multi-board pipeline
 - The selected group devices and TCM endpoint are taken from the profile
-- The legacy script still performs the actual TCM align, TCP receive, packet
-  parse, aggregation, and run-file writing
+- The pipeline performs TCM align, TCP receive, packet parse, aggregation, and
+  run-file writing (same on-disk format as before, so old decode workflows and
+  previously captured runs still work)
+- Set `DAQ_MULTI_VENDOR=1` to fall back to the vendored
+  `multi_board_acquire.py` path for A/B comparison
 - `--decode-json` enables multi-board decoded JSON output
 - `--watch-waveforms` adds a best-effort sampled waveform monitor with one window, same-aggregate-event board switching, and short history navigation
 - Multi waveform watch only supports boards currently sending waveform-bearing modes `1` or `3`

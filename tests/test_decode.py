@@ -31,9 +31,9 @@ from daq_cli.infrastructure.tcp_sent_decode import (
     decode_tcp_sent_file,
     decode_tcp_sent_packet,
 )
-from daq_cli.infrastructure.adapters.legacy_multi_capture_runner import (
-    _DecodeControlMessage,
-    _multi_board_decode_backend_main,
+from daq_cli.infrastructure.adapters.multi_board_decode_backend import (
+    DecodeControlMessage,
+    run_multi_board_decode_backend,
 )
 
 
@@ -406,8 +406,8 @@ class DecodeTests(unittest.TestCase):
 
             control_queue: queue.Queue = queue.Queue()
             result_queue: queue.Queue = queue.Queue()
-            control_queue.put(_DecodeControlMessage(kind="capture_finished"))
-            _multi_board_decode_backend_main(
+            control_queue.put(DecodeControlMessage(kind="capture_finished"))
+            run_multi_board_decode_backend(
                 task_queue=control_queue,
                 result_queue=result_queue,
                 run_output_dir=str(run_dir),

@@ -214,7 +214,7 @@ def acquire_multi(
     ] = None,
     profile: RequiredProfileOption = ...,
 ) -> None:
-    """Run legacy multi-board acquisition for one logical group."""
+    """Run multi-board acquisition for one logical group."""
     profile_data = ProfileService().load_profile(profile)
     resolved = _resolve_multi_acquire_options(
         defaults=profile_data.defaults,

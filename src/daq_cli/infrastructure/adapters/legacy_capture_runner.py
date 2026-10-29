@@ -29,6 +29,7 @@ from daq_cli.infrastructure.text_event_writer import (
 from daq_cli.infrastructure.tcp_sent_protocol import (
     ADC_LENGTH,
     FEATURE_BYTES,
+    FORMAT_VERSION_FINE,
     FRAME_PREFIX,
     HEADER_BYTES,
     MODE2_MAGIC,
@@ -827,11 +828,42 @@ class LegacySingleCaptureRunner:
             return None
 
 
+@dataclass(slots=True)
+class TcpSentHeaderFields:
+    """A validated TCP_SENT frame plus the header fields used to size it.
+
+    ``packet`` is the exact wire bytes (header + feature + waveform), so callers
+    that only want the raw frame can use :meth:`_TcpSentRawStreamReader.read_packet`
+    while multi-board callers get the parsed fields without re-parsing.
+    """
+
+    packet: bytes
+    mode: int
+    format_version: int
+    header_bytes: int
+    event_count: int
+    timestamp: int
+    hit_mask: int
+    hit_count: int
+    feature_record_length: int
+    feature_len: int
+    waveform_len: int
+    crossing_fine: int | None
+    accept_fine: int | None
+
+
 class _TcpSentRawStreamReader:
-    def __init__(self, sock: socket.socket, expected_send_mode: int | None = None) -> None:
+    def __init__(
+        self,
+        sock: socket.socket,
+        expected_send_mode: int | None = None,
+        *,
+        adc_length: int = ADC_LENGTH,
+    ) -> None:
         self.sock = sock
         self.buffer = bytearray()
         self.expected_send_mode = expected_send_mode
+        self.adc_length = int(adc_length)
 
     def _recv_more(self) -> None:
         chunk = self.sock.recv(4096)
@@ -857,7 +889,7 @@ class _TcpSentRawStreamReader:
                 del self.buffer[: len(self.buffer) - keep]
             self._recv_more()
 
-    def read_packet(self) -> bytes:
+    def read_frame(self) -> TcpSentHeaderFields:
         # Dense payloads (e.g. high-rate trigger storms) can contain the magic
         # prefix FF FE 01 by chance; validate header fields and re-sync by
         # dropping one byte instead of failing on the first garbage header.
@@ -898,14 +930,43 @@ class _TcpSentRawStreamReader:
                 total_size = frame_total_size(
                     send_mode=mode,
                     hit_count=hit_count,
-                    adc_length=ADC_LENGTH,
+                    adc_length=self.adc_length,
                     feature_bytes=FEATURE_BYTES,
                     format_version=format_version,
                 )
                 self._fill(total_size)
                 packet = bytes(self.buffer[:total_size])
                 del self.buffer[:total_size]
-                return packet
+
+                feature_len = hit_count * FEATURE_BYTES if mode in (2, 3) else 0
+                if mode == 1:
+                    waveform_len = 16 * self.adc_length * 4
+                elif mode in (0, 3):
+                    waveform_len = hit_count * self.adc_length * 4
+                else:
+                    waveform_len = 0
+
+                crossing_fine: int | None = None
+                accept_fine: int | None = None
+                if format_version >= FORMAT_VERSION_FINE:
+                    crossing_fine = _u32_be(header, 20)
+                    accept_fine = _u32_be(header, 24)
+
+                return TcpSentHeaderFields(
+                    packet=packet,
+                    mode=mode,
+                    format_version=format_version,
+                    header_bytes=header_bytes,
+                    event_count=_u32_be(header, 4),
+                    timestamp=_u64_be(header, 8),
+                    hit_mask=hit_mask,
+                    hit_count=hit_count,
+                    feature_record_length=feature_size,
+                    feature_len=feature_len,
+                    waveform_len=waveform_len,
+                    crossing_fine=crossing_fine,
+                    accept_fine=accept_fine,
+                )
 
             bad_headers += 1
             if bad_headers >= 100:
@@ -916,6 +977,9 @@ class _TcpSentRawStreamReader:
                     f"{self.expected_send_mode})"
                 )
             del self.buffer[0]
+
+    def read_packet(self) -> bytes:
+        return self.read_frame().packet
 
 
 _Mode2RawStreamReader = _TcpSentRawStreamReader
@@ -932,6 +996,14 @@ def _bit_count(value: int) -> int:
 
 def _u16_be(data: bytes, offset: int) -> int:
     return (data[offset] << 8) | data[offset + 1]
+
+
+def _u32_be(data: bytes, offset: int) -> int:
+    return int.from_bytes(data[offset : offset + 4], "big")
+
+
+def _u64_be(data: bytes, offset: int) -> int:
+    return int.from_bytes(data[offset : offset + 8], "big")
 
 
 def _decode_worker_main(task_queue: Any, result_queue: Any) -> None:

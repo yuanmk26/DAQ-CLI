@@ -372,7 +372,7 @@ class TcmLinkTests(unittest.TestCase):
         service = AS()
         with patch.object(service._profile_service, "load_profile", return_value=profile):
             with patch(
-                "daq_cli.application.acquire_service.LegacyMultiCaptureRunner"
+                "daq_cli.application.acquire_service.MultiCaptureRunner"
             ) as runner_cls:
                 runner_cls.return_value.capture_multi.return_value = SimpleNamespace(
                     run_output_dir=Path("out/multi_run"),

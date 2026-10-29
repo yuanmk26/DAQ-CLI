@@ -1,3 +1,4 @@
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -17,10 +18,35 @@ from daq_cli.infrastructure.adapters.legacy_capture_runner import (
     LegacySingleCaptureRunner,
 )
 from daq_cli.infrastructure.adapters.legacy_board_adapter import LegacyBoardAdapter
-from daq_cli.infrastructure.adapters.legacy_multi_capture_runner import (
-    LegacyMultiCaptureConfig,
-    LegacyMultiCaptureRunner,
+from daq_cli.infrastructure.adapters.multi_capture_runner import (
+    MultiCaptureConfig,
+    MultiCaptureRunner,
 )
+
+# Opt-in escape hatch during the native migration: set DAQ_MULTI_VENDOR=1 to run
+# multi-board capture through the legacy wrapper + vendored script instead of the
+# native runner (useful for A/B comparison on real hardware).
+_VENDOR_ENV_FLAG = "DAQ_MULTI_VENDOR"
+
+
+def _use_vendor_multi_runner() -> bool:
+    return os.environ.get(_VENDOR_ENV_FLAG, "").strip().lower() in {"1", "true", "yes"}
+
+
+def _multi_runner_classes():
+    """Pick the multi-board runner/config pair (native by default).
+
+    The legacy pair is imported lazily so the vendored script is only touched
+    when explicitly requested via ``DAQ_MULTI_VENDOR=1``.
+    """
+    if _use_vendor_multi_runner():
+        from daq_cli.infrastructure.adapters.legacy_multi_capture_runner import (
+            LegacyMultiCaptureConfig,
+            LegacyMultiCaptureRunner,
+        )
+
+        return LegacyMultiCaptureRunner, LegacyMultiCaptureConfig
+    return MultiCaptureRunner, MultiCaptureConfig
 
 
 @dataclass(slots=True)
@@ -329,9 +355,10 @@ class AcquireService:
                     "multi waveform watch only supports send_mode 1 or 3; "
                     f"unsupported boards: {', '.join(unsupported)}"
                 )
-        runner = LegacyMultiCaptureRunner()
+        runner_cls, config_cls = _multi_runner_classes()
+        runner = runner_cls()
         raw_result = runner.capture_multi(
-            LegacyMultiCaptureConfig(
+            config_cls(
                 run_name_prefix=run_name_prefix or group.name,
                 output_base_dir=base_dir,
                 tcm_ip=tcm_config.ip,
@@ -404,7 +431,14 @@ class AcquireService:
         configured = profile.defaults.get("output_dir", "out")
         base = Path(str(configured))
         if not base.is_absolute():
-            base = profile_path.parent.parent / base
+            # Repository layout: profiles/<name>.yaml -> <repo>/out.
+            # Deployments that place a profile outside a "profiles" directory
+            # (e.g. daq-profile.yaml next to the exe) keep outputs beside it.
+            profile_dir = profile_path.parent
+            if profile_dir.name.lower() == "profiles":
+                base = profile_dir.parent / base
+            else:
+                base = profile_dir / base
         return base
 
     def _resolve_group_devices(

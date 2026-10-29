@@ -270,8 +270,10 @@ Implemented end-to-end:
   - Supports event count, timeout, and output directory selection
 - `daq acquire multi <group>`
   - Resolves a logical group and TCM from the selected profile
-  - Generates a temporary config for the legacy `multi_board_acquire.py` flow
-  - Uses the legacy multi-board align, receive, parse, and aggregation path
+  - Writes a run config and runs the native multi-board pipeline
+    (`infrastructure/multi_board_acquire/`)
+  - Performs TCM align, receive, parse, and aggregation natively, writing the
+    same aggregated file format as the superseded legacy path
 - `daq monitor wave <device>`
   - Uses a native TCP receive path for `send_mode = 1` full-waveform monitoring
   - Supports live preview, bundled demo preview, and dump replay preview

@@ -313,7 +313,11 @@ def default_output_base_dir(profile) -> Path:
     configured = profile.defaults.get("output_dir", "out")
     base = Path(str(configured))
     if not base.is_absolute():
-        base = profile.path.parent.parent / base
+        profile_dir = profile.path.parent
+        if profile_dir.name.lower() == "profiles":
+            base = profile_dir.parent / base
+        else:
+            base = profile_dir / base
     return base
 
 

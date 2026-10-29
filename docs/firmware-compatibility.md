@@ -215,12 +215,24 @@ That needs correction because:
   format version (byte 19), and validation rejects incompatible `send_mode`
   values before capture
 
-### 3.3 Multi-board acquisition runs through the vendored legacy script
+### 3.3 Multi-board acquisition is native
 
-`daq acquire multi` wraps the vendored `multi_board_acquire.py` (not a native
-implementation). The vendored FrameParser supports both 20-byte and 28-byte
-frames (byte 19 discrimination); the upstream script parses 28-byte headers
-unconditionally. Keep this divergence documented when re-syncing.
+`daq acquire multi` runs the native implementation in
+`src/daq_cli/infrastructure/multi_board_acquire/` (driven by
+`adapters/multi_capture_runner.py`). It reproduces the aggregated file layout
+(`complete_events.dat` / `partial_events.dat` / `complete_events.idx` /
+`monitor.jsonl` / `run_meta.json`) byte for byte, so previously captured runs
+and the offline decode path are unaffected.
+
+The native stream reader discriminates frame format versions by header byte 19
+(20-byte vs 28-byte headers). The upstream
+`FDU-ADC-250M-16ch/script/multi_board_acquire.py` parses 28-byte headers
+unconditionally; the vendored copy carries the divergence. Set
+`DAQ_MULTI_VENDOR=1` to fall back to the vendored path for A/B comparison; that
+path is slated for removal and otherwise unused.
+
+Frame equivalence tests against the vendored implementation live in
+`tests/test_multi_board_native_equivalence.py`.
 
 ### 3.4 No local firmware compatibility reference existed
 

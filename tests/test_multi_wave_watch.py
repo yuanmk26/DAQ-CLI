@@ -7,29 +7,38 @@ import unittest
 import uuid
 from unittest.mock import patch
 
-import daq_cli.infrastructure.adapters.legacy_multi_capture_runner as legacy_multi_capture_runner_module
+import daq_cli.infrastructure.adapters.multi_capture_runner as multi_capture_runner_module
 from daq_cli.application.output_config import (
     AcquireOutputsConfig,
     OutputTargetConfig,
     TextOutputConfig,
 )
-from daq_cli.infrastructure.adapters.legacy_multi_capture_runner import (
-    DEFAULT_MULTI_WATCH_QUEUE_SIZE,
-    LegacyMultiCaptureConfig,
-    LegacyMultiCaptureRunner,
+from daq_cli.infrastructure.adapters.multi_capture_runner import (
     MultiBoardDecodeRuntime,
+    MultiCaptureConfig,
+    MultiCaptureRunner,
+)
+from daq_cli.infrastructure.adapters.multi_board_decode_backend import (
+    DecodeDrainResult,
+)
+from daq_cli.infrastructure.adapters.multi_board_watch import (
+    DEFAULT_MULTI_WATCH_QUEUE_SIZE,
+    MultiBoardWatchPublisher,
     MultiBoardWatchRuntime,
-    _DecodeDrainResult,
-    _WatchControlMessage,
-    _legacy_frame_to_tcp_sent_packet,
-    _multi_board_watch_backend_main,
-    _publish_multi_board_view_update,
-    _MultiBoardWatchPublisher,
-    _MultiBoardFrameQueueProxy,
+    WatchControlMessage,
+    _publish_view_update,
+    watch_backend_main,
+)
+from daq_cli.infrastructure.multi_board_acquire import (
+    MultiBoardAppConfig,
+    MultiBoardConfig,
+    MultiBoardFrame,
+    frame_from_fields,
 )
 from daq_cli.infrastructure.wave_monitor import MultiBoardWaveUpdate, WaveMonitorFrame
 from daq_cli.presentation.wave_monitor_viewer import _drain_multi_board_updates
 from daq_cli.infrastructure.tcp_sent_decode import decode_tcp_sent_packet
+from daq_cli.infrastructure.adapters.legacy_capture_runner import _TcpSentRawStreamReader
 from daq_cli.infrastructure.run_name_allocator import allocate_next_run_dir
 
 
@@ -37,10 +46,9 @@ ADC_LENGTH = 256
 
 
 class MultiWaveWatchTests(unittest.TestCase):
-    def test_legacy_frame_round_trips_mode1_waveform_packet(self) -> None:
-        frame = _build_legacy_frame(mode=1, hit_mask=0x00FF, event_count=12, timestamp=3456)
-        packet = _legacy_frame_to_tcp_sent_packet(frame)
-        decoded = decode_tcp_sent_packet(packet, source_file=Path("sample.bin"))
+    def test_native_frame_round_trips_mode1_waveform_packet(self) -> None:
+        frame = _build_native_frame(mode=1, hit_mask=0x00FF, event_count=12, timestamp=3456)
+        decoded = decode_tcp_sent_packet(frame.raw_packet, source_file=Path("sample.bin"))
 
         self.assertEqual(decoded.send_mode, 1)
         self.assertEqual(decoded.event_count, 12)
@@ -49,10 +57,9 @@ class MultiWaveWatchTests(unittest.TestCase):
         self.assertEqual(len(decoded.channels), 16)
         self.assertTrue(all(channel is not None for channel in decoded.channels))
 
-    def test_legacy_frame_round_trips_mode3_waveform_packet(self) -> None:
-        frame = _build_legacy_frame(mode=3, hit_mask=0x0003, event_count=7, timestamp=99)
-        packet = _legacy_frame_to_tcp_sent_packet(frame)
-        decoded = decode_tcp_sent_packet(packet, source_file=Path("sample.bin"))
+    def test_native_frame_round_trips_mode3_waveform_packet(self) -> None:
+        frame = _build_native_frame(mode=3, hit_mask=0x0003, event_count=7, timestamp=99)
+        decoded = decode_tcp_sent_packet(frame.raw_packet, source_file=Path("sample.bin"))
 
         self.assertEqual(decoded.send_mode, 3)
         self.assertEqual(decoded.hit_mask, 0x0003)
@@ -60,28 +67,25 @@ class MultiWaveWatchTests(unittest.TestCase):
         self.assertIsNotNone(decoded.channels[1])
         self.assertIsNone(decoded.channels[2])
 
-    def test_legacy_frame_round_trips_fine_frame_to_v1_packet(self) -> None:
-        frame = _build_legacy_frame(mode=1, hit_mask=0x00FF, event_count=12, timestamp=3456)
-        frame.format_version = 1
-        frame.crossing_fine = 0xCAFE0000
-        frame.accept_fine = 0xCAFE0064
-        packet = _legacy_frame_to_tcp_sent_packet(frame)
-        decoded = decode_tcp_sent_packet(packet, source_file=Path("sample.bin"))
+    def test_native_frame_round_trips_fine_frame_to_v1_packet(self) -> None:
+        frame = _build_native_frame(
+            mode=1,
+            hit_mask=0x00FF,
+            event_count=12,
+            timestamp=3456,
+            format_version=1,
+            crossing_fine=0xCAFE0000,
+            accept_fine=0xCAFE0064,
+        )
+        decoded = decode_tcp_sent_packet(frame.raw_packet, source_file=Path("sample.bin"))
 
         self.assertEqual(decoded.format_version, 1)
         self.assertEqual(decoded.crossing_fine, 0xCAFE0000)
         self.assertEqual(decoded.accept_fine, 0xCAFE0064)
         self.assertEqual(decoded.delta_fine, 100)
 
-    def test_vendored_frame_parser_discriminates_frame_versions(self) -> None:
-        from daq_cli.infrastructure.adapters.legacy_runtime import (
-            bundled_legacy_script_dir,
-            temporary_sys_path,
-        )
+    def test_stream_reader_discriminates_frame_versions(self) -> None:
         from daq_cli.infrastructure.tcp_sent_protocol import FORMAT_VERSION_FINE
-        from daq_cli.infrastructure.tcp_sent_decode import decode_tcp_sent_packet
-        from daq_cli.infrastructure.multi_board_decode import build_board_packet
-        import types as _types
 
         fine_packet = _build_tcp_sent_packet_v2(
             1, 0x00FF, 21, format_version=1,
@@ -89,33 +93,21 @@ class MultiWaveWatchTests(unittest.TestCase):
         )
         legacy_packet = _build_tcp_sent_packet_v2(1, 0x00FF, 21)
 
-        with temporary_sys_path(bundled_legacy_script_dir()):
-            import multi_board_acquire as mba
+        fine_fields = _read_fields(fine_packet)
+        self.assertEqual(fine_fields.format_version, FORMAT_VERSION_FINE)
+        self.assertEqual(fine_fields.header_bytes, 28)
+        self.assertEqual(fine_fields.crossing_fine, 0x100)
+        self.assertEqual(fine_fields.accept_fine, 0x180)
 
-            board = mba.BoardConfig(
-                board_id=0, name="dev1", ip="192.168.10.10", tcp_port=24,
-            )
-            parser = mba.FrameParser(adc_length=256)
-
-            fine_buffer = bytearray(fine_packet)
-            fine_frame, desync = parser.parse_one(fine_buffer, board, False)
-            self.assertFalse(desync)
-            self.assertIsNotNone(fine_frame)
-            self.assertEqual(fine_frame.format_version, FORMAT_VERSION_FINE)
-            self.assertEqual(fine_frame.crossing_fine, 0x100)
-            self.assertEqual(fine_frame.accept_fine, 0x180)
-
-            legacy_buffer = bytearray(legacy_packet)
-            legacy_frame, desync = parser.parse_one(legacy_buffer, board, False)
-            self.assertFalse(desync)
-            self.assertIsNotNone(legacy_frame)
-            self.assertEqual(legacy_frame.format_version, 0)
-            self.assertEqual(legacy_frame.crossing_fine, 0)
-            self.assertEqual(legacy_frame.accept_fine, 0)
+        legacy_fields = _read_fields(legacy_packet)
+        self.assertEqual(legacy_fields.format_version, 0)
+        self.assertEqual(legacy_fields.header_bytes, 20)
+        self.assertIsNone(legacy_fields.crossing_fine)
+        self.assertIsNone(legacy_fields.accept_fine)
 
     def test_watch_publisher_samples_every_nth_frame_per_board(self) -> None:
         task_queue: queue.Queue = queue.Queue(maxsize=4)
-        publisher = _MultiBoardWatchPublisher(
+        publisher = MultiBoardWatchPublisher(
             board_order={0: ("dev1", 0)},
             watch_every=2,
             aggregation_key="event_count",
@@ -123,12 +115,12 @@ class MultiWaveWatchTests(unittest.TestCase):
             event_timeout_ms=50,
             task_queue=task_queue,
         )
-        frame = _build_legacy_frame(mode=1, hit_mask=0x00FF, event_count=1, timestamp=1)
+        frame = _build_native_frame(mode=1, hit_mask=0x00FF, event_count=1, timestamp=1)
 
-        publisher.publish(frame)
+        publisher.on_frame(frame)
         self.assertTrue(task_queue.empty())
 
-        publisher.publish(frame)
+        publisher.on_frame(frame)
         sampled = task_queue.get_nowait()
         self.assertEqual(sampled.board_name, "dev1")
         self.assertEqual(sampled.board_index, 0)
@@ -137,10 +129,9 @@ class MultiWaveWatchTests(unittest.TestCase):
     def test_multi_watch_queue_size_is_large_enough_for_bursty_watch_every_one(self) -> None:
         self.assertGreaterEqual(DEFAULT_MULTI_WATCH_QUEUE_SIZE, 1024)
 
-    def test_queue_proxy_forwards_to_aggregator_and_watcher(self) -> None:
-        downstream_queue: queue.Queue = queue.Queue()
+    def test_publisher_forwarded_packet_is_the_raw_wire_frame(self) -> None:
         task_queue: queue.Queue = queue.Queue(maxsize=1)
-        publisher = _MultiBoardWatchPublisher(
+        publisher = MultiBoardWatchPublisher(
             board_order={0: ("dev1", 0)},
             watch_every=1,
             aggregation_key="event_count",
@@ -148,19 +139,19 @@ class MultiWaveWatchTests(unittest.TestCase):
             event_timeout_ms=50,
             task_queue=task_queue,
         )
-        proxy = _MultiBoardFrameQueueProxy(downstream_queue, publisher)
-        frame = _build_legacy_frame(mode=1, hit_mask=0x00FF, event_count=1, timestamp=1)
+        frame = _build_native_frame(mode=1, hit_mask=0x00FF, event_count=1, timestamp=1)
 
-        proxy.put(frame)
+        publisher.on_frame(frame)
 
-        self.assertIs(downstream_queue.get_nowait(), frame)
         sampled = task_queue.get_nowait()
         self.assertEqual(sampled.board_name, "dev1")
+        # No re-encoding: the sampled packet is the exact wire bytes.
+        self.assertEqual(sampled.packet, frame.raw_packet)
 
     def test_publish_multi_board_view_update_keeps_same_event_updates_for_two_boards(self) -> None:
         viewer_queue: queue.Queue = queue.Queue(maxsize=16)
         for board_index, board_name in ((0, "dev1"), (1, "dev2")):
-            _publish_multi_board_view_update(
+            _publish_view_update(
                 viewer_queue,
                 MultiBoardWaveUpdate(
                     board_name=board_name,
@@ -190,7 +181,7 @@ class MultiWaveWatchTests(unittest.TestCase):
     def test_publish_multi_board_view_update_drops_when_queue_too_small(self) -> None:
         viewer_queue: queue.Queue = queue.Queue(maxsize=1)
         for board_index, board_name in ((0, "dev1"), (1, "dev2")):
-            _publish_multi_board_view_update(
+            _publish_view_update(
                 viewer_queue,
                 MultiBoardWaveUpdate(
                     board_name=board_name,
@@ -253,7 +244,7 @@ class MultiWaveWatchTests(unittest.TestCase):
                     with patch(
                         "daq_cli.presentation.wave_monitor_viewer.run_multi_board_wave_viewer"
                     ):
-                        _multi_board_watch_backend_main(
+                        watch_backend_main(
                             task_queue=task_queue,
                             result_queue=result_queue,
                             group_label="two_board",
@@ -263,7 +254,7 @@ class MultiWaveWatchTests(unittest.TestCase):
         self.assertEqual(captured_queue_size["value"], 16)
 
     def test_capture_multi_stops_when_watch_viewer_closes(self) -> None:
-        runner = LegacyMultiCaptureRunner("legacy")
+        runner = MultiCaptureRunner()
         logs: list[tuple[str, str]] = []
         stop_called = {"value": False}
 
@@ -282,17 +273,14 @@ class MultiWaveWatchTests(unittest.TestCase):
 
         fake_app = FakeApp()
         result_queue: queue.Queue = queue.Queue()
-        result_queue.put(_WatchControlMessage(kind="viewer_closed"))
+        result_queue.put(WatchControlMessage(kind="viewer_closed"))
         watch_runtime = MultiBoardWatchRuntime(
             task_queue=queue.Queue(),
             result_queue=result_queue,
             process=_FakeProcess(alive=False),
         )
-        fake_module = SimpleNamespace(
-            AppConfig=SimpleNamespace(from_json_file=lambda _path: SimpleNamespace()),
-            AcquisitionApp=lambda _cfg, _path: fake_app,
-        )
-        config = LegacyMultiCaptureConfig(
+        fake_app_factory = lambda _cfg, _path, **_kwargs: fake_app
+        config = MultiCaptureConfig(
             run_name_prefix="two_board",
             output_base_dir=Path("out/multi"),
             tcm_ip="192.168.10.16",
@@ -312,15 +300,14 @@ class MultiWaveWatchTests(unittest.TestCase):
             stop_capture_on_watch_close=True,
         )
 
-        with patch(
-            "daq_cli.infrastructure.adapters.legacy_multi_capture_runner.importlib.import_module",
-            return_value=fake_module,
+        with patch.object(
+            multi_capture_runner_module, "MultiBoardAcquisitionApp", fake_app_factory
         ):
             with patch.object(runner, "_start_multi_watch_backend", return_value=watch_runtime):
                 with patch.object(runner, "_write_temp_config", return_value=Path("out/multi/.daq_cli_tmp/test.json")):
                     with patch.object(runner, "_read_status", return_value="stopped"):
                         with patch.object(
-                            legacy_multi_capture_runner_module,
+                            multi_capture_runner_module,
                             "allocate_next_run_dir",
                             return_value=Path("out/multi/two_board_00001"),
                         ):
@@ -336,7 +323,7 @@ class MultiWaveWatchTests(unittest.TestCase):
         )
 
     def test_capture_multi_waits_for_decode_backend_summary(self) -> None:
-        runner = LegacyMultiCaptureRunner("legacy")
+        runner = MultiCaptureRunner()
 
         class FakeApp:
             def __init__(self) -> None:
@@ -350,11 +337,8 @@ class MultiWaveWatchTests(unittest.TestCase):
             def stop(self) -> None:
                 self.stop_event.set()
 
-        fake_module = SimpleNamespace(
-            AppConfig=SimpleNamespace(from_json_file=lambda _path: SimpleNamespace()),
-            AcquisitionApp=lambda _cfg, _path: FakeApp(),
-        )
-        config = LegacyMultiCaptureConfig(
+        fake_app_factory = lambda _cfg, _path, **_kwargs: FakeApp()
+        config = MultiCaptureConfig(
             run_name_prefix="two_board",
             output_base_dir=Path("out/multi"),
             tcm_ip="192.168.10.16",
@@ -378,9 +362,8 @@ class MultiWaveWatchTests(unittest.TestCase):
             output_dir=Path("out/multi/two_board_00001/decoded"),
         )
 
-        with patch(
-            "daq_cli.infrastructure.adapters.legacy_multi_capture_runner.importlib.import_module",
-            return_value=fake_module,
+        with patch.object(
+            multi_capture_runner_module, "MultiBoardAcquisitionApp", fake_app_factory
         ):
             with patch.object(
                 runner,
@@ -389,7 +372,7 @@ class MultiWaveWatchTests(unittest.TestCase):
             ):
                 with patch.object(runner, "_read_status", return_value="ok"):
                     with patch.object(
-                        legacy_multi_capture_runner_module,
+                        multi_capture_runner_module,
                         "allocate_next_run_dir",
                         return_value=Path("out/multi/two_board_00001"),
                     ):
@@ -401,7 +384,7 @@ class MultiWaveWatchTests(unittest.TestCase):
                             with patch.object(
                                 runner,
                                 "_stop_multi_decode_backend",
-                                return_value=_DecodeDrainResult(
+                                return_value=DecodeDrainResult(
                                     decoded_complete_events=9,
                                     decoded_partial_events=2,
                                     decode_errors=0,
@@ -418,7 +401,7 @@ class MultiWaveWatchTests(unittest.TestCase):
         self.assertEqual(result.decode_errors, 0)
 
     def test_capture_multi_moves_outputs_to_configured_directories(self) -> None:
-        runner = LegacyMultiCaptureRunner("legacy")
+        runner = MultiCaptureRunner()
         base_dir = Path("tmp_test_outputs") / "multi_outputs_case"
         run_dir = base_dir / "out" / "two_board_00001"
         raw_dir = base_dir / "exports" / "raw"
@@ -443,11 +426,8 @@ class MultiWaveWatchTests(unittest.TestCase):
             def stop(self) -> None:
                 self.stop_event.set()
 
-        fake_module = SimpleNamespace(
-            AppConfig=SimpleNamespace(from_json_file=lambda _path: SimpleNamespace()),
-            AcquisitionApp=lambda _cfg, _path: FakeApp(),
-        )
-        config = LegacyMultiCaptureConfig(
+        fake_app_factory = lambda _cfg, _path, **_kwargs: FakeApp()
+        config = MultiCaptureConfig(
             run_name_prefix="two_board",
             output_base_dir=base_dir / "out",
             tcm_ip="192.168.10.16",
@@ -483,9 +463,10 @@ class MultiWaveWatchTests(unittest.TestCase):
         )
 
         try:
-            with patch(
-                "daq_cli.infrastructure.adapters.legacy_multi_capture_runner.importlib.import_module",
-                return_value=fake_module,
+            with patch.object(
+                multi_capture_runner_module,
+                "MultiBoardAcquisitionApp",
+                fake_app_factory,
             ):
                 with patch.object(
                     runner,
@@ -493,7 +474,7 @@ class MultiWaveWatchTests(unittest.TestCase):
                     return_value=base_dir / "out" / ".daq_cli_tmp" / "test.json",
                 ):
                     with patch.object(
-                        legacy_multi_capture_runner_module,
+                        multi_capture_runner_module,
                         "allocate_next_run_dir",
                         return_value=run_dir,
                     ):
@@ -505,7 +486,7 @@ class MultiWaveWatchTests(unittest.TestCase):
                             with patch.object(
                                 runner,
                                 "_stop_multi_decode_backend",
-                                return_value=_DecodeDrainResult(
+                                return_value=DecodeDrainResult(
                                     decoded_complete_events=3,
                                     decoded_partial_events=1,
                                     decode_errors=0,
@@ -545,7 +526,7 @@ class MultiWaveWatchTests(unittest.TestCase):
 
     def test_watch_publisher_assigns_same_aggregate_id_for_same_event_count(self) -> None:
         task_queue: queue.Queue = queue.Queue(maxsize=8)
-        publisher = _MultiBoardWatchPublisher(
+        publisher = MultiBoardWatchPublisher(
             board_order={0: ("dev1", 0), 1: ("dev2", 1)},
             watch_every=1,
             aggregation_key="event_count",
@@ -553,13 +534,14 @@ class MultiWaveWatchTests(unittest.TestCase):
             event_timeout_ms=50,
             task_queue=task_queue,
         )
-        frame_a = _build_legacy_frame(mode=1, hit_mask=0x00FF, event_count=12, timestamp=500)
-        frame_b = _build_legacy_frame(mode=1, hit_mask=0x00FF, event_count=12, timestamp=900)
-        frame_b.board_id = 1
-        frame_b.board_name = "dev2"
+        frame_a = _build_native_frame(mode=1, hit_mask=0x00FF, event_count=12, timestamp=500)
+        frame_b = _build_native_frame(
+            mode=1, hit_mask=0x00FF, event_count=12, timestamp=900,
+            board_id=1, board_name="dev2",
+        )
 
-        publisher.publish(frame_a)
-        publisher.publish(frame_b)
+        publisher.on_frame(frame_a)
+        publisher.on_frame(frame_b)
 
         first = task_queue.get_nowait()
         second = task_queue.get_nowait()
@@ -569,7 +551,7 @@ class MultiWaveWatchTests(unittest.TestCase):
 
     def test_watch_publisher_assigns_same_aggregate_id_within_timestamp_window(self) -> None:
         task_queue: queue.Queue = queue.Queue(maxsize=8)
-        publisher = _MultiBoardWatchPublisher(
+        publisher = MultiBoardWatchPublisher(
             board_order={0: ("dev1", 0), 1: ("dev2", 1)},
             watch_every=1,
             aggregation_key="timestamp",
@@ -577,13 +559,13 @@ class MultiWaveWatchTests(unittest.TestCase):
             event_timeout_ms=50,
             task_queue=task_queue,
         )
-        frame_a = _build_legacy_frame(mode=1, hit_mask=0x00FF, event_count=20, timestamp=1000)
-        frame_b = _build_legacy_frame(mode=1, hit_mask=0x00FF, event_count=21, timestamp=1007)
+        frame_a = _build_native_frame(mode=1, hit_mask=0x00FF, event_count=20, timestamp=1000)
+        frame_b = _build_native_frame(mode=1, hit_mask=0x00FF, event_count=21, timestamp=1007)
         frame_b.board_id = 1
         frame_b.board_name = "dev2"
 
-        publisher.publish(frame_a)
-        publisher.publish(frame_b)
+        publisher.on_frame(frame_a)
+        publisher.on_frame(frame_b)
 
         first = task_queue.get_nowait()
         second = task_queue.get_nowait()
@@ -593,7 +575,7 @@ class MultiWaveWatchTests(unittest.TestCase):
 
     def test_watch_publisher_splits_timestamp_aggregates_outside_window(self) -> None:
         task_queue: queue.Queue = queue.Queue(maxsize=8)
-        publisher = _MultiBoardWatchPublisher(
+        publisher = MultiBoardWatchPublisher(
             board_order={0: ("dev1", 0), 1: ("dev2", 1)},
             watch_every=1,
             aggregation_key="timestamp",
@@ -601,60 +583,77 @@ class MultiWaveWatchTests(unittest.TestCase):
             event_timeout_ms=50,
             task_queue=task_queue,
         )
-        frame_a = _build_legacy_frame(mode=1, hit_mask=0x00FF, event_count=20, timestamp=1000)
-        frame_b = _build_legacy_frame(mode=1, hit_mask=0x00FF, event_count=21, timestamp=1020)
+        frame_a = _build_native_frame(mode=1, hit_mask=0x00FF, event_count=20, timestamp=1000)
+        frame_b = _build_native_frame(mode=1, hit_mask=0x00FF, event_count=21, timestamp=1020)
         frame_b.board_id = 1
         frame_b.board_name = "dev2"
 
-        publisher.publish(frame_a)
-        publisher.publish(frame_b)
+        publisher.on_frame(frame_a)
+        publisher.on_frame(frame_b)
 
         first = task_queue.get_nowait()
         second = task_queue.get_nowait()
         self.assertNotEqual(first.aggregate_event_id, second.aggregate_event_id)
 
 
-def _build_legacy_frame(mode: int, hit_mask: int, event_count: int, timestamp: int):
-    hit_count = _bit_count(hit_mask)
-    feature_size = 10 if mode in (2, 3) else 0
-    feature_bytes = b""
-    if mode in (2, 3):
-        feature_chunks = []
-        for channel_index in range(hit_count):
-            feature_chunks.append(
-                bytes([channel_index])
-                + (100 + channel_index).to_bytes(2, "big")
-                + (200 + channel_index).to_bytes(2, "big")
-                + bytes([channel_index])
-                + (300 + channel_index).to_bytes(4, "big", signed=True)
-            )
-        feature_bytes = b"".join(feature_chunks)
+def _read_fields(packet: bytes):
+    class _OneShotSocket:
+        def __init__(self, blob: bytes) -> None:
+            self._blob = blob
 
-    waveform_channel_count = 16 if mode == 1 else hit_count if mode in (0, 3) else 0
-    waveform_words = bytearray()
-    for sample_index in range(ADC_LENGTH):
-        for channel_index in range(waveform_channel_count):
-            value_a = (sample_index + channel_index) & 0x0FFF
-            value_b = (sample_index + channel_index + 1) & 0x0FFF
-            word = (value_a << 16) | value_b
-            waveform_words.extend(word.to_bytes(4, "big", signed=False))
+        def recv(self, size: int) -> bytes:
+            chunk, self._blob = self._blob[:size], self._blob[size:]
+            return chunk
 
-    return SimpleNamespace(
-        board_id=0,
-        board_name="dev1",
-        board_ip="192.168.10.10",
-        mode=mode,
-        format_version=0,
-        crossing_fine=0,
-        accept_fine=0,
-        event_count=event_count,
-        timestamp=timestamp,
-        hit_mask=hit_mask,
-        feature_size=feature_size,
-        feature_bytes=feature_bytes,
-        waveform_bytes=bytes(waveform_words),
-        reconnect_mark=False,
+    reader = _TcpSentRawStreamReader(_OneShotSocket(packet), expected_send_mode=None)
+    return reader.read_frame()
+
+
+def _build_native_frame(
+    mode: int,
+    hit_mask: int,
+    event_count: int,
+    timestamp: int,
+    *,
+    format_version: int = 0,
+    crossing_fine: int = 0,
+    accept_fine: int = 0,
+    board_id: int = 0,
+    board_name: str = "dev1",
+):
+    """Build a :class:`MultiBoardFrame` from real wire bytes.
+
+    The packet is constructed with the production layout, then parsed back by
+    the stream reader so ``raw_packet``/``feature_bytes``/``waveform_bytes`` are
+    exactly what the capture path would produce.
+    """
+    packet = _build_tcp_sent_packet_v2(
+        mode,
+        hit_mask,
+        event_count,
+        format_version=format_version,
+        crossing_fine=crossing_fine,
+        accept_fine=accept_fine,
     )
+    packet = bytearray(packet)
+    packet[8:16] = timestamp.to_bytes(8, "big", signed=False)
+
+    class _OneShotSocket:
+        def __init__(self, blob: bytes) -> None:
+            self._blob = blob
+
+        def recv(self, size: int) -> bytes:
+            chunk, self._blob = self._blob[:size], self._blob[size:]
+            return chunk
+
+    reader = _TcpSentRawStreamReader(
+        _OneShotSocket(bytes(packet)), expected_send_mode=None
+    )
+    fields = reader.read_frame()
+    board = MultiBoardConfig(
+        board_id=board_id, name=board_name, ip="192.168.10.10", tcp_port=24
+    )
+    return frame_from_fields(fields, board, recv_unix_ns=0)
 
 
 def _bit_count(value: int) -> int:

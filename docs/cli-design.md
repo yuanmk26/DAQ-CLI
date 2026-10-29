@@ -205,8 +205,8 @@ Implementation note:
 - `single --decode-json` adds a best-effort online decode pipeline while keeping raw capture as the priority path
 - `single --watch-every N` adds a best-effort sampled waveform watch path while keeping raw capture as the priority path
 - `decode` provides offline packet-to-JSON decoding for saved raw event files
-- `multi` currently runs through the legacy `multi_board_acquire.py` script adapter
-- `multi --watch-waveforms` samples waveform-bearing packets from the legacy receive path and shows one board at a time with keyboard switching
+- `multi` runs through the native multi-board pipeline (`infrastructure/multi_board_acquire/`)
+- `multi --watch-waveforms` samples waveform-bearing packets from the receive path and shows one board at a time with keyboard switching
 
 ## 6. Monitor Commands
 
