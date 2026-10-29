@@ -16,7 +16,7 @@ from daq_cli.domain.tcm import TcmConfig
 class TcmServiceTests(unittest.TestCase):
     def _patched_service(self):
         profile = SimpleNamespace(
-            path=Path("profiles/example.yaml"),
+            path=Path("profiles/examples/example.yaml"),
             tcm={
                 "main": TcmConfig(name="main", ip="192.168.10.16", rbcp_port=4660),
             },
@@ -51,7 +51,7 @@ class TcmServiceTests(unittest.TestCase):
             service, "_resolve_tcm", return_value=(profile, tcm)
         ), patch.object(service, "_make_adapter", return_value=adapter):
             result = service.read_trigger_config(
-                tcm_name="main", profile_path="profiles/example.yaml"
+                tcm_name="main", profile_path="profiles/examples/example.yaml"
             )
 
         adapter.read_trigger_config.assert_called_once_with(tcm)
@@ -90,7 +90,7 @@ class TcmServiceTests(unittest.TestCase):
         ), patch.object(service, "_make_adapter", return_value=adapter):
             result = service.configure_trigger(
                 tcm_name="main",
-                profile_path="profiles/example.yaml",
+                profile_path="profiles/examples/example.yaml",
                 enable=True,
                 mask=0x01,
                 pulse_width=40,
@@ -141,7 +141,7 @@ class TcmServiceTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 service.configure_trigger(
                     tcm_name="main",
-                    profile_path="profiles/example.yaml",
+                    profile_path="profiles/examples/example.yaml",
                     enable=True,
                     mask=0x01,
                     pulse_width=40,
@@ -151,14 +151,14 @@ class TcmServiceTests(unittest.TestCase):
     def test_unknown_tcm_name_raises(self) -> None:
         service = TcmService()
         profile = SimpleNamespace(
-            path=Path("profiles/example.yaml"), tcm={}
+            path=Path("profiles/examples/example.yaml"), tcm={}
         )
         with patch.object(
             service._profile_service, "load_profile", return_value=profile
         ):
             with self.assertRaisesRegex(ValueError, "Unknown TCM 'ghost'"):
                 service.read_trigger_config(
-                    tcm_name="ghost", profile_path="profiles/example.yaml"
+                    tcm_name="ghost", profile_path="profiles/examples/example.yaml"
                 )
 
     def test_clear_trigger_sticky_delegates(self) -> None:
@@ -167,7 +167,7 @@ class TcmServiceTests(unittest.TestCase):
             service, "_resolve_tcm", return_value=(profile, tcm)
         ), patch.object(service, "_make_adapter", return_value=adapter):
             service.clear_trigger_sticky(
-                tcm_name="main", profile_path="profiles/example.yaml"
+                tcm_name="main", profile_path="profiles/examples/example.yaml"
             )
         adapter.clear_trigger_sticky.assert_called_once_with(tcm)
 
@@ -179,7 +179,7 @@ class TcmCliTests(unittest.TestCase):
         with patch.object(TcmService, "read_trigger_config") as read_trigger_config:
             read_trigger_config.return_value = SimpleNamespace(
                 tcm=TcmConfig(name="main", ip="192.168.10.16", rbcp_port=4660),
-                source_profile=Path("profiles/example.yaml"),
+                source_profile=Path("profiles/examples/example.yaml"),
                 enable=True,
                 mask=0x03,
                 pulse_width=32,
@@ -206,13 +206,13 @@ class TcmCliTests(unittest.TestCase):
                         "show",
                         "main",
                         "--profile",
-                        "profiles/example.yaml",
+                        "profiles/examples/example.yaml",
                     ],
                 )
 
         self.assertEqual(result.exit_code, 0, result.output)
         read_trigger_config.assert_called_once_with(
-            tcm_name="main", profile_path=Path("profiles/example.yaml")
+            tcm_name="main", profile_path=Path("profiles/examples/example.yaml")
         )
         self.assertIn("TCM Trigger Config", result.output)
         self.assertIn("0x03", result.output)
@@ -224,7 +224,7 @@ class TcmCliTests(unittest.TestCase):
         with patch.object(TcmService, "configure_trigger") as configure_trigger:
             configure_trigger.return_value = SimpleNamespace(
                 tcm=TcmConfig(name="main", ip="192.168.10.16", rbcp_port=4660),
-                source_profile=Path("profiles/example.yaml"),
+                source_profile=Path("profiles/examples/example.yaml"),
                 enable=True,
                 mask=0x01,
                 pulse_width=32,
@@ -251,14 +251,14 @@ class TcmCliTests(unittest.TestCase):
                             "25",
                             "--clear-sticky",
                             "--profile",
-                            "profiles/example.yaml",
+                            "profiles/examples/example.yaml",
                         ],
                     )
 
         self.assertEqual(result.exit_code, 0, result.output)
         configure_trigger.assert_called_once_with(
             tcm_name="main",
-            profile_path=Path("profiles/example.yaml"),
+            profile_path=Path("profiles/examples/example.yaml"),
             enable=True,
             mask=0x01,
             pulse_width=40,
@@ -270,7 +270,7 @@ class TcmCliTests(unittest.TestCase):
             group_n=(0, 0, 0, 0),
         )
         clear_sticky.assert_called_once_with(
-            tcm_name="main", profile_path=Path("profiles/example.yaml")
+            tcm_name="main", profile_path=Path("profiles/examples/example.yaml")
         )
         self.assertIn("TCM Trigger Config Written", result.output)
 
@@ -285,7 +285,7 @@ class TcmCliTests(unittest.TestCase):
                 "--mask",
                 "0x1FF",
                 "--profile",
-                "profiles/example.yaml",
+                "profiles/examples/example.yaml",
             ],
         )
         self.assertNotEqual(result.exit_code, 0)
@@ -302,7 +302,7 @@ class TcmCliTests(unittest.TestCase):
                 "--mask",
                 "not-a-number",
                 "--profile",
-                "profiles/example.yaml",
+                "profiles/examples/example.yaml",
             ],
         )
         self.assertNotEqual(result.exit_code, 0)

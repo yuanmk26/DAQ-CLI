@@ -148,7 +148,7 @@ class MeasureTcmLinkServiceTests(unittest.TestCase):
         from daq_cli.application.board_service import BoardService
 
         profile = SimpleNamespace(
-            path=Path("profiles/example.yaml"),
+            path=Path("profiles/examples/example.yaml"),
             legacy=SimpleNamespace(project_root=Path("legacy")),
         )
         device = SimpleNamespace(name="dev1")
@@ -175,7 +175,7 @@ class MeasureTcmLinkServiceTests(unittest.TestCase):
                 ) as calibrate:
                     result = service.measure_tcm_link(
                         device_name="dev1",
-                        profile_path="profiles/example.yaml",
+                        profile_path="profiles/examples/example.yaml",
                         seconds=1.0,
                     )
         calibrate.assert_called_once()
@@ -198,7 +198,7 @@ class MeasureTcmLinkServiceTests(unittest.TestCase):
                 ):
                     result = service.measure_tcm_link(
                         device_name="dev1",
-                        profile_path="profiles/example.yaml",
+                        profile_path="profiles/examples/example.yaml",
                         seconds=1.0,
                     )
         # send_mode 0 -> 1 -> 0; trigger 9 -> 7 -> 9; M21 re-armed 0 -> 1
@@ -226,7 +226,7 @@ class MeasureTcmLinkServiceTests(unittest.TestCase):
                 ):
                     service.measure_tcm_link(
                         device_name="dev1",
-                        profile_path="profiles/example.yaml",
+                        profile_path="profiles/examples/example.yaml",
                         seconds=1.0,
                     )
         self.assertEqual(writes, [])  # no register writes at all

@@ -4,7 +4,7 @@ All notable changes to `daq-cli` are documented in this file.
 
 Each version is tagged as `v<version>` on the `main` branch. The detailed
 snapshot of the v0.1.x line (commands, firmware contract, architecture,
-release flow) is archived in `docs/version-snapshot-v0.1.4.md`.
+release flow) is archived in `docs/archive/version-snapshot-v0.1.4.md`.
 
 ## [v0.4.0] - 2026-10-28
 
@@ -43,6 +43,18 @@ release flow) is archived in `docs/version-snapshot-v0.1.4.md`.
   `decode_tcp_sent_packet`，删除了 `_legacy_frame_to_tcp_sent_packet`。
 - `multi_board_decode.py` 新增 `INDEX_ENTRY_FMT`/`INDEX_ENTRY_SIZE`，writer
   与 reader 共用同一份 struct 定义。
+- 示例 profile 移到 `profiles/examples/`；`daq profile init` 使用的
+  `profile_templates/example.template.yaml` 更新为四板生产模板；删除失效的
+  `legacy.project_root` 配置。
+- 文档归档：已完成计划与 v0.1.x 快照移到 `docs/archive/`，实测笔记移到
+  `docs/hardware-notes/`。
+
+### Removed
+
+- `daq wave` 占位子命令（永远返回 "Not implemented yet"）；实际波形查看
+  使用 `daq monitor wave` 或 GUI 监视 tab。
+- 根目录三个历史 PyInstaller spec、旧版 `dist/` 产物与测试产生的采集目录。
+  0.3.2 发布物保留用于回滚。
 
 ### Fixed
 
@@ -89,7 +101,7 @@ TCM 触发链路修复与 GUI 配置流程改进（四板联调实测驱动）�
 - `profiles/example.template.yaml` 更新为四板生产模板（dev1-4 + TCM、
   `four_board` 组、`adc_length: 256`、`trigger_position: 74`、timestamp
   聚合放行无 ack）。
-- 陷阱文档 `docs/2026-08-12_tcm-link-config-traps.md` 补充实测字节序与
+- 陷阱文档 `docs/hardware-notes/2026-08-12_tcm-link-config-traps.md` 补充实测字节序与
   Trigger_position 标定表。
 
 ## [v0.3.0] - 2026-08-10

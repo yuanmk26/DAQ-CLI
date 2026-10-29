@@ -208,7 +208,7 @@ class BoardTab:
         grid.pack(fill=tk.X)
         self._m9_model_var = tk.StringVar(value="9")
         # 74 = 实测标定值：窗口 256 采样（512 值 A/B）下信号居中；
-        # 换链路拓扑后需重新标定（见 docs/2026-08-12_tcm-link-config-traps.md §1.5）
+        # 换链路拓扑后需重新标定（见 docs/hardware-notes/2026-08-12_tcm-link-config-traps.md §1.5）
         self._m9_position_var = tk.StringVar(value="74")
         self._m9_start_delay_var = tk.StringVar(value="0")
         ttk.Label(grid, text="0x10 Trigger_model").grid(row=0, column=0, sticky="w")

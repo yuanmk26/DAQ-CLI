@@ -163,5 +163,7 @@ Full reference: `docs/firmware-compatibility.md`. Key rules:
 - `docs/deploy-exe.md` — standalone exe deployment (profile auto-discovery, paths)
 - `docs/architecture.md` / `docs/cli-design.md` — design intent, layering, command design
 - `docs/firmware-compatibility.md` — firmware contract details and gaps
-- `docs/version-snapshot-v0.1.4.md` — archived snapshot of the v0.1.x line
+- `docs/hardware-notes/` — dated real-hardware findings (TCM byte order,
+  alignment traps, muon-imaging test results)
+- `docs/archive/` — completed plans and the v0.1.x snapshot
 - `CHANGELOG.md` — version history

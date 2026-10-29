@@ -8,10 +8,11 @@
 **方案 A：exe（推荐，免 Python）**
 
 ```text
-1. 拷贝 daq-gui-0.3.1.exe 和 example.template.yaml 到新电脑
-2. 把 example.template.yaml 按需改 IP（默认 192.168.10.10/.12/.13/.14 + TCM .16）
-3. 双击 daq-gui-0.3.1.exe
-4. 启动后点顶部 [浏览] 选择 profile yaml 文件 → 加载
+1. 拷贝 daq-gui-0.4.0.exe + profiles/daq.yaml（或整个 daq-gui-0.4.0-win64 目录）
+   到新电脑
+2. 按需修改 profiles/daq.yaml 里的 IP（默认 192.168.10.10/.12/.13/.14 + TCM .16）
+3. 双击 daq-gui-0.4.0.exe
+4. 启动后自动加载 profiles/daq.yaml；若未加载，点顶部 [加载 Profile] 手动选择
 ```
 
 **方案 B：zip（Python 3.12）**
@@ -113,12 +114,12 @@ TCM tab → show → 看 sticky/最近触发通道；或用示波器看 M21 脉�
 | 现象 | 原因 | 处理 |
 |---|---|---|
 | 标定采到全 0 | 固件重烧后 ADC/时钟未配 | 回到 1.1 |
-| 应用全部后 TCM 无触发 | 阈值全 0 / 字节序旧版 | 重新标定；确认用 v0.3.1 包 |
+| 应用全部后 TCM 无触发 | 阈值全 0 / 字节序旧版 | 重新标定；确认用 v0.4.0 包 |
 | TCM show 无 sticky | M21 未连 TCM / 阈值没穿越 | 查线缆；看板卡 tab 自动标定值 |
 | 多板采集卡在 align | ack 不全但放行没开 | 勾选 ☑ 无 ack 放行 |
 | 信号不在窗口中间 | Trigger_position 不对 | 换拓扑后重新标定（见 traps §1.5） |
 
 ## 6. 参考
 
-- 配置陷阱细节（字节序/标定表）：`docs/2026-08-12_tcm-link-config-traps.md`
+- 配置陷阱细节（字节序/标定表）：`docs/hardware-notes/2026-08-12_tcm-link-config-traps.md`
 - CLI 命令用法：`docs/usage.md`

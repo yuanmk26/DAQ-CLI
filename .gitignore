@@ -42,7 +42,13 @@ tmp*/
 temp/
 tmp_test_outputs/
 tmp_test_decode/
-.tmp-build/
+.tmp-*/
+
+# One-off local probe scripts
+tmp_*.py
+
+# Real acquisition samples (kept locally, not shipped in git)
+samples/
 
 # Waveform and acquisition scratch data
 captures/
@@ -51,6 +57,7 @@ artifacts/
 # PyInstaller executable builds
 dist-exe/
 .tmp-pyinstaller/
+/*.spec
 
 # Local profile overrides
 profiles/*.local.yaml
@@ -58,4 +65,4 @@ profiles/*.private.yaml
 
 # Stray vendored-script test run outputs
 tests/.daq_cli_tmp/
-tests/two_board_*/
+tests/*_board_*/

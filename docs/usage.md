@@ -98,7 +98,7 @@ Important fields:
 Example command with explicit profile:
 
 ```bash
-daq board info dev1 --profile profiles/example.yaml
+daq board info dev1 --profile profiles/examples/example.yaml
 ```
 
 ## 5. Inspecting the Profile
@@ -106,8 +106,8 @@ daq board info dev1 --profile profiles/example.yaml
 Use these commands to inspect and validate a profile:
 
 ```bash
-daq profile show --profile profiles/example.yaml
-daq profile validate --profile profiles/example.yaml
+daq profile show --profile profiles/examples/example.yaml
+daq profile validate --profile profiles/examples/example.yaml
 ```
 
 Note:
@@ -120,7 +120,7 @@ Note:
 Use `board info` to confirm that the CLI resolves the logical device correctly:
 
 ```bash
-daq board info dev1 --profile profiles/example.yaml
+daq board info dev1 --profile profiles/examples/example.yaml
 ```
 
 This command currently shows:
@@ -139,7 +139,7 @@ This is a profile-backed command. It does not talk to hardware yet.
 Use `board sysmon` to read telemetry from the board:
 
 ```bash
-daq board sysmon dev1 --profile profiles/example.yaml
+daq board sysmon dev1 --profile profiles/examples/example.yaml
 ```
 
 This command uses the legacy `lib/sysmon.py` path and currently reports:
@@ -162,7 +162,7 @@ Use `board config` to run the board configuration flow through the legacy script
 Basic usage:
 
 ```bash
-daq board config dev1 --profile profiles/example.yaml
+daq board config dev1 --profile profiles/examples/example.yaml
 ```
 
 Default behavior:
@@ -225,13 +225,13 @@ Important default behavior:
 To explicitly keep external trigger disabled:
 
 ```bash
-daq board config dev1 --no-ext-trigger --profile profiles/example.yaml
+daq board config dev1 --no-ext-trigger --profile profiles/examples/example.yaml
 ```
 
 To explicitly keep timestamp clean disabled:
 
 ```bash
-daq board config dev1 --no-timestamp-clean --profile profiles/example.yaml
+daq board config dev1 --no-timestamp-clean --profile profiles/examples/example.yaml
 ```
 
 Example with external trigger enabled:
@@ -253,7 +253,7 @@ daq board config dev1 --send-start-delay-us 100
 Example with send mode:
 
 ```bash
-daq board config dev1 --send-mode 1 --profile profiles/example.yaml
+daq board config dev1 --send-mode 1 --profile profiles/examples/example.yaml
 ```
 
 The command prints:
@@ -273,7 +273,7 @@ Use `acquire single` to capture mode-2 TCP packets from one device.
 Basic usage:
 
 ```bash
-daq acquire single dev1 --profile profiles/example.yaml
+daq acquire single dev1 --profile profiles/examples/example.yaml
 ```
 
 You can move the common `acquire single` defaults into the profile to keep commands short:
@@ -321,7 +321,7 @@ defaults:
         dir: out/logs
 ```
 
-When these keys are present, `daq acquire single dev1 --profile profiles/example.yaml` and `daq acquire multi two_board --profile profiles/example.yaml` will use them automatically, and any explicit CLI option still overrides the profile value.
+When these keys are present, `daq acquire single dev1 --profile profiles/examples/example.yaml` and `daq acquire multi two_board --profile profiles/examples/example.yaml` will use them automatically, and any explicit CLI option still overrides the profile value.
 
 Useful options:
 
@@ -346,12 +346,12 @@ Profile-driven output routing:
 Examples:
 
 ```bash
-daq acquire single dev1 --events 100 --profile profiles/example.yaml
-daq acquire single dev1 --events 1000 --timeout 10 --profile profiles/example.yaml
-daq acquire single dev1 --events 200 --output-dir out/single --profile profiles/example.yaml
-daq acquire single dev1 --events 100 --decode-json --profile profiles/example.yaml
-daq acquire single dev1 --events 1000 --watch-every 100 --profile profiles/example.yaml
-daq acquire single dev1 --events 1000 --progress-every 50 --profile profiles/example.yaml
+daq acquire single dev1 --events 100 --profile profiles/examples/example.yaml
+daq acquire single dev1 --events 1000 --timeout 10 --profile profiles/examples/example.yaml
+daq acquire single dev1 --events 200 --output-dir out/single --profile profiles/examples/example.yaml
+daq acquire single dev1 --events 100 --decode-json --profile profiles/examples/example.yaml
+daq acquire single dev1 --events 1000 --watch-every 100 --profile profiles/examples/example.yaml
+daq acquire single dev1 --events 1000 --progress-every 50 --profile profiles/examples/example.yaml
 ```
 
 Current behavior:
@@ -433,8 +433,8 @@ The CLI now supports three levels of read-only configuration inspection.
 These commands read meaningful configuration groups instead of raw register addresses:
 
 ```bash
-daq board trigger-show dev1 --profile profiles/example.yaml
-daq board tcp-mode2-show dev1 --profile profiles/example.yaml
+daq board trigger-show dev1 --profile profiles/examples/example.yaml
+daq board tcp-mode2-show dev1 --profile profiles/examples/example.yaml
 ```
 
 `trigger-show` currently reports:
@@ -457,8 +457,8 @@ daq board tcp-mode2-show dev1 --profile profiles/example.yaml
 To write the current board `send_mode` directly:
 
 ```bash
-daq board send-mode-set dev1 1 --profile profiles/example.yaml
-daq board tcp-mode2-show dev1 --profile profiles/example.yaml
+daq board send-mode-set dev1 1 --profile profiles/examples/example.yaml
+daq board tcp-mode2-show dev1 --profile profiles/examples/example.yaml
 ```
 
 Supported modes:
@@ -483,7 +483,7 @@ board can return a wide MOSI pulse that acts as the acquisition trigger
 (`Trigger_model = 9`). Read the current configuration without writing:
 
 ```bash
-daq board tcm-link-show dev1 --profile profiles/example.yaml
+daq board tcm-link-show dev1 --profile profiles/examples/example.yaml
 ```
 
 `tcm-link-show` reports:
@@ -501,7 +501,7 @@ Write the configuration with readback verification:
 daq board tcm-link-config dev1 \
   --mask 0x0003 --polarity 0x0002 --thr 2700,1800 \
   --debounce 200 --width 20 --enable \
-  --profile profiles/example.yaml
+  --profile profiles/examples/example.yaml
 ```
 
 Options:
@@ -552,14 +552,14 @@ coincidence mode with all groups disabled.
 Read the current configuration and status:
 
 ```bash
-daq tcm show main --profile profiles/example.yaml
+daq tcm show main --profile profiles/examples/example.yaml
 ```
 
 Write the configuration with readback verification:
 
 ```bash
 daq tcm config main --mask 0x01 --width 32 --debounce 20 --enable \
-  --clear-sticky --profile profiles/example.yaml
+  --clear-sticky --profile profiles/examples/example.yaml
 ```
 
 Options:
@@ -603,7 +603,7 @@ TCM-link integration notes:
 To view the most important trigger and TCP mode-2 settings together:
 
 ```bash
-daq board config-show dev1 --profile profiles/example.yaml
+daq board config-show dev1 --profile profiles/examples/example.yaml
 ```
 
 This is the recommended command for routine verification after configuration.
@@ -613,8 +613,8 @@ This is the recommended command for routine verification after configuration.
 For low-level debugging, a raw register-read command is also available:
 
 ```bash
-daq board reg-read dev1 0x10 --len 1 --profile profiles/example.yaml
-daq board reg-read dev1 0x11 --len 8 --profile profiles/example.yaml
+daq board reg-read dev1 0x10 --len 1 --profile profiles/examples/example.yaml
+daq board reg-read dev1 0x11 --len 8 --profile profiles/examples/example.yaml
 ```
 
 Recommended usage:
@@ -630,7 +630,7 @@ group defined in the profile.
 Basic usage:
 
 ```bash
-daq acquire multi two_board --profile profiles/example.yaml
+daq acquire multi two_board --profile profiles/examples/example.yaml
 ```
 
 Useful options:
@@ -696,7 +696,7 @@ Use `monitor wave` to open a 16-channel waveform monitor window.
 Basic live usage:
 
 ```bash
-daq monitor wave dev1 --profile profiles/example.yaml
+daq monitor wave dev1 --profile profiles/examples/example.yaml
 ```
 
 Important behavior:
@@ -770,13 +770,13 @@ new dependencies (tkinter ships with Python on Windows).
 Launch it:
 
 ```bash
-daq-gui --profile profiles/example.yaml
+daq-gui --profile profiles/examples/example.yaml
 ```
 
 or from the CLI:
 
 ```bash
-daq gui --profile profiles/example.yaml
+daq gui --profile profiles/examples/example.yaml
 ```
 
 > Prefer `daq-gui`: it selects the TkAgg matplotlib backend before any other
@@ -840,7 +840,7 @@ log panel keeps the last 5000 lines.
    ack 物理链路未全通时不会卡在 align）。
 
 陷阱细节（阈值字节序 0x45=低字节、hit 沿需 enable=1 时发生、
-Trigger_position 标定表）见 `docs/2026-08-12_tcm-link-config-traps.md`。
+Trigger_position 标定表）见 `docs/hardware-notes/2026-08-12_tcm-link-config-traps.md`。
 
 ## 14. Suggested Workflow
 
@@ -856,21 +856,21 @@ A simple single-board workflow looks like this:
 Example:
 
 ```bash
-daq profile validate --profile profiles/example.yaml
-daq board info dev1 --profile profiles/example.yaml
-daq board sysmon dev1 --profile profiles/example.yaml
-daq board config dev1 --profile profiles/example.yaml
-daq board config-show dev1 --profile profiles/example.yaml
-daq acquire single dev1 --events 100 --profile profiles/example.yaml
+daq profile validate --profile profiles/examples/example.yaml
+daq board info dev1 --profile profiles/examples/example.yaml
+daq board sysmon dev1 --profile profiles/examples/example.yaml
+daq board config dev1 --profile profiles/examples/example.yaml
+daq board config-show dev1 --profile profiles/examples/example.yaml
+daq acquire single dev1 --events 100 --profile profiles/examples/example.yaml
 ```
 
 For a synchronized multi-board run:
 
 ```bash
-daq profile validate --profile profiles/example.yaml
-daq board config dev1 --profile profiles/example.yaml
-daq board config dev2 --profile profiles/example.yaml
-daq acquire multi two_board --profile profiles/example.yaml
+daq profile validate --profile profiles/examples/example.yaml
+daq board config dev1 --profile profiles/examples/example.yaml
+daq board config dev2 --profile profiles/examples/example.yaml
+daq acquire multi two_board --profile profiles/examples/example.yaml
 ```
 
 ## 15. Current Limitations

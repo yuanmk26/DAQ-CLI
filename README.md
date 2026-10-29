@@ -10,9 +10,10 @@ The repository currently contains:
 - Architecture and command design documents in `docs/`
 - A user guide in `docs/usage.md`
 - Firmware compatibility notes in `docs/firmware-compatibility.md`
-- A Python package skeleton under `src/`
+- A Python package under `src/` with layered architecture
 - Profile-driven device loading
-- Legacy-script adapters for board telemetry, board configuration, and acquisition
+- Native multi-board acquisition; legacy-script adapters for board telemetry,
+  board configuration, and the TCM chain
 - Working command paths:
   - `daq board info <device>`
   - `daq board sysmon <device>`
@@ -33,7 +34,6 @@ The repository currently contains:
 Not implemented yet:
 
 - additional `daq monitor ...` commands
-- `daq wave ...`
 - `daq shell`
 
 ## Quick start
@@ -67,12 +67,12 @@ To build both the GUI and the CLI as one-file executables instead:
 Outputs land in `dist-exe\` (`daq-gui.exe` + `daq.exe`).
 
 ```bash
-dist\daq-gui-0.4.0.exe --profile profiles\example.tcm-trigger.yaml
+dist\daq-gui-0.4.0.exe --profile profiles\examples\example.tcm-trigger.yaml
 dist-exe\daq.exe --help
 ```
 
 A ready-to-use TCM trigger-link example profile ships at
-`profiles/example.tcm-trigger.yaml` (3 ADC boards + TCM, mode 9 workflow,
+`profiles/examples/example.tcm-trigger.yaml` (3 ADC boards + TCM, mode 9 workflow,
 per-type output directories, step-by-step configuration notes).
 
 Install from a GitHub Releases offline package on a new PC:
@@ -80,7 +80,7 @@ Install from a GitHub Releases offline package on a new PC:
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
-python -m pip install --no-index --find-links wheelhouse daq_cli-0.1.0-py3-none-any.whl
+python -m pip install --no-index --find-links wheelhouse daq_cli-<version>-py3-none-any.whl
 daq --help
 daq profile init .\lab-pc-01.yaml
 ```
@@ -93,30 +93,30 @@ hardware-specific values there.
 Run the example command:
 
 ```bash
-daq board info dev1 --profile profiles/example.yaml
+daq board info dev1 --profile profiles/examples/example.yaml
 ```
 
 Read telemetry:
 
 ```bash
-daq board sysmon dev1 --profile profiles/example.yaml
+daq board sysmon dev1 --profile profiles/examples/example.yaml
 ```
 
 Run configurable board setup:
 
 ```bash
-daq board config dev1 --profile profiles/example.yaml
-daq board config dev1 --adc --clock --trigger --tcp-mode2 --profile profiles/example.yaml
-daq board config dev1 --trigger-mode 1 --trigger-position 40 --threshold-1 1950 --threshold-2 2400 --threshold-3 2300 --threshold-4 2300 --profile profiles/example.yaml
+daq board config dev1 --profile profiles/examples/example.yaml
+daq board config dev1 --adc --clock --trigger --tcp-mode2 --profile profiles/examples/example.yaml
+daq board config dev1 --trigger-mode 1 --trigger-position 40 --threshold-1 1950 --threshold-2 2400 --threshold-3 2300 --threshold-4 2300 --profile profiles/examples/example.yaml
 ```
 
 Read configuration back without writing:
 
 ```bash
-daq board trigger-show dev1 --profile profiles/example.yaml
-daq board tcp-mode2-show dev1 --profile profiles/example.yaml
-daq board config-show dev1 --profile profiles/example.yaml
-daq board reg-read dev1 0x10 --len 1 --profile profiles/example.yaml
+daq board trigger-show dev1 --profile profiles/examples/example.yaml
+daq board tcp-mode2-show dev1 --profile profiles/examples/example.yaml
+daq board config-show dev1 --profile profiles/examples/example.yaml
+daq board reg-read dev1 0x10 --len 1 --profile profiles/examples/example.yaml
 ```
 
 Firmware notes:
@@ -134,15 +134,15 @@ Firmware notes:
 Capture single-board data:
 
 ```bash
-daq acquire single dev1 --events 100 --profile profiles/example.yaml
+daq acquire single dev1 --events 100 --profile profiles/examples/example.yaml
 ```
 
 Run multi-board acquisition:
 
 ```bash
-daq acquire multi two_board --profile profiles/example.yaml
-daq acquire multi two_board --aggregation-key event_count --allow-start-without-ack --profile profiles/example.yaml
-daq acquire multi two_board --decode-json --profile profiles/example.yaml
+daq acquire multi two_board --profile profiles/examples/example.yaml
+daq acquire multi two_board --aggregation-key event_count --allow-start-without-ack --profile profiles/examples/example.yaml
+daq acquire multi two_board --decode-json --profile profiles/examples/example.yaml
 ```
 
 Configure capture outputs in the profile with independent `raw`, `json`, `text`,
@@ -173,7 +173,7 @@ event dumps enabled.
 Preview or watch waveforms:
 
 ```bash
-daq monitor wave dev1 --profile profiles/example.yaml
+daq monitor wave dev1 --profile profiles/examples/example.yaml
 daq monitor wave demo --demo
 daq monitor wave replay --replay src/daq_cli/monitoring_samples/replay_dump.txt
 daq monitor multi-demo

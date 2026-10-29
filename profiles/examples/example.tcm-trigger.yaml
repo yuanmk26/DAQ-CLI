@@ -118,6 +118,3 @@ defaults:
 # 4. 验证：
 #      daq tcm show main --profile profiles/example.tcm-trigger.yaml
 #      # mask/trig_sticky/TRG_CHAN：最近一次触发来自哪块板
-
-legacy:
-  project_root: E:\projects\1-hardware\FDU-ADC-250M-16ch

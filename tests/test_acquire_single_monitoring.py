@@ -93,7 +93,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
             _build_tcp_sent_packet(send_mode=2, hit_mask=0x0003, event_count=2),
         ]
         progress_updates = []
-        runner = LegacySingleCaptureRunner("legacy")
+        runner = LegacySingleCaptureRunner()
 
         base_dir = self._make_workspace_temp_dir()
         try:
@@ -143,7 +143,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
             _build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=1),
             _build_tcp_sent_packet(send_mode=1, hit_mask=0x0FFF, event_count=2),
         ]
-        runner = LegacySingleCaptureRunner("legacy")
+        runner = LegacySingleCaptureRunner()
         base_dir = self._make_workspace_temp_dir()
         try:
             with patch.object(
@@ -187,7 +187,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
             _build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=1),
             _build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=2),
         ]
-        runner = LegacySingleCaptureRunner("legacy")
+        runner = LegacySingleCaptureRunner()
         base_dir = self._make_workspace_temp_dir()
         try:
             with patch.object(
@@ -242,7 +242,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
             _build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=1),
             _build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=2),
         ]
-        runner = LegacySingleCaptureRunner("legacy")
+        runner = LegacySingleCaptureRunner()
         base_dir = self._make_workspace_temp_dir()
         try:
             with patch.object(
@@ -274,7 +274,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
 
     def test_parallel_runner_supports_custom_output_directories(self) -> None:
         packets = [_build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=1)]
-        runner = LegacySingleCaptureRunner("legacy")
+        runner = LegacySingleCaptureRunner()
         base_dir = self._make_workspace_temp_dir()
         raw_dir = base_dir / "exports" / "raw"
         json_dir = base_dir / "exports" / "json"
@@ -324,7 +324,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
 
     def test_parallel_runner_decode_failure_keeps_raw_capture_and_counts_error(self) -> None:
         packets = [_build_tcp_sent_packet(send_mode=1, hit_mask=0xFFFF, event_count=1)]
-        runner = LegacySingleCaptureRunner("legacy")
+        runner = LegacySingleCaptureRunner()
         base_dir = self._make_workspace_temp_dir()
         try:
             with patch.object(
@@ -372,7 +372,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
             _build_tcp_sent_packet(send_mode=1, hit_mask=0xFFFF, event_count=1),
             _build_tcp_sent_packet(send_mode=1, hit_mask=0xFFFF, event_count=2),
         ]
-        runner = LegacySingleCaptureRunner("legacy")
+        runner = LegacySingleCaptureRunner()
         base_dir = self._make_workspace_temp_dir()
         try:
             with patch.object(
@@ -416,7 +416,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
             _build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=3),
             _build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=4),
         ]
-        runner = LegacySingleCaptureRunner("legacy")
+        runner = LegacySingleCaptureRunner()
         base_dir = self._make_workspace_temp_dir()
         try:
             with patch.object(
@@ -458,7 +458,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
             _build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=3),
             _build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=4),
         ]
-        runner = LegacySingleCaptureRunner("legacy")
+        runner = LegacySingleCaptureRunner()
         base_dir = self._make_workspace_temp_dir()
         sampled: list[bytes] = []
         try:
@@ -500,7 +500,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
             _build_tcp_sent_packet(send_mode=1, hit_mask=0x00FF, event_count=i)
             for i in range(1, 50)
         ]
-        runner = LegacySingleCaptureRunner("legacy")
+        runner = LegacySingleCaptureRunner()
         base_dir = self._make_workspace_temp_dir()
         cancel_event = threading.Event()
         try:
@@ -530,7 +530,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
             _build_tcp_sent_packet(send_mode=2, hit_mask=0x0001, event_count=1),
             _build_tcp_sent_packet(send_mode=2, hit_mask=0x0003, event_count=2),
         ]
-        runner = LegacySingleCaptureRunner("legacy")
+        runner = LegacySingleCaptureRunner()
 
         base_dir = self._make_workspace_temp_dir()
         try:
@@ -572,7 +572,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
 
     def test_acquire_service_emits_progress_with_positive_rate(self) -> None:
         profile = SimpleNamespace(
-            path=Path("profiles/example.yaml"),
+            path=Path("profiles/examples/example.yaml"),
             devices={"dev1": SimpleNamespace(name="dev1")},
             defaults={"output_dir": "out"},
             legacy=SimpleNamespace(project_root=Path("legacy")),
@@ -625,7 +625,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                     runner_cls.return_value.capture_single.side_effect = fake_capture_single
                     result = service.capture_single(
                         device_name="dev1",
-                        profile_path="profiles/example.yaml",
+                        profile_path="profiles/examples/example.yaml",
                         events=2,
                         timeout_s=1.0,
                         progress_callback=progress_updates.append,
@@ -658,7 +658,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         )
         result_payload = SingleAcquireResult(
             device=SimpleNamespace(name="dev1"),
-            source_profile=Path("profiles/example.yaml"),
+            source_profile=Path("profiles/examples/example.yaml"),
             output_base_dir=Path("out/single"),
             run_output_dir=Path("out/single/20260606_201703"),
             requested_events=10,
@@ -695,7 +695,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                     "1",
                     "--decode-json",
                     "--profile",
-                    "profiles/example.yaml",
+                    "profiles/examples/example.yaml",
                 ],
             )
 
@@ -715,7 +715,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         runner = CliRunner()
         result_payload = SingleAcquireResult(
             device=SimpleNamespace(name="dev1"),
-            source_profile=Path("profiles/example.yaml"),
+            source_profile=Path("profiles/examples/example.yaml"),
             output_base_dir=Path("out/single"),
             run_output_dir=Path("out/single/20260606_201703"),
             requested_events=10,
@@ -762,7 +762,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                     "--progress-every",
                     "5",
                     "--profile",
-                    "profiles/example.yaml",
+                    "profiles/examples/example.yaml",
                 ],
             )
 
@@ -788,7 +788,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         )
         result_payload = SingleAcquireResult(
             device=SimpleNamespace(name="dev1"),
-            source_profile=Path("profiles/example.yaml"),
+            source_profile=Path("profiles/examples/example.yaml"),
             output_base_dir=Path("out/single"),
             run_output_dir=Path("out/single/20260606_201703"),
             requested_events=25,
@@ -817,7 +817,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                         "single",
                         "dev1",
                         "--profile",
-                        "profiles/example.yaml",
+                        "profiles/examples/example.yaml",
                     ],
                 )
 
@@ -847,7 +847,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         result_payload = SimpleNamespace(
             group=SimpleNamespace(name="two_board"),
             devices=[SimpleNamespace(name="dev1"), SimpleNamespace(name="dev2")],
-            source_profile=Path("profiles/example.yaml"),
+            source_profile=Path("profiles/examples/example.yaml"),
             output_base_dir=Path("out/multi"),
             run_output_dir=Path("out/multi/two_board_20260607_220846"),
             aggregation_key="event_count",
@@ -881,7 +881,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                         "multi",
                         "two_board",
                         "--profile",
-                        "profiles/example.yaml",
+                        "profiles/examples/example.yaml",
                     ],
                 )
 
@@ -901,7 +901,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         result_payload = SimpleNamespace(
             group=SimpleNamespace(name="two_board"),
             devices=[SimpleNamespace(name="dev1"), SimpleNamespace(name="dev2")],
-            source_profile=Path("profiles/example.yaml"),
+            source_profile=Path("profiles/examples/example.yaml"),
             output_base_dir=Path("out/multi"),
             run_output_dir=Path("out/multi/two_board_20260607_220846"),
             aggregation_key="event_count",
@@ -935,7 +935,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                     "--watch-waveforms",
                     "--keep-running-after-watch-close",
                     "--profile",
-                    "profiles/example.yaml",
+                    "profiles/examples/example.yaml",
                 ],
             )
 
@@ -950,7 +950,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         result_payload = SimpleNamespace(
             group=SimpleNamespace(name="two_board"),
             devices=[SimpleNamespace(name="dev1"), SimpleNamespace(name="dev2")],
-            source_profile=Path("profiles/example.yaml"),
+            source_profile=Path("profiles/examples/example.yaml"),
             output_base_dir=Path("out/multi"),
             run_output_dir=Path("out/multi/two_board_20260607_220846"),
             aggregation_key="timestamp",
@@ -983,7 +983,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                     "two_board",
                     "--decode-json",
                     "--profile",
-                    "profiles/example.yaml",
+                    "profiles/examples/example.yaml",
                 ],
             )
 
@@ -1015,7 +1015,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         )
         result_payload = SingleAcquireResult(
             device=SimpleNamespace(name="dev1"),
-            source_profile=Path("profiles/example.yaml"),
+            source_profile=Path("profiles/examples/example.yaml"),
             output_base_dir=Path("out/single"),
             run_output_dir=Path("out/single/20260606_201703"),
             requested_events=10,
@@ -1044,7 +1044,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                         "single",
                         "dev1",
                         "--profile",
-                        "profiles/example.yaml",
+                        "profiles/examples/example.yaml",
                     ],
                 )
 
@@ -1074,7 +1074,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         result_payload = SimpleNamespace(
             group=SimpleNamespace(name="two_board"),
             devices=[SimpleNamespace(name="dev1"), SimpleNamespace(name="dev2")],
-            source_profile=Path("profiles/example.yaml"),
+            source_profile=Path("profiles/examples/example.yaml"),
             output_base_dir=Path("out/multi"),
             run_output_dir=Path("out/multi/two_board_20260607_220846"),
             aggregation_key="timestamp",
@@ -1109,7 +1109,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                         "two_board",
                         "--raw-only",
                         "--profile",
-                        "profiles/example.yaml",
+                        "profiles/examples/example.yaml",
                     ],
                 )
 
@@ -1123,7 +1123,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
 
     def test_acquire_service_multi_uses_runner_decode_results(self) -> None:
         profile = SimpleNamespace(
-            path=Path("profiles/example.yaml"),
+            path=Path("profiles/examples/example.yaml"),
             devices={
                 "dev1": SimpleNamespace(
                     name="dev1", ip="192.168.10.10", tcp_port=24, board_id=0
@@ -1169,7 +1169,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                 )
                 result = service.capture_multi(
                     group_name="two_board",
-                    profile_path="profiles/example.yaml",
+                    profile_path="profiles/examples/example.yaml",
                     decode_json=True,
                 )
 
@@ -1186,7 +1186,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         runner = CliRunner()
         result_payload = SingleAcquireResult(
             device=SimpleNamespace(name="dev1"),
-            source_profile=Path("profiles/example.yaml"),
+            source_profile=Path("profiles/examples/example.yaml"),
             output_base_dir=Path("out/single"),
             run_output_dir=Path("out/single/20260606_201703"),
             requested_events=10,
@@ -1215,7 +1215,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                     "--events",
                     "10",
                     "--profile",
-                    "profiles/example.yaml",
+                    "profiles/examples/example.yaml",
                 ],
             )
 
@@ -1432,7 +1432,7 @@ class OutputsConfigDrivesDecodeTests(unittest.TestCase):
         from daq_cli.domain.device import DeviceConfig
 
         profile = SimpleNamespace(
-            path=Path("profiles/example.yaml"),
+            path=Path("profiles/examples/example.yaml"),
             defaults={},
             devices={
                 "dev1": DeviceConfig(
@@ -1502,7 +1502,7 @@ class OutputsConfigDrivesDecodeTests(unittest.TestCase):
         )
         service.capture_single(
             device_name="dev1",
-            profile_path="profiles/example.yaml",
+            profile_path="profiles/examples/example.yaml",
             events=10,
             timeout_s=5.0,
             outputs=outputs,
@@ -1517,7 +1517,7 @@ class OutputsConfigDrivesDecodeTests(unittest.TestCase):
         service, captured = self._service_and_profile()
         service.capture_single(
             device_name="dev1",
-            profile_path="profiles/example.yaml",
+            profile_path="profiles/examples/example.yaml",
             events=10,
             timeout_s=5.0,
         )

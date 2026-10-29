@@ -16,7 +16,7 @@ from daq_cli.cli.app import app
 class BoardSendModeTests(unittest.TestCase):
     def test_set_send_mode_writes_and_reads_back(self) -> None:
         profile = SimpleNamespace(
-            path=Path("profiles/example.yaml"),
+            path=Path("profiles/examples/example.yaml"),
             legacy=SimpleNamespace(project_root=Path("legacy")),
         )
         device = SimpleNamespace(name="dev1")
@@ -28,7 +28,7 @@ class BoardSendModeTests(unittest.TestCase):
             with patch.object(service, "_make_adapter", return_value=adapter):
                 result = service.set_send_mode(
                     device_name="dev1",
-                    profile_path="profiles/example.yaml",
+                    profile_path="profiles/examples/example.yaml",
                     send_mode=1,
                 )
 
@@ -46,7 +46,7 @@ class BoardSendModeTests(unittest.TestCase):
 
     def test_set_send_mode_raises_on_readback_mismatch(self) -> None:
         profile = SimpleNamespace(
-            path=Path("profiles/example.yaml"),
+            path=Path("profiles/examples/example.yaml"),
             legacy=SimpleNamespace(project_root=Path("legacy")),
         )
         device = SimpleNamespace(name="dev1")
@@ -59,13 +59,13 @@ class BoardSendModeTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     service.set_send_mode(
                         device_name="dev1",
-                        profile_path="profiles/example.yaml",
+                        profile_path="profiles/examples/example.yaml",
                         send_mode=1,
                     )
 
     def test_configure_board_with_send_mode_writes_and_reads_back(self) -> None:
         profile = SimpleNamespace(
-            path=Path("profiles/example.yaml"),
+            path=Path("profiles/examples/example.yaml"),
             legacy=SimpleNamespace(project_root=Path("legacy")),
         )
         device = SimpleNamespace(name="dev1")
@@ -81,7 +81,7 @@ class BoardSendModeTests(unittest.TestCase):
             with patch("daq_cli.application.board_service.LegacyBoardAdapter", return_value=adapter):
                 result = service.configure_board(
                     device_name="dev1",
-                    profile_path="profiles/example.yaml",
+                    profile_path="profiles/examples/example.yaml",
                     options=BoardConfigOptions(send_mode=1),
                 )
 
@@ -95,7 +95,7 @@ class BoardSendModeTests(unittest.TestCase):
 
     def test_configure_board_without_send_mode_skips_send_mode_write(self) -> None:
         profile = SimpleNamespace(
-            path=Path("profiles/example.yaml"),
+            path=Path("profiles/examples/example.yaml"),
             legacy=SimpleNamespace(project_root=Path("legacy")),
         )
         device = SimpleNamespace(name="dev1")
@@ -110,7 +110,7 @@ class BoardSendModeTests(unittest.TestCase):
             with patch("daq_cli.application.board_service.LegacyBoardAdapter", return_value=adapter):
                 result = service.configure_board(
                     device_name="dev1",
-                    profile_path="profiles/example.yaml",
+                    profile_path="profiles/examples/example.yaml",
                     options=BoardConfigOptions(),
                 )
 
@@ -123,7 +123,7 @@ class BoardSendModeTests(unittest.TestCase):
         runner = CliRunner()
         result_payload = SendModeSetResult(
             device=SimpleNamespace(name="dev1"),
-            source_profile=Path("profiles/example.yaml"),
+            source_profile=Path("profiles/examples/example.yaml"),
             requested_send_mode=1,
             effective_send_mode=1,
         )
@@ -139,14 +139,14 @@ class BoardSendModeTests(unittest.TestCase):
                     "dev1",
                     "1",
                     "--profile",
-                    "profiles/example.yaml",
+                    "profiles/examples/example.yaml",
                 ],
             )
 
         self.assertEqual(result.exit_code, 0, result.output)
         service.set_send_mode.assert_called_once_with(
             device_name="dev1",
-            profile_path=Path("profiles/example.yaml"),
+            profile_path=Path("profiles/examples/example.yaml"),
             send_mode=1,
         )
         self.assertIn("Send Mode Set: dev1", result.output)
@@ -163,7 +163,7 @@ class BoardSendModeTests(unittest.TestCase):
                 "dev1",
                 "4",
                 "--profile",
-                "profiles/example.yaml",
+                "profiles/examples/example.yaml",
             ],
         )
         self.assertNotEqual(result.exit_code, 0)
@@ -176,7 +176,7 @@ class BoardSendModeTests(unittest.TestCase):
             service = service_cls.return_value
             service.configure_board.return_value = SimpleNamespace(
                 device=SimpleNamespace(name="dev1"),
-                source_profile=Path("profiles/example.yaml"),
+                source_profile=Path("profiles/examples/example.yaml"),
                 success=True,
                 send_start_delay_us=0.0,
                 adc_enabled=False,
@@ -201,7 +201,7 @@ class BoardSendModeTests(unittest.TestCase):
                     "--send-mode",
                     "1",
                     "--profile",
-                    "profiles/example.yaml",
+                    "profiles/examples/example.yaml",
                 ],
             )
 
@@ -215,7 +215,7 @@ class BoardSendModeTests(unittest.TestCase):
 class TcmLinkTests(unittest.TestCase):
     def _patched_service(self) -> tuple[BoardService, SimpleNamespace, SimpleNamespace, Mock]:
         profile = SimpleNamespace(
-            path=Path("profiles/example.yaml"),
+            path=Path("profiles/examples/example.yaml"),
             legacy=SimpleNamespace(project_root=Path("legacy")),
         )
         device = SimpleNamespace(name="dev1")
@@ -237,7 +237,7 @@ class TcmLinkTests(unittest.TestCase):
         )
         with patch.object(service, "_resolve_device", return_value=(profile, device)), patch.object(service, "_make_adapter", return_value=adapter):
             result = service.read_tcm_link_config(
-                device_name="dev1", profile_path="profiles/example.yaml"
+                device_name="dev1", profile_path="profiles/examples/example.yaml"
             )
 
         adapter.read_tcm_link_config.assert_called_once_with(device)
@@ -262,7 +262,7 @@ class TcmLinkTests(unittest.TestCase):
         with patch.object(service, "_resolve_device", return_value=(profile, device)), patch.object(service, "_make_adapter", return_value=adapter):
             result = service.configure_tcm_link(
                 device_name="dev1",
-                profile_path="profiles/example.yaml",
+                profile_path="profiles/examples/example.yaml",
                 thresholds=[1800] * 16,
                 mask=0x0001,
                 polarity=0x0001,
@@ -289,7 +289,7 @@ class TcmLinkTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 service.configure_tcm_link(
                     device_name="dev1",
-                    profile_path="profiles/example.yaml",
+                    profile_path="profiles/examples/example.yaml",
                     thresholds=[1800] * 16,
                     mask=0x0001,
                     polarity=0x0001,
@@ -302,7 +302,7 @@ class TcmLinkTests(unittest.TestCase):
         from daq_cli.application.acquire_service import AcquireService as AS
 
         profile = SimpleNamespace(
-            path=Path("profiles/example.yaml"),
+            path=Path("profiles/examples/example.yaml"),
             legacy=SimpleNamespace(project_root=Path("legacy")),
             defaults={"output_dir": "out"},
             devices={"dev1": SimpleNamespace(name="dev1", ip="1.2.3.4", tcp_port=24, board_id=0)},
@@ -342,7 +342,7 @@ class TcmLinkTests(unittest.TestCase):
                     )
                     service.capture_single(
                         device_name="dev1",
-                        profile_path="profiles/example.yaml",
+                        profile_path="profiles/examples/example.yaml",
                         events=10,
                         timeout_s=1.0,
                         run_name_prefix="expA",
@@ -355,7 +355,7 @@ class TcmLinkTests(unittest.TestCase):
         from daq_cli.application.acquire_service import AcquireService as AS
 
         profile = SimpleNamespace(
-            path=Path("profiles/example.yaml"),
+            path=Path("profiles/examples/example.yaml"),
             legacy=SimpleNamespace(project_root=Path("legacy")),
             defaults={"output_dir": "out", "adc_length": 64},
             devices={
@@ -399,7 +399,7 @@ class TcmLinkTests(unittest.TestCase):
                 )
                 service.capture_multi(
                     group_name="two_board",
-                    profile_path="profiles/example.yaml",
+                    profile_path="profiles/examples/example.yaml",
                     run_name_prefix="expMulti",
                 )
                 call = runner_cls.return_value.capture_multi.call_args
@@ -413,7 +413,7 @@ class TcmLinkTests(unittest.TestCase):
         ), patch.object(service, "_make_adapter", return_value=adapter):
             service.write_registers(
                 device_name="dev1",
-                profile_path="profiles/example.yaml",
+                profile_path="profiles/examples/example.yaml",
                 address=0x43,
                 data=bytes([4]),
             )
@@ -428,7 +428,7 @@ class TcmLinkTests(unittest.TestCase):
                 "tcm-link-config",
                 "dev1",
                 "--profile",
-                "profiles/example.yaml",
+                "profiles/examples/example.yaml",
             ],
         )
         self.assertNotEqual(result.exit_code, 0)
@@ -440,7 +440,7 @@ class TcmLinkTests(unittest.TestCase):
         with patch.object(BoardService, "read_tcm_link_config") as read_tcm_link_config:
             read_tcm_link_config.return_value = SimpleNamespace(
                 device=SimpleNamespace(name="dev1"),
-                source_profile=Path("profiles/example.yaml"),
+                source_profile=Path("profiles/examples/example.yaml"),
                 thresholds=[2700, 1800] + [0] * 14,
                 mask=0x0003,
                 polarity=0x0002,
@@ -456,13 +456,13 @@ class TcmLinkTests(unittest.TestCase):
                         "tcm-link-show",
                         "dev1",
                         "--profile",
-                        "profiles/example.yaml",
+                        "profiles/examples/example.yaml",
                     ],
                 )
 
         self.assertEqual(result.exit_code, 0, result.output)
         read_tcm_link_config.assert_called_once_with(
-            device_name="dev1", profile_path=Path("profiles/example.yaml")
+            device_name="dev1", profile_path=Path("profiles/examples/example.yaml")
         )
         self.assertIn("TCM Link Config", result.output)
         self.assertIn("2700", result.output)

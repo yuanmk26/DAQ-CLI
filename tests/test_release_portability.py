@@ -75,7 +75,7 @@ def test_load_profile_ignores_legacy_section() -> None:
 def test_board_service_uses_bundled_runtime_without_legacy_profile_field() -> None:
     service = BoardService()
     device = SimpleNamespace(name="dev1", ip="192.168.10.10", rbcp_port=4660, tcp_port=24, board_id=0, role="adc")
-    profile = SimpleNamespace(path=Path("profiles/example.yaml"), devices={"dev1": device})
+    profile = SimpleNamespace(path=Path("profiles/examples/example.yaml"), devices={"dev1": device})
 
     with patch.object(service, "_resolve_device", return_value=(profile, device)):
         with patch("daq_cli.application.board_service.LegacyBoardAdapter") as adapter_cls:
@@ -84,7 +84,7 @@ def test_board_service_uses_bundled_runtime_without_legacy_profile_field() -> No
                 data=b"\xAA",
             )
 
-            result = service.read_registers("dev1", "profiles/example.yaml", 0x10, 1)
+            result = service.read_registers("dev1", "profiles/examples/example.yaml", 0x10, 1)
 
     adapter_cls.assert_called_once_with()
     assert result.data == b"\xAA"

@@ -80,6 +80,3 @@ defaults:
       log:
         enabled: true
         dir: out/multi_log
-
-legacy:
-  project_root: E:\projects\1-hardware\FDU-ADC-250M-16ch

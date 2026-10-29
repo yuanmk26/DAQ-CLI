@@ -194,6 +194,10 @@ This reduces early implementation risk while preserving a clean long-term archit
 
 ## 7. Waveform Viewing Strategy
 
+> Status (v0.4.0): `daq wave` is design-only. The placeholder subcommand was
+> removed; actual waveform viewing is provided by `daq monitor wave` and the
+> GUI monitor tab.
+
 Waveform display should not force the project into a full GUI architecture.
 
 Recommended model:

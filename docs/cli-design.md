@@ -46,8 +46,8 @@ Current implementation:
 ```bash
 daq profile show
 daq profile validate
-daq profile show profiles/example.yaml
-daq profile validate profiles/example.yaml
+daq profile show profiles/examples/example.yaml
+daq profile validate profiles/examples/example.yaml
 ```
 
 Possible future extensions:
@@ -258,6 +258,9 @@ Current status:
 
 ## 7. Wave Commands
 
+> Status (v0.4.0): design-only. The placeholder `daq wave` subcommand was
+> removed; use `daq monitor wave` or the GUI monitor tab for actual viewing.
+
 Purpose:
 
 - Inspect waveform data for selected channels
@@ -368,7 +371,7 @@ legacy:
 
 Current implementation note:
 
-- `profiles/example.yaml` follows this structure and is used by the working commands today.
+- `profiles/examples/example.yaml` follows this structure and is used by the working commands today.
 
 ## 10. First Milestone
 

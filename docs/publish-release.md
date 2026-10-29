@@ -19,6 +19,11 @@ The main end-user asset is:
 
 - `dist\daq_cli-<version>-offline-win-amd64.zip`
 
+The standalone GUI executable is built separately with
+`scripts\build_gui_exe.ps1` (outputs `dist\daq-gui-<version>.exe` plus a
+deployment bundle). See `docs/deploy-exe.md`; the two release formats are
+independent.
+
 ## 2. Pre-Release Checks
 
 Before building a release:
@@ -29,7 +34,7 @@ Before building a release:
    - `README.md`
    - `docs/usage.md`
    - `docs/install-on-new-pc.md`
-   - `profiles/example.yaml`
+   - `profiles/examples/example.yaml`
    - `profiles/example.template.yaml`
    - `src/daq_cli/profile_templates/example.template.yaml`
 4. Confirm the release does not depend on lab-private paths, machine-local files, or uncommitted generated data.
@@ -183,4 +188,5 @@ Finally:
 
 - `docs/release-checklist.md`
 - `docs/install-on-new-pc.md`
+- `docs/deploy-exe.md`
 - `README.md`

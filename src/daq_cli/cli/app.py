@@ -8,7 +8,6 @@ from daq_cli.cli.gui import app as gui_app
 from daq_cli.cli.monitor import app as monitor_app
 from daq_cli.cli.profile import app as profile_app
 from daq_cli.cli.tcm import app as tcm_app
-from daq_cli.cli.wave import app as wave_app
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -23,4 +22,3 @@ app.add_typer(decode_app, name="decode")
 app.add_typer(gui_app, name="gui")
 app.add_typer(monitor_app, name="monitor")
 app.add_typer(tcm_app, name="tcm")
-app.add_typer(wave_app, name="wave")

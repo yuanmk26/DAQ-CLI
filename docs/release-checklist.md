@@ -8,7 +8,7 @@ For the full step-by-step process, see `docs/publish-release.md`.
 
 1. Confirm the working tree is clean or that you understand any remaining changes.
 2. Update the version in `pyproject.toml`.
-3. Review `README.md`, `docs/install-on-new-pc.md`, `docs/usage.md`, `profiles/example.yaml`, and `profiles/example.template.yaml`.
+3. Review `README.md`, `docs/install-on-new-pc.md`, `docs/usage.md`, `profiles/examples/example.yaml`, and `profiles/example.template.yaml`.
 4. Make sure the release does not depend on private local paths or lab-only configuration.
 
 ## Validation

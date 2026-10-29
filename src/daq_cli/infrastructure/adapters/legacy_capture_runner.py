@@ -15,7 +15,6 @@ from daq_cli.application.output_config import (
     TextOutputConfig,
 )
 from daq_cli.domain.device import DeviceConfig
-from daq_cli.infrastructure.adapters.legacy_runtime import bundled_legacy_script_dir
 from daq_cli.infrastructure.run_name_allocator import allocate_next_run_dir
 from daq_cli.infrastructure.tcp_sent_decode import (
     DecodedTcpSentEvent,
@@ -147,11 +146,6 @@ class WatchBackendRuntime:
 
 class LegacySingleCaptureRunner:
     """Native single-board TCP_SENT mode-2 capture with parallel receive/write."""
-
-    def __init__(self, script_dir: Path | str | None = None) -> None:
-        self._script_dir = (
-            Path(script_dir) if script_dir is not None else bundled_legacy_script_dir()
-        )
 
     def capture_single(
         self,
