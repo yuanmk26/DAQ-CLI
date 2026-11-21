@@ -56,6 +56,20 @@ and **停止采样** cancels capture and waits for the output files to close.
 After completion or stop, **开始采样** creates a new run directory.
 The existing `daq-gui` entry point opens the Tk application.
 
+In **单板采样**, toggle **硬件配置** to open or collapse the right-hand panel.
+Its ADC/TCM target is independent of the capture target. Each target keeps its
+own editable draft. **读取当前值** shows a timestamped hardware snapshot;
+**回读载入草稿** copies its settings into the form. **应用并回读** writes the draft
+and reads the hardware again. The ADC **模式 9** tab measures baselines and
+fills sixteen proposed thresholds using the selected offset and polarity.
+Apply the draft when ready. The TCM tab edits input masks, timing and the four
+coincidence groups. Hardware tasks use the currently loaded profile.
+
+While a single-board run is active or stopping, its ADC permits readback
+and draft editing. Writes and calibration become available after capture
+finalization. A pending write or calibration also holds that board until it
+finishes. The interlock applies within this workstation.
+
 The timeline combines complete and partial events in recorded flush-time order.
 The default preview loads up to 256 events; use `--limit N` to change it.
 Select a board to see its 16 channels, or use the channel selector to inspect

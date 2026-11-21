@@ -9,6 +9,7 @@ from PySide6 import QtCore, QtWidgets as W
 
 from daq_cli.application.acquire_options import default_output_base_dir, resolve_single_acquire_options
 from daq_cli.application.acquire_service import AcquireService
+from daq_cli.application.config_models import board_profile_options
 from daq_cli.application.profile_service import ProfileService
 from daq_cli.infrastructure.tcp_sent_decode import decode_tcp_sent_packet
 from daq_cli.qt_scope import label
@@ -17,9 +18,10 @@ from daq_cli.qt_scope import label
 class CaptureSession(threading.Thread):
     """The writer only publishes references; the preview consumes the latest packet."""
 
-    def __init__(self, params):
+    def __init__(self, params, profile):
         super().__init__(name="qt-single-capture")
         self.params = params
+        self.service = AcquireService(ProfileService(profile))
         self.cancel = threading.Event()
         self.writer_done = threading.Event()
         self.lock = threading.Lock()
@@ -61,7 +63,7 @@ class CaptureSession(threading.Thread):
         decoder = threading.Thread(target=self.decode_preview, name="qt-single-preview")
         decoder.start()
         try:
-            self.result = AcquireService().capture_single(
+            self.result = self.service.capture_single(
                 **self.params, cancel_event=self.cancel,
                 progress_callback=self.accept_progress, watch_frame_callback=self.accept_packet,
             )
@@ -75,10 +77,13 @@ class CaptureSession(threading.Thread):
 class SingleCapturePane(W.QFrame):
     updated = QtCore.Signal(bool)
     active_changed = QtCore.Signal(bool)
+    profile_changed = QtCore.Signal(object)
 
     def __init__(self, profile_path=None):
         super().__init__(objectName="panel")
         self.profile = None
+        self.config_write_ip = None
+        self.config_busy = False
         self.session = None
         self.displayed = None
         self.latest = None
@@ -153,9 +158,12 @@ class SingleCapturePane(W.QFrame):
             self.load_profile(path)
 
     def load_profile(self, path):
+        if self.active or self.config_busy:
+            return
         try:
             profile = ProfileService().load_profile(path)
             options = resolve_single_acquire_options(defaults=profile.defaults)
+            board_profile_options(profile.defaults)
             if not profile.devices:
                 raise ValueError("配置中没有可用板卡")
         except Exception as exc:
@@ -171,7 +179,7 @@ class SingleCapturePane(W.QFrame):
         self.stride.setValue(options["watch_every"] or 1)
         self.storage.setCurrentIndex(self.storage.findData(options["storage_mode"]))
         self.output.setText(str(options["output_dir"] or default_output_base_dir(profile) / "single"))
-        self.start.setEnabled(True)
+        self.profile_changed.emit(profile)
         self.reset_display()
 
     def choose_output(self):
@@ -186,10 +194,22 @@ class SingleCapturePane(W.QFrame):
         self.message = "等待开始采样"
         self.state.setText("就绪")
         self.count.setText("0")
+        self.refresh_interlock()
         self.updated.emit(True)
 
+    def target_ip(self):
+        device = self.profile.devices.get(self.target.currentText()) if self.profile else None
+        return device.ip if device else None
+
+    def refresh_interlock(self):
+        ip = self.target_ip()
+        blocked = bool(ip and ip == self.config_write_ip)
+        self.start.setEnabled(bool(ip) and not self.active and not blocked)
+        self.start.setToolTip("该板正在配置或标定" if blocked else "")
+        self.load.setEnabled(not self.active and not self.config_busy)
+
     def begin(self):
-        if self.active or not self.profile:
+        if self.active or not self.target_ip() or self.target_ip() == self.config_write_ip:
             return
         self.reset_display()
         path = self.output.text().strip()
@@ -199,7 +219,7 @@ class SingleCapturePane(W.QFrame):
             outputs=self.options["outputs"], storage_mode=self.storage.currentData(),
             rate_interval_s=self.options["rate_interval_s"], watch_every=self.stride.value(),
             output_base_dir=Path(path) if path else self.options["output_dir"],
-        ))
+        ), self.profile)
         self.set_busy(True)
         self.state.setText("正在连接")
         self.session.start()
@@ -211,6 +231,7 @@ class SingleCapturePane(W.QFrame):
             widget.setDisabled(busy)
         self.stop_button.setEnabled(busy)
         self.pause.setEnabled(busy)
+        self.refresh_interlock()
         self.active_changed.emit(busy)
 
     def stop(self):

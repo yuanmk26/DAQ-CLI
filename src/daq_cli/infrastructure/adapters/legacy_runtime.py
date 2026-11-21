@@ -5,9 +5,14 @@ import sys
 from contextlib import contextmanager
 from importlib import resources
 from pathlib import Path
+from threading import RLock
 from typing import Iterator
 
 from daq_cli.domain.device import DeviceConfig
+
+# Legacy drivers swap process-wide modules, sys.path and device environment.
+# A configuration worker and the single capture's initial read can overlap.
+_driver_lock = RLock()
 
 
 def bundled_legacy_script_dir() -> Path:
@@ -18,13 +23,14 @@ def bundled_legacy_script_dir() -> Path:
 @contextmanager
 def temporary_sys_path(path: Path) -> Iterator[None]:
     path_str = str(path)
-    original = list(sys.path)
-    if path_str not in sys.path:
-        sys.path.insert(0, path_str)
-    try:
-        yield
-    finally:
-        sys.path[:] = original
+    with _driver_lock:
+        original = list(sys.path)
+        if path_str not in sys.path:
+            sys.path.insert(0, path_str)
+        try:
+            yield
+        finally:
+            sys.path[:] = original
 
 
 @contextmanager

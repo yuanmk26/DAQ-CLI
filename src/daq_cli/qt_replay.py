@@ -11,6 +11,7 @@ import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets as W
 from daq_cli.qt_scope import WaveformScope, label
 from daq_cli.qt_single import SingleCapturePane
+from daq_cli.qt_config import ConfigPanel
 
 from daq_cli.infrastructure.multi_board_decode import (
     MultiBoardAggregatedEventReader, build_board_context, build_board_packet,
@@ -105,6 +106,8 @@ class Workstation(W.QMainWindow):
         header.addSpacing(8)
         self.run_time = label("", "muted")
         header.addWidget(self.run_time)
+        self.config_toggle = W.QPushButton("硬件配置", checkable=True)
+        header.addWidget(self.config_toggle)
         layout.addLayout(header)
 
         splitter = W.QSplitter(QtCore.Qt.Orientation.Horizontal)
@@ -149,8 +152,13 @@ class Workstation(W.QMainWindow):
         self.scope = WaveformScope()
         self.scope.view_changed.connect(self.render)
         splitter.addWidget(self.scope)
+        self.config = ConfigPanel(self.single)
+        splitter.addWidget(self.config)
+        self.config.hide()
+        self.config_toggle.toggled.connect(self.config.setVisible)
+        self.config.busy_changed.connect(self.config_busy_changed)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([200, 1050])
+        splitter.setSizes([200, 760, 350])
 
         controls = W.QFrame(objectName="panel")
         bar = W.QHBoxLayout(controls)
@@ -208,6 +216,8 @@ class Workstation(W.QMainWindow):
         self.set_playing(False)
         self.sides.setCurrentIndex(mode)
         self.bars.setCurrentIndex(mode)
+        self.config_toggle.setVisible(mode == 1)
+        self.config.setVisible(mode == 1 and self.config_toggle.isChecked())
         for shortcut in self.replay_shortcuts:
             shortcut.setEnabled(mode == 0)
         self.scope.allow_comparison(mode == 0 and len(self.run.boards) == 4)
@@ -222,13 +232,24 @@ class Workstation(W.QMainWindow):
                 self.single.draw(self.scope)
 
     def capture_active_changed(self, active):
-        self.mode.setDisabled(active)
-        if self.closing and not active:
+        self.mode.setDisabled(active or self.config.task is not None)
+        self.finish_close()
+
+    def config_busy_changed(self):
+        self.mode.setDisabled(self.single.active or self.config.task is not None)
+        self.single.config_busy = self.config.task is not None
+        self.single.config_write_ip = self.config.write_ip
+        self.single.refresh_interlock()
+        self.finish_close()
+
+    def finish_close(self):
+        if self.closing and not self.single.active and self.config.task is None:
             QtCore.QTimer.singleShot(0, self.close)
 
     def closeEvent(self, event):
-        if self.single.active:
+        if self.single.active or self.config.task is not None:
             self.closing = True
+            self.centralWidget().setEnabled(False)
             self.single.stop()
             event.ignore()
         else:
