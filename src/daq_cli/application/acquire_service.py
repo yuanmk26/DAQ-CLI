@@ -75,6 +75,13 @@ class SingleAcquireResult:
     text_output_dir: Path | None = None
     text_output_events: int = 0
     text_output_files: int = 0
+    storage_mode: str = "legacy"
+    rate_interval_s: float = 1.0
+    rate_csv_path: Path | None = None
+    run_meta_path: Path | None = None
+    aggregate_output_path: Path | None = None
+    aggregate_index_path: Path | None = None
+    monitor_jsonl_path: Path | None = None
 
 
 @dataclass(slots=True)
@@ -147,6 +154,8 @@ class AcquireService:
         watch_frame_callback: Callable[[bytes], None] | None = None,
         run_name_prefix: str | None = None,
         cancel_event: threading.Event | None = None,
+        storage_mode: str = "legacy",
+        rate_interval_s: float = 1.0,
     ) -> SingleAcquireResult:
         profile = self._profile_service.load_profile(profile_path)
         try:
@@ -244,6 +253,8 @@ class AcquireService:
             watch_frame_callback=watch_frame_callback,
             run_name_prefix=run_name_prefix,
             cancel_event=cancel_event,
+            storage_mode=storage_mode,
+            rate_interval_s=rate_interval_s,
         )
         return SingleAcquireResult(
             device=device,
@@ -276,6 +287,19 @@ class AcquireService:
             text_output_dir=getattr(raw_result, "text_output_dir", None),
             text_output_events=getattr(raw_result, "text_output_events", 0),
             text_output_files=getattr(raw_result, "text_output_files", 0),
+            storage_mode=getattr(raw_result, "storage_mode", storage_mode),
+            rate_interval_s=getattr(
+                raw_result, "rate_interval_s", rate_interval_s
+            ),
+            rate_csv_path=getattr(raw_result, "rate_csv_path", None),
+            run_meta_path=getattr(raw_result, "run_meta_path", None),
+            aggregate_output_path=getattr(
+                raw_result, "aggregate_output_path", None
+            ),
+            aggregate_index_path=getattr(
+                raw_result, "aggregate_index_path", None
+            ),
+            monitor_jsonl_path=getattr(raw_result, "monitor_jsonl_path", None),
         )
 
     def capture_multi(

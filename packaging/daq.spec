@@ -29,6 +29,11 @@ _datas = [
 
 _hiddenimports = collect_submodules("daq_cli")
 
+# The app uses numpy + matplotlib + tkinter only. PyInstaller's hooks
+# otherwise pull in scipy/pandas/numba/llvmlite; llvmlite alone is ~120 MB
+# uncompressed and dominates onefile startup time.
+_excludes = ["scipy", "pandas", "numba", "llvmlite", "pytest", "IPython"]
+
 
 # ---------------------------------------------------------------- GUI
 
@@ -40,7 +45,7 @@ _gui_analysis = Analysis(
     hiddenimports=_hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    excludes=[],
+    excludes=_excludes,
     noarchive=False,
 )
 _gui_pyz = PYZ(_gui_analysis.pure)
@@ -69,7 +74,7 @@ _cli_analysis = Analysis(
     hiddenimports=_hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    excludes=[],
+    excludes=_excludes,
     noarchive=False,
 )
 _cli_pyz = PYZ(_cli_analysis.pure)

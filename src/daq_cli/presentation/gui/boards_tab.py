@@ -82,7 +82,7 @@ class BoardTab:
         self._trigger_position_var = tk.StringVar(value="40")
         param_grid = ttk.Frame(group)
         param_grid.pack(fill=tk.X, pady=(6, 0))
-        ttk.Label(param_grid, text="trigger-mode:").grid(row=0, column=0, sticky="w")
+        ttk.Label(param_grid, text="trigger-mode (0..255):").grid(row=0, column=0, sticky="w")
         ttk.Entry(param_grid, textvariable=self._trigger_mode_var, width=6).grid(
             row=0, column=1, sticky="w", padx=(4, 12)
         )

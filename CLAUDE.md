@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `daq-cli` is a Python CLI (typer + rich) for DAQ boards (FDU-ADC-250M-16ch
 hardware): board configuration, telemetry, single/multi-board capture,
 TCP_SENT packet decoding, and waveform monitoring. Current version line:
-v0.4.0 (see `CHANGELOG.md`).
+v0.4.6 (see `CHANGELOG.md`).
 
 Hardware access is NOT native: it runs through vendored legacy scripts
 (`src/daq_cli/_vendor/fdu_legacy/`) wrapped by adapters in
@@ -46,6 +46,11 @@ services; application/infrastructure layers stay GUI-free.
   `schedule` = `root.after`); unit-tested
 - `formatting.py` — pure result→text and form→service-parameter builders;
   unit-tested
+- `fonts.py` — DPI awareness + Tk named-font sizing. ttk widgets ignore
+  `option_add("*Font")`; set `TkDefaultFont`/`TkFixedFont` here. The user
+  font scale (100–150%) is persisted in `%APPDATA%\daq-cli\gui.json`.
+- both entry points call `enable_dpi_awareness()` before `tk.Tk()`; the GUI
+  scales fonts and geometry from `winfo_fpixels("1i")`
 - tabs: `boards_tab` / `acquire_tab` / `monitor_tab` / `tcm_tab`
 - **backend ordering constraint**: `daq-gui` (gui_main.py) calls
   `matplotlib.use("TkAgg")` before any other import, because the CLI import
@@ -96,6 +101,15 @@ Key workflow facts:
   `complete_events.dat` / `partial_events.dat` / `complete_events.idx` layout
   byte for byte; the vendored `multi_board_acquire.py` path is still reachable
   with `DAQ_MULTI_VENDOR=1` for A/B comparison and is slated for deletion.
+- Single-board capture supports `storage_mode`: `aggregate` (default;
+  FDU_AGGR v2 `complete_events.dat` + idx + `run_meta.json` + `rate.csv` +
+  `monitor.jsonl` + `log.txt`; one board chunk per event, no partial),
+  `rate` (rate.csv/monitor/run_meta/log only; no event payload), and
+  `legacy` (per-event `raw/event_*.bin` + optional JSON/TXT/log).  The rate
+  log is sampled by `RateLogRecorder` at `rate_interval_s` (default 1.0s);
+  aggregate/rate modes ignore the per-type output directories and write
+  everything in the run directory.  In aggregate/rate modes `log.txt` is
+  appended live (`[MON]` total/window/rate lines) and finished with a summary.
 - `monitoring_samples/` holds demo/replay data for the viewer
   (`daq monitor wave demo`, `daq monitor wave --replay ...`).
 - Tests are hardware-free: they use the sample dumps and temp dirs.
@@ -129,6 +143,12 @@ Full reference: `docs/firmware-compatibility.md`. Key rules:
   mask, polarity, debounce (5ns units), enable, M21 pulse width —
   `daq board tcm-link-show/config`. `Trigger_model = 9` is the TCM-trigger
   source; keep `Trigger_position` 0..10 (link delay D ≈ 397ns).
+- `0x10` `Trigger_model` is an 8-bit RW register; current firmware defines
+  0..12: 9 = TCM-trigger return, 10 = four-group positive coincidence
+  (`TCM_THR` 0x45..0x64 + `COINC_WINDOW` 0x6F), 11 = four-group negative
+  coincidence, 12 = all-channel negative OR (11/12 use
+  `Trigger_threshold` 0x11..0x18). daq-cli accepts 0..255 so new modes do
+  not need a vendored-script update.
 - TCM trigger link, TCM board side (FDU-TCM v3 `0x20..0x2F`): TRG_CTRL
   (enable/clear-sticky), 8-bit TRG_IN_MASK, pulse width + debounce in 20M
   cycles (50ns units, NOT 5ns like the ADC side), TRG_STATUS (bit0 sticky /

@@ -26,6 +26,10 @@ def gui(
     matplotlib.rcParams["font.sans-serif"] = ["Microsoft YaHei", "DejaVu Sans"]
     matplotlib.rcParams["axes.unicode_minus"] = False
 
+    from daq_cli.presentation.gui.fonts import enable_dpi_awareness
+
+    enable_dpi_awareness()  # must run before the first tk.Tk()
+
     import tkinter as tk
 
     from daq_cli.presentation.gui.app import DaqGuiApp

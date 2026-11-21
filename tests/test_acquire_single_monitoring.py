@@ -1,5 +1,7 @@
 from pathlib import Path
+import json
 import shutil
+import struct
 from types import SimpleNamespace
 import unittest
 import uuid
@@ -32,6 +34,12 @@ from daq_cli.infrastructure.adapters.legacy_capture_runner import (
     _decode_worker_main,
     _frame_total_size,
     _Mode2RawStreamReader,
+)
+from daq_cli.infrastructure.multi_board_acquire.constants import (
+    BOARD_HEADER_FMT_V2,
+    EVENT_HEADER_FMT,
+    FILE_HEADER_FMT,
+    INDEX_ENTRY_FMT,
 )
 from daq_cli.infrastructure.run_name_allocator import allocate_next_run_dir
 
@@ -1523,3 +1531,146 @@ class OutputsConfigDrivesDecodeTests(unittest.TestCase):
         )
         self.assertFalse(captured["decode_json"])
         self.assertFalse(captured["text_output_enabled"])
+
+
+class SingleStorageModeTests(unittest.TestCase):
+    def _workspace(self) -> Path:
+        path = Path("tmp_test_outputs") / uuid.uuid4().hex
+        path.mkdir(parents=True, exist_ok=False)
+        return path
+
+    def _device(self):
+        return SimpleNamespace(
+            ip="192.168.10.10", tcp_port=24, name="dev1", board_id=0
+        )
+
+    def test_aggregate_storage_writes_complete_only_and_rate_log(self):
+        packets = [
+            _build_tcp_sent_packet(send_mode=2, hit_mask=0x0001, event_count=1),
+            _build_tcp_sent_packet(send_mode=2, hit_mask=0x0003, event_count=2),
+        ]
+        runner = LegacySingleCaptureRunner()
+        base = self._workspace()
+        try:
+            with patch.object(
+                runner, "_open_socket", return_value=FakeSocket(packets)
+            ):
+                result = runner.capture_single(
+                    device=self._device(),
+                    output_base_dir=base,
+                    events=2,
+                    timeout_s=1.0,
+                    send_mode=2,
+                    storage_mode="aggregate",
+                    rate_interval_s=0.1,
+                )
+            run_dir = result.run_output_dir
+            self.assertIsNotNone(run_dir)
+            self.assertEqual(result.storage_mode, "aggregate")
+            self.assertEqual(result.captured_events, 2)
+            self.assertTrue((run_dir / "complete_events.dat").is_file())
+            self.assertTrue((run_dir / "complete_events.idx").is_file())
+            self.assertFalse((run_dir / "partial_events.dat").exists())
+            self.assertFalse((run_dir / "raw").exists())
+            self.assertTrue((run_dir / "rate.csv").is_file())
+            self.assertTrue((run_dir / "monitor.jsonl").is_file())
+            self.assertTrue((run_dir / "run_meta.json").is_file())
+            self.assertTrue((run_dir / "log.txt").is_file())
+
+            data = (run_dir / "complete_events.dat").read_bytes()
+            file_header = struct.unpack_from(FILE_HEADER_FMT, data, 0)
+            header_size = struct.calcsize(FILE_HEADER_FMT)
+            self.assertEqual(file_header[0], b"FDUAGGR1")
+            self.assertEqual(file_header[6], 1)  # board_count
+            self.assertEqual(file_header[7], ADC_LENGTH)
+
+            events = []
+            offset = header_size
+            while offset < len(data):
+                event_header = struct.unpack_from(EVENT_HEADER_FMT, data, offset)
+                record_bytes = event_header[0]
+                board_header_bytes = event_header[1]
+                board_count = event_header[2]
+                board_offset = offset + board_header_bytes
+                boards = []
+                for _ in range(board_count):
+                    board_header = struct.unpack_from(
+                        BOARD_HEADER_FMT_V2, data, board_offset
+                    )
+                    boards.append(board_header)
+                    board_offset += board_header[0]
+                events.append((event_header, boards))
+                offset += record_bytes
+
+            self.assertEqual(len(events), 2)
+            self.assertEqual(
+                [board[4] for _, boards in events for board in boards],
+                [1, 2],
+            )
+            self.assertTrue(
+                all(board[2] == 0 and board[6] == 2 for _, boards in events for board in boards)
+            )
+            self.assertEqual(
+                (run_dir / "complete_events.idx").stat().st_size,
+                2 * struct.calcsize(INDEX_ENTRY_FMT),
+            )
+            meta = json.loads(
+                (run_dir / "run_meta.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(meta["storage_mode"], "aggregate")
+            self.assertEqual(meta["captured_events"], 2)
+            self.assertEqual(meta["status"], "complete")
+            self.assertEqual(
+                meta["complete_events_path"],
+                str(run_dir / "complete_events.dat"),
+            )
+            rate_text = (run_dir / "rate.csv").read_text(encoding="utf-8")
+            self.assertTrue(rate_text.startswith("elapsed_s,"))
+            log_text = (run_dir / "log.txt").read_text(encoding="utf-8")
+            self.assertIn("[MON]", log_text)
+            self.assertIn("total_events=", log_text)
+        finally:
+            shutil.rmtree(base, ignore_errors=True)
+
+    def test_rate_only_storage_has_no_event_data(self):
+        packets = [
+            _build_tcp_sent_packet(send_mode=2, hit_mask=0x0001, event_count=1),
+            _build_tcp_sent_packet(send_mode=2, hit_mask=0x0001, event_count=2),
+        ]
+        runner = LegacySingleCaptureRunner()
+        base = self._workspace()
+        try:
+            with patch.object(
+                runner, "_open_socket", return_value=FakeSocket(packets)
+            ):
+                result = runner.capture_single(
+                    device=self._device(),
+                    output_base_dir=base,
+                    events=2,
+                    timeout_s=1.0,
+                    send_mode=2,
+                    storage_mode="rate",
+                    rate_interval_s=0.1,
+                )
+            run_dir = result.run_output_dir
+            self.assertIsNotNone(run_dir)
+            self.assertEqual(result.storage_mode, "rate")
+            self.assertEqual(result.captured_events, 2)
+            self.assertFalse((run_dir / "complete_events.dat").exists())
+            self.assertFalse((run_dir / "complete_events.idx").exists())
+            self.assertFalse((run_dir / "partial_events.dat").exists())
+            self.assertTrue((run_dir / "rate.csv").is_file())
+            self.assertTrue((run_dir / "monitor.jsonl").is_file())
+            self.assertTrue((run_dir / "run_meta.json").is_file())
+            self.assertTrue((run_dir / "log.txt").is_file())
+            meta = json.loads(
+                (run_dir / "run_meta.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(meta["storage_mode"], "rate")
+            self.assertEqual(meta["captured_events"], 2)
+            self.assertIsNone(meta["complete_events_path"])
+            log_text = (run_dir / "log.txt").read_text(encoding="utf-8")
+            self.assertIn("[MON]", log_text)
+            self.assertIn("total_events=", log_text)
+        finally:
+            shutil.rmtree(base, ignore_errors=True)

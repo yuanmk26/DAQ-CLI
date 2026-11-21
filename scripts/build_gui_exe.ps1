@@ -31,6 +31,9 @@ foreach ($candidate in $pythons) {
 }
 if (-not $py) { $py = "python" }
 
+# The app imports numpy + matplotlib + tkinter only. PyInstaller's hooks
+# otherwise pull in scipy/pandas/numba/llvmlite (~200 MB uncompressed),
+# which the GUI never uses and which dominates onefile startup time.
 Write-Host "Building $name.exe with $py ..."
 & $py -m PyInstaller --noconfirm --onefile --windowed --name $name `
   --paths src `
@@ -50,9 +53,15 @@ Write-Host "Building $name.exe with $py ..."
   --hidden-import lib.i2c `
   --hidden-import lib.spi_3wire `
   --hidden-import lib.sysmon `
-  --add-data "src/daq_cli/_vendor/fdu_legacy;daq_cli/_vendor/fdu_legacy" `
-  --collect-all daq_cli.monitoring_samples `
-  --collect-all daq_cli.profile_templates `
+  --add-data "$repoRoot/src/daq_cli/_vendor/fdu_legacy;daq_cli/_vendor/fdu_legacy" `
+  --add-data "$repoRoot/src/daq_cli/monitoring_samples;daq_cli/monitoring_samples" `
+  --add-data "$repoRoot/src/daq_cli/profile_templates;daq_cli/profile_templates" `
+  --exclude-module scipy `
+  --exclude-module pandas `
+  --exclude-module numba `
+  --exclude-module llvmlite `
+  --exclude-module pytest `
+  --exclude-module IPython `
   --collect-submodules daq_cli `
   src/daq_cli/gui_main.py
 

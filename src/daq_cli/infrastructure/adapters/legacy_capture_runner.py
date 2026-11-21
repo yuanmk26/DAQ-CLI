@@ -5,7 +5,9 @@ import queue
 import shutil
 import socket
 import threading
+import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Any
 
@@ -63,6 +65,13 @@ class LegacySingleCaptureResult:
     text_output_dir: Path | None = None
     text_output_events: int = 0
     text_output_files: int = 0
+    storage_mode: str = "legacy"
+    rate_interval_s: float = 1.0
+    rate_csv_path: Path | None = None
+    run_meta_path: Path | None = None
+    aggregate_output_path: Path | None = None
+    aggregate_index_path: Path | None = None
+    monitor_jsonl_path: Path | None = None
 
 
 @dataclass(slots=True)
@@ -118,6 +127,7 @@ class WatchWorkerResult:
 class ParallelCaptureStats:
     requested_events: int
     captured_events: int = 0
+    received_events: int = 0
     writer_errors: int = 0
     decode_enabled: bool = False
     decode_submitted: int = 0
@@ -166,7 +176,28 @@ class LegacySingleCaptureRunner:
         watch_frame_callback: Callable[[bytes], None] | None = None,
         run_name_prefix: str | None = None,
         cancel_event: threading.Event | None = None,
+        storage_mode: str = "legacy",
+        rate_interval_s: float = 1.0,
     ) -> LegacySingleCaptureResult:
+        if storage_mode not in {"legacy", "aggregate", "rate"}:
+            raise ValueError(
+                "storage_mode must be 'legacy', 'aggregate', or 'rate'"
+            )
+        if storage_mode != "legacy":
+            return self._capture_single_compact(
+                device=device,
+                output_base_dir=output_base_dir,
+                events=events,
+                timeout_s=timeout_s,
+                send_mode=send_mode,
+                storage_mode=storage_mode,
+                rate_interval_s=rate_interval_s,
+                watch_every=watch_every,
+                progress_callback=progress_callback,
+                watch_frame_callback=watch_frame_callback,
+                run_name_prefix=run_name_prefix,
+                cancel_event=cancel_event,
+            )
         resolved_outputs = outputs or AcquireOutputsConfig(
             raw=OutputTargetConfig(enabled=True),
             json=OutputTargetConfig(enabled=decode_json, dir=decoded_output_dir),
@@ -413,6 +444,272 @@ class LegacySingleCaptureRunner:
             watch_every=watch_every,
             watched_frames=stats.watched_frames,
             log_output=log_output,
+        )
+
+    def _capture_single_compact(
+        self,
+        *,
+        device: DeviceConfig,
+        output_base_dir: Path,
+        events: int,
+        timeout_s: float,
+        send_mode: int,
+        storage_mode: str,
+        rate_interval_s: float,
+        watch_every: int | None,
+        progress_callback: Callable[[LegacySingleCaptureProgress], None] | None,
+        watch_frame_callback: Callable[[bytes], None] | None,
+        run_name_prefix: str | None,
+        cancel_event: threading.Event | None,
+    ) -> LegacySingleCaptureResult:
+        """Single-threaded aggregate/rate-only capture.
+
+        The legacy path is a parallel raw-file pipeline; the compact path has
+        no per-event files, so it can read, aggregate, and count in one loop.
+        """
+        from daq_cli.infrastructure.rate_log import RateLogRecorder
+        from daq_cli.infrastructure.single_aggregate import (
+            SingleBoardAggregateWriter,
+            write_single_run_meta,
+        )
+
+        output_base_dir = Path(output_base_dir)
+        output_base_dir.mkdir(parents=True, exist_ok=True)
+        run_dir = self._make_output_dir(
+            output_base_dir,
+            prefix=run_name_prefix or str(getattr(device, "name", "acquire")),
+        )
+        rate_interval = max(0.1, float(rate_interval_s))
+        rate_csv_path = run_dir / "rate.csv"
+        monitor_path = run_dir / "monitor.jsonl"
+        run_meta_path = run_dir / "run_meta.json"
+        log_path = run_dir / "log.txt"
+        start_time = datetime.now().astimezone().isoformat(timespec="seconds")
+        stats = ParallelCaptureStats(
+            requested_events=events,
+            watch_enabled=watch_every is not None,
+            watch_every=watch_every,
+        )
+        aggregate_writer: SingleBoardAggregateWriter | None = None
+        rate_recorder: RateLogRecorder | None = None
+        sock: socket.socket | None = None
+        status = "complete"
+        error: BaseException | None = None
+        log_lines = [
+            f"Connecting TCP {getattr(device, 'ip', '')}:{getattr(device, 'tcp_port', 24)}",
+            f"Storage mode: {storage_mode}",
+            f"Capture send_mode: {send_mode}",
+            f"Capture directory: {run_dir}",
+            f"Rate interval: {rate_interval:.3f}s",
+        ]
+        if watch_every is not None and watch_frame_callback is None:
+            log_lines.append("Wave watch is ignored in compact storage mode")
+        try:
+            if storage_mode == "aggregate":
+                aggregate_writer = SingleBoardAggregateWriter(
+                    run_dir=run_dir,
+                    device=device,
+                    adc_length=ADC_LENGTH,
+                )
+                log_lines.append(
+                    f"Aggregate output: {aggregate_writer.complete_path}"
+                )
+                log_lines.append(f"Index output: {aggregate_writer.index_path}")
+            header_stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+            log_path.write_text(
+                "\n".join(
+                    f"{header_stamp} [INFO] {line}" for line in log_lines
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            rate_recorder = RateLogRecorder(
+                csv_path=rate_csv_path,
+                jsonl_path=monitor_path,
+                log_path=log_path,
+                interval_s=rate_interval,
+                count_fn=lambda: stats.received_events,
+                metadata={
+                    "device": str(getattr(device, "name", "acquire")),
+                    "send_mode": int(send_mode),
+                    "storage_mode": storage_mode,
+                },
+            )
+            write_single_run_meta(
+                run_meta_path,
+                run_dir=run_dir,
+                device=device,
+                storage_mode=storage_mode,
+                send_mode=send_mode,
+                adc_length=ADC_LENGTH,
+                requested_events=events,
+                captured_events=0,
+                status="running",
+                start_time=start_time,
+                stop_time=None,
+                rate_interval_s=rate_interval,
+                complete_events_path=(
+                    aggregate_writer.complete_path
+                    if aggregate_writer is not None
+                    else None
+                ),
+                complete_events_index_path=(
+                    aggregate_writer.index_path
+                    if aggregate_writer is not None
+                    else None
+                ),
+                rate_csv_path=rate_csv_path,
+                monitor_jsonl_path=monitor_path,
+            )
+            rate_recorder.start()
+            sock = self._open_socket(device=device, timeout_s=timeout_s)
+            reader = _TcpSentRawStreamReader(
+                sock=sock,
+                expected_send_mode=send_mode,
+            )
+            for _ in range(events):
+                if cancel_event is not None and cancel_event.is_set():
+                    status = "stopped"
+                    break
+                fields = reader.read_frame()
+                stats.received_events += 1
+                if aggregate_writer is not None:
+                    aggregate_writer.write(
+                        fields,
+                        recv_unix_ns=time.time_ns(),
+                    )
+                stats.captured_events += 1
+                if (
+                    watch_every is not None
+                    and watch_frame_callback is not None
+                    and stats.captured_events % watch_every == 0
+                ):
+                    watch_frame_callback(fields.packet)
+                    stats.watched_frames += 1
+                if progress_callback is not None:
+                    progress_callback(
+                        LegacySingleCaptureProgress(
+                            captured_events=stats.captured_events,
+                            packet_bytes=len(fields.packet),
+                            hit_mask=fields.hit_mask,
+                            output_dir=run_dir,
+                        )
+                    )
+        except socket.timeout as exc:
+            if cancel_event is not None and cancel_event.is_set():
+                status = "stopped"
+            else:
+                status = "error"
+                error = exc
+        except BaseException as exc:  # noqa: BLE001 - surfaced after finalize
+            status = "error"
+            error = exc
+        finally:
+            if sock is not None:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+            if aggregate_writer is not None:
+                aggregate_writer.close()
+            if rate_recorder is not None:
+                rate_recorder.stop()
+            stop_time = datetime.now().astimezone().isoformat(timespec="seconds")
+            rate_summary = None
+            if rate_recorder is not None:
+                rate_summary = {
+                    "duration_s": round(rate_recorder.duration_s, 3),
+                    "total_events": int(rate_recorder.total_events),
+                    "average_rate_hz": round(rate_recorder.average_rate_hz, 3),
+                    "peak_rate_hz": round(rate_recorder.peak_rate_hz, 3),
+                    "samples": int(rate_recorder.sample_count),
+                }
+            summary_lines = [
+                f"Received events: {stats.received_events}",
+                f"Captured events: {stats.captured_events}",
+            ]
+            if rate_recorder is not None:
+                summary_lines.extend(
+                    [
+                        f"Duration: {rate_recorder.duration_s:.3f}s",
+                        f"Average rate: {rate_recorder.average_rate_hz:.3f} Hz",
+                        f"Peak rate: {rate_recorder.peak_rate_hz:.3f} Hz",
+                        f"Rate CSV: {rate_csv_path}",
+                        f"Monitor JSONL: {monitor_path}",
+                    ]
+                )
+            if watch_every is not None:
+                summary_lines.append(f"Watched frames: {stats.watched_frames}")
+            summary_lines.append(f"Status: {status}")
+            log_lines.extend(summary_lines)
+            log_output = "\n".join(log_lines) + "\n"
+            summary_stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+            with log_path.open("a", encoding="utf-8") as log_fh:
+                log_fh.write(
+                    "\n".join(
+                        f"{summary_stamp} [INFO] {line}"
+                        for line in summary_lines
+                    )
+                    + "\n"
+                )
+            write_single_run_meta(
+                run_meta_path,
+                run_dir=run_dir,
+                device=device,
+                storage_mode=storage_mode,
+                send_mode=send_mode,
+                adc_length=ADC_LENGTH,
+                requested_events=events,
+                captured_events=stats.captured_events,
+                status=status,
+                start_time=start_time,
+                stop_time=stop_time,
+                rate_interval_s=rate_interval,
+                complete_events_path=(
+                    aggregate_writer.complete_path
+                    if aggregate_writer is not None
+                    else None
+                ),
+                complete_events_index_path=(
+                    aggregate_writer.index_path
+                    if aggregate_writer is not None
+                    else None
+                ),
+                rate_csv_path=rate_csv_path,
+                monitor_jsonl_path=monitor_path,
+                rate_summary=rate_summary,
+            )
+        if error is not None:
+            raise error
+        return LegacySingleCaptureResult(
+            run_output_dir=run_dir,
+            captured_events=stats.captured_events,
+            send_mode=send_mode,
+            decode_enabled=False,
+            decoded_output_dir=None,
+            decoded_events=0,
+            decode_errors=0,
+            watch_enabled=watch_every is not None,
+            watch_every=watch_every,
+            watched_frames=stats.watched_frames,
+            log_output=log_output,
+            raw_output_dir=None,
+            log_output_path=log_path,
+            storage_mode=storage_mode,
+            rate_interval_s=rate_interval,
+            rate_csv_path=rate_csv_path,
+            run_meta_path=run_meta_path,
+            aggregate_output_path=(
+                aggregate_writer.complete_path
+                if aggregate_writer is not None
+                else None
+            ),
+            aggregate_index_path=(
+                aggregate_writer.index_path
+                if aggregate_writer is not None
+                else None
+            ),
+            monitor_jsonl_path=monitor_path,
         )
 
     def _receiver_loop(

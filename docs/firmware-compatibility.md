@@ -151,7 +151,9 @@ Rules:
 - fully decoupled from `Hit_threshold` (0x20..0x3F, baseline-relative)
 - measured full-chain delay D ≈ 397ns; keep `Trigger_position` <= 10 when
   using the TCM link so the crossing point stays inside the window
-- `Trigger_model = 9` is the TCM-trigger source; values 0..8 unchanged
+- `Trigger_model` (`0x10`) is an 8-bit register; the current firmware defines
+  `0..12` (`9` = TCM-trigger return, `10/11/12` = board-local coincidence
+  modes; see 2.7). `daq-cli` accepts the full `0..255` range.
 - TCM board side (FDU-TCM v3, `5fc2bbc`+) exposes its own trigger-link
   registers at `0x20..0x2F` (TRG_CTRL / TRG_IN_MASK / TRG_PULSE_WIDTH /
   TRG_DEBOUNCE / TRG_STATUS / TRG_CHAN / coincidence 0x27..0x2F) — different
@@ -163,7 +165,26 @@ Rules:
   `--coinc-groups/--coinc-window/--coinc-masks/--coinc-ns`; all groups
   disabled = classic mask-OR mode
 
-### 2.7 Multi-board acquisition already has a legacy workflow
+### 2.7 Trigger_model (0x10): modes 10/11/12
+
+`0x10` `Trigger_model` is an 8-bit RW register; the current firmware defines
+`0..12`.  Modes `0..9` keep their legacy semantics (`9` = TCM-trigger
+return).  The newer board-local coincidence modes are:
+
+| mode | behavior |
+| --- | --- |
+| `10` | Four-group **positive** coincidence: ch0-3 / ch4-7 / ch8-11 / ch12-15; any channel above its `TCM_THR` marks the group; groups are held for `COINC_WINDOW` (`0x6F`, default 8 = 100ns @80M); all four groups active triggers. Uses `TCM_THR` `0x45..0x64`; `TCM_THR = 0xFFFF` disables a channel; `TCM_MASK/POLARITY/DEBOUNCE/EN` are not used. |
+| `11` | Four-group **negative** coincidence: each group is marked when any channel is below its threshold; all four groups active triggers; pure level, no hold window. Thresholds come from `Trigger_threshold` `0x11..0x18`, mapped by position: ch0/4/8/12→threshold0, ch1/5/9/13→threshold1, ch2/6/10/14→threshold2, ch3/7/11/15→threshold3. |
+| `12` | All-channel **negative** OR: any of the 16 channels below its threshold triggers; same threshold mapping and pure-level behavior as mode 11. |
+
+`daq-cli` accepts `0..255` (the full 8-bit register range) so future firmware
+modes do not require a vendored-script update.  Values outside the current
+firmware's `0..12` set are passed through but may be ignored by the FPGA.
+Mode 10's `COINC_WINDOW` (`0x6F`) helper exists in the vendored
+`FPGA_CTRL.py` (`set_coinc_window` / `read_coinc_window`) but is not yet
+exposed as a `daq board config` option.
+
+### 2.8 Multi-board acquisition already has a legacy workflow
 
 The external hardware project contains `script/multi_board_acquire.py` and a
 matching example config. That workflow already supports:

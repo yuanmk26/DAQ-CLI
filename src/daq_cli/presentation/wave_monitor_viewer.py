@@ -34,6 +34,9 @@ class WaveMonitorLoopStepResult:
 
 
 DEFAULT_FIGSIZE = (14.0, 10.0)
+#: Embedded GUI figures: compact enough to fit 16 channels in one page at
+#: common Windows DPI scaling while leaving room for controls/log strips.
+EMBEDDED_FIGSIZE = (11.0, 5.0)
 # Keep a materially larger recent window so watch_every=1 does not
 # silently collapse most of the sampled session into a tiny history.
 DEFAULT_MULTI_BOARD_HISTORY_LIMIT = 5000
@@ -69,16 +72,26 @@ class WaveMonitorFigure:
         source_label: str,
         help_text: str | None = None,
         figsize: tuple[float, float] | None = None,
+        grid: tuple[int, int] = (4, 4),
     ) -> None:
         self._source_label = source_label
         # Embedded GUIs pass an explicit figsize; standalone windows default
         # to a screen-derived size.
         figsize = figsize if figsize is not None else _compute_default_figsize()
-        self._figure, axes = plt.subplots(4, 4, figsize=figsize, sharex=True)
+        rows, cols = grid
+        if rows * cols != 16:
+            raise ValueError("grid must contain 16 subplots (rows * cols == 16)")
+        self._figure, axes = plt.subplots(rows, cols, figsize=figsize, sharex=True)
         self._axes = list(axes.flatten())
         self._lines = []
         for index, axis in enumerate(self._axes):
-            (line,) = axis.plot([], [], color="#5B8FF9", linewidth=1.2, alpha=0.55)
+            (line,) = axis.plot(
+                [],
+                [],
+                color="#5B8FF9",
+                linewidth=0.6,
+                alpha=0.5,
+            )
             axis.set_title(f"ch{index}")
             axis.set_xlim(0, 15)
             axis.grid(True, alpha=0.25)
@@ -91,10 +104,19 @@ class WaveMonitorFigure:
             help_text or "space: run/stop | s: single | r: run | q: quit",
             ha="left",
             va="top",
-            fontsize=9,
+            # Follow the GUI's DPI/font-scale rcParams; 9 when font.size is
+            # the matplotlib default of 10 (standalone CLI viewer).
+            fontsize=9.0 * float(plt.rcParams["font.size"]) / 10.0,
             color="#555555",
         )
-        self._figure.tight_layout(rect=(0, 0, 1, 0.9))
+        # A one-shot tight_layout is computed for the construction-time
+        # figure size/dpi; FigureCanvasTkAgg later resizes the figure to the
+        # Tk widget and sets its dpi.  A persistent layout engine re-runs on
+        # every draw, so the axes adapt to the final canvas size and DPI.
+        try:
+            self._figure.set_layout_engine("tight", rect=(0, 0, 1, 0.9))
+        except (AttributeError, TypeError, ValueError):
+            self._figure.tight_layout(rect=(0, 0, 1, 0.9))
         self.set_state(WaveMonitorRunState.RUN)
 
     @property
@@ -112,8 +134,8 @@ class WaveMonitorFigure:
             line.set_data(x_values[: len(channel)], channel)
             hit = bool(frame.hit_mask & (1 << channel_index))
             line.set_color("#D94841" if hit else "#5B8FF9")
-            line.set_linewidth(1.9 if hit else 1.1)
-            line.set_alpha(0.95 if hit else 0.45)
+            line.set_linewidth(1.0 if hit else 0.6)
+            line.set_alpha(0.95 if hit else 0.5)
             axis.set_xlim(0, max(max_length - 1, 15))
             axis.set_ylim(*_compute_channel_ylim(channel))
         self._set_title(frame=frame, run_state=run_state)
@@ -128,8 +150,8 @@ class WaveMonitorFigure:
             line.set_data(x_values[: len(channel)], channel)
             hit = bool(frame.hit_mask & (1 << channel_index))
             line.set_color("#D94841" if hit else "#5B8FF9")
-            line.set_linewidth(1.9 if hit else 1.1)
-            line.set_alpha(0.95 if hit else 0.45)
+            line.set_linewidth(1.0 if hit else 0.6)
+            line.set_alpha(0.95 if hit else 0.5)
             axis.set_xlim(0, max(max_length - 1, 15))
             axis.set_ylim(*_compute_channel_ylim(channel))
         self.set_custom_title(title)

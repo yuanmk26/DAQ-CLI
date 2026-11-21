@@ -13,10 +13,9 @@ from tkinter import filedialog, ttk
 
 from daq_cli import __version__
 from daq_cli.application.profile_service import ProfileService
+from daq_cli.presentation.gui import fonts as gui_fonts
 
 _LOG_MAX_LINES = 5000
-_FONT_FAMILY = "Microsoft YaHei"
-_FONT_SIZE = 9
 
 
 class DaqGuiApp:
@@ -25,16 +24,26 @@ class DaqGuiApp:
     def __init__(self, root: tk.Tk, profile_path: str | Path | None = None) -> None:
         self.root = root
         root.title(f"daq-cli 控制台 v{__version__}")
-        root.option_add("*Font", (_FONT_FAMILY, _FONT_SIZE))
-        root.geometry("1100x760")
+
+        self._font_scale = gui_fonts.load_font_scale()
+        self._dpi_scale = gui_fonts.dpi_scale(root)
+        gui_fonts.apply_ui_fonts(
+            root,
+            gui_fonts.font_size_pt(gui_fonts.BASE_FONT_PT, self._font_scale),
+        )
+        gui_fonts.apply_matplotlib_font_scale(self._font_scale)
+        self._apply_window_geometry(center=True)
 
         self._profile_service = ProfileService()
         self.profile = None  # loaded ProfileData, refreshed on load
         self.profile_path: Path | None = None
 
         self._build_profile_bar(root)
-        self._build_notebook(root)
+        # Reserve the bottom strip before the notebook: pack allocates the
+        # notebook's large requested height first, which would otherwise
+        # leave no space for the log panel (worse with larger fonts).
         self._build_log_panel(root)
+        self._build_notebook(root)
 
         self.tabs: list = [self.board_tab, self.acquire_tab, self.monitor_tab, self.tcm_tab]
 
@@ -49,11 +58,62 @@ class DaqGuiApp:
         bar = ttk.Frame(root, padding=(8, 6))
         bar.pack(side=tk.TOP, fill=tk.X)
         self._profile_var = tk.StringVar()
-        profile_entry = ttk.Entry(bar, textvariable=self._profile_var, width=60)
+        profile_entry = ttk.Entry(bar, textvariable=self._profile_var, width=40)
         profile_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
         ttk.Button(bar, text="加载 Profile", command=self._choose_profile).pack(
-            side=tk.LEFT, padx=(6, 0)
+            side=tk.RIGHT, padx=(6, 0)
         )
+        self._font_scale_var = tk.StringVar(value=self._scale_label(self._font_scale))
+        font_combo = ttk.Combobox(
+            bar,
+            textvariable=self._font_scale_var,
+            state="readonly",
+            width=5,
+            values=[
+                self._scale_label(scale)
+                for scale in gui_fonts.FONT_SCALE_OPTIONS
+            ],
+        )
+        font_combo.pack(side=tk.RIGHT, padx=(4, 12))
+        font_combo.bind("<<ComboboxSelected>>", self._on_font_scale_selected)
+        ttk.Label(bar, text="字号:").pack(side=tk.RIGHT, padx=(8, 0))
+
+    @staticmethod
+    def _scale_label(scale: float) -> str:
+        return f"{int(round(scale * 100))}%"
+
+    def _apply_window_geometry(self, center: bool = False) -> None:
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        width, height, x, y = gui_fonts.window_geometry(
+            screen_w, screen_h, self._dpi_scale, self._font_scale
+        )
+        if center:
+            self.root.geometry(f"{width}x{height}+{x}+{y}")
+        else:
+            self.root.geometry(f"{width}x{height}")
+        # Keep the log panel from eating the notebook on small screens.
+        self._log_lines = 6 if screen_h < 900 else 10
+
+    def _on_font_scale_selected(self, _event=None) -> None:
+        try:
+            scale = gui_fonts.nearest_font_scale(
+                int(self._font_scale_var.get().rstrip("%")) / 100.0
+            )
+        except ValueError:
+            return
+        if scale == self._font_scale:
+            return
+        self._font_scale = scale
+        gui_fonts.apply_ui_fonts(
+            self.root,
+            gui_fonts.font_size_pt(gui_fonts.BASE_FONT_PT, scale),
+        )
+        gui_fonts.apply_matplotlib_font_scale(scale)
+        gui_fonts.save_font_scale(scale)
+        self._apply_window_geometry()
+        self.log(f"字号已调整为 {self._scale_label(scale)}")
 
     def _build_notebook(self, root: tk.Tk) -> None:
         self.notebook = ttk.Notebook(root)
@@ -81,7 +141,7 @@ class DaqGuiApp:
         frame = ttk.LabelFrame(root, text="日志", padding=(6, 4))
         frame.pack(side=tk.BOTTOM, fill=tk.BOTH, padx=8, pady=(4, 8))
         self._log_text = scrolledtext.ScrolledText(
-            frame, height=10, state=tk.DISABLED, wrap=tk.WORD
+            frame, height=self._log_lines, state=tk.DISABLED, wrap=tk.WORD
         )
         self._log_text.pack(fill=tk.BOTH, expand=True)
 

@@ -6,6 +6,119 @@ Each version is tagged as `v<version>` on the `main` branch. The detailed
 snapshot of the v0.1.x line (commands, firmware contract, architecture,
 release flow) is archived in `docs/archive/version-snapshot-v0.1.4.md`.
 
+## [v0.4.6] - 2026-11-19
+
+监视页单页布局、细曲线，以及单板实时日志。
+
+### Changed
+
+- 监视 tab 改为 2×8 子图布局，嵌入式 figure 尺寸 11×5；16 路波形可在
+  一页内看完，子图高度更合适。
+- 采集页单板/多板 watch 使用 11×5 嵌入式尺寸（保持 4×4 布局）；曲线
+  线宽从 1.1/1.9 降到 0.6/1.0，hit 曲线 1.0。
+- 单板 `aggregate` / `rate` 的 `log.txt` 与 `rate.csv` / `monitor.jsonl`
+  同步：按 `rate_interval` 实时追加 `[MON]` 行（elapsed、total_events、
+  window_events、rate），结束后再追加 summary，不再只在结束时写汇总。
+  legacy 模式保持原日志行为。
+
+## [v0.4.5] - 2026-11-19
+
+修复高 DPI 下采集 / 监视波形图“变松”的问题。
+
+### Fixed
+
+- `apply_matplotlib_font_scale` 不再乘显示器 DPI。`FigureCanvasTkAgg`
+  已经把 figure dpi 设为屏幕 dpi，再乘一次会造成字号双重放大，
+  axes 被标题/刻度挤小、间距变大。现在只应用用户字号倍率。
+- `WaveMonitorFigure` 改用持久 `tight` layout engine，不再只在构造时
+  调用一次 `tight_layout`；canvas 插入 Tk 后 figure 尺寸/dpi 改变时，
+  axes 会重新排版，不再保留旧布局留下的大片空白。
+- 影响采集页单板/多板 watch、监视 tab 和独立 CLI viewer。
+
+## [v0.4.4] - 2026-11-19
+
+单板取数默认改为多板风格的聚合存储，并新增只记事例率模式。
+
+### Added
+
+- `acquire single --storage aggregate|rate|legacy`（默认 `aggregate`）：
+  - `aggregate`: `complete_events.dat` + `complete_events.idx` +
+    `run_meta.json` + `rate.csv` + `monitor.jsonl` + `log.txt`；单板一个
+    board chunk，无 `partial_events.dat`；
+  - `rate`: 只写 `rate.csv` + `monitor.jsonl` + `run_meta.json` +
+    `log.txt`，不写任何事件数据；
+  - `legacy`: 原 per-event `raw/event_*.bin` + 可选 JSON/TXT/log。
+- `--rate-interval`（默认 1.0s）和 GUI“率间隔”；`rate.csv` 列为
+  `elapsed_s,unix_time,total_events,window_events,rate_hz`，
+  `monitor.jsonl` 为同内容的 JSON。
+- GUI 单板页新增“存储模式”选择；聚合/只记率模式禁用 JSON/TXT 开关。
+- `SingleBoardAggregateWriter`、`RateLogRecorder`；多板 writer 支持
+  `partial_enabled`/`monitor_enabled=False`。
+
+### Changed
+
+- 单板默认存储从 per-event raw 改为 aggregate；需要旧格式用
+  `--storage legacy`。
+- 聚合/只记率模式的 core 文件写在 run 目录，忽略 profile/GUI 的
+  `outputs.*` 目录；旧格式仍按原逻辑。
+
+### Note
+
+- aggregate 模式的离线 decode/JSON 尚未实现；`decode run` 仍用于
+  legacy `event_*.bin`。
+
+## [v0.4.3] - 2026-11-16
+
+Trigger_model 配置范围按 8-bit 寄存器放开，支持固件 10/11/12 模式。
+
+### Fixed
+
+- vendored `FPGA_CTRL.trigger_model()` 原先把范围写死为 0..9；配置
+  11/12 时打印 `Error: Invalid trigger mode` 后直接返回，`0x10` 保持
+  旧值（例如 4）。现在按 8-bit 寄存器接受 0..255。
+- CLI `--trigger-mode`、GUI trigger-mode 字段和 `BoardConfigOptions`
+  统一按 0..255 校验；GUI 标签提示范围，避免再次静默失败。
+
+### Added
+
+- 同步外部固件的 `set_coinc_window` / `read_coinc_window`（0x6F，
+  Trigger_model=10 的四组符合保持窗口）。
+
+### Docs
+
+- 补充 `Trigger_model` 0x10 的 8-bit 定义、当前固件 0..12 的模式语义，
+  以及 11/12 使用 `Trigger_threshold` 0x11..0x18 的通道映射。
+
+## [v0.4.2] - 2026-10-29
+
+GUI 在小屏 / 高 DPI 笔记本上的字号与布局修复。
+
+### Changed
+
+- GUI 全局字体改为 Tk 命名字体（`TkDefaultFont` / `TkTextFont` /
+  `TkHeadingFont` / `TkFixedFont` 等）。原先的
+  `root.option_add("*Font", ...)` 对 ttk 控件和 `ScrolledText` 无效，
+  实际一直使用系统默认 9pt。
+- GUI 启动时启用 Windows system-DPI awareness；窗口按 DPI 缩放、夹取到
+  屏幕内并居中。默认字号从 9pt 提高到 11pt。
+- profile 栏新增“字号”下拉（100% / 115% / 130% / 150%），实时生效，
+  保存到 `%APPDATA%\daq-cli\gui.json`（不写入采集 profile）。
+- 修复日志面板被 notebook 请求高度挤出窗口的问题。
+- DPI 感知后同步缩放监视 tab 的 matplotlib 字体，避免图表文字相对变小。
+
+## [v0.4.1] - 2026-10-29
+
+打包优化：单文件 exe 从 130MB 降到约 41MB，启动时间从约 13s 降到约 8s。
+
+### Changed
+
+- `scripts/build_gui_exe.ps1` 排除 GUI 运行时不使用的
+  `scipy`/`pandas`/`numba`/`llvmlite`/`pytest`/`IPython`。其中
+  `llvmlite.dll` 单独就有约 120MB（解压后），是 onefile 启动慢的主因。
+- 用 `--add-data` 替代失效的 `--collect-all`，修复
+  `monitoring_samples` / `profile_templates` 数据文件未打入 exe 的问题
+  （影响 `daq profile init` 和 `daq monitor wave demo/replay`）。
+
 ## [v0.4.0] - 2026-10-28
 
 多板采集原生化（采集内核 + 输出格式字节级兼容）+ 可部署 exe。

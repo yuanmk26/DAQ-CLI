@@ -61,6 +61,8 @@ class MultiBoardDataWriter:
         logger=None,
         *,
         clock: MultiBoardClock = SYSTEM_CLOCK,
+        partial_enabled: bool = True,
+        monitor_enabled: bool = True,
     ) -> None:
         self.config = config
         self.run_dir = Path(run_dir)
@@ -74,15 +76,22 @@ class MultiBoardDataWriter:
 
         self._lock = threading.Lock()
         self._complete_fh = open(self.complete_path, "wb")
-        self._partial_fh = open(self.partial_path, "wb")
+        self._partial_fh = (
+            open(self.partial_path, "wb") if partial_enabled else None
+        )
         self._index_fh = open(self.index_path, "wb")
-        self._monitor_fh = open(self.monitor_jsonl_path, "a", encoding="utf-8")
+        self._monitor_fh = (
+            open(self.monitor_jsonl_path, "a", encoding="utf-8")
+            if monitor_enabled
+            else None
+        )
         self._complete_event_counter = 0
         self._partial_event_counter = 0
         self._closed = False
 
         self._write_file_header(self._complete_fh)
-        self._write_file_header(self._partial_fh)
+        if self._partial_fh is not None:
+            self._write_file_header(self._partial_fh)
 
     # ------------------------------------------------------------- file header
 
@@ -194,12 +203,16 @@ class MultiBoardDataWriter:
                     self._complete_fh.flush()
                     self._index_fh.flush()
             else:
+                if self._partial_fh is None:
+                    return
                 self._partial_fh.write(payload)
                 self._partial_event_counter += 1
                 if self._partial_event_counter % WRITER_FLUSH_EVERY == 0:
                     self._partial_fh.flush()
 
     def write_monitor_snapshot(self, snapshot: dict) -> None:
+        if self._monitor_fh is None:
+            return
         with self._lock:
             self._monitor_fh.write(
                 json.dumps(snapshot, ensure_ascii=True, sort_keys=True) + "\n"
@@ -216,6 +229,8 @@ class MultiBoardDataWriter:
                 self._index_fh,
                 self._monitor_fh,
             ):
+                if fh is None:
+                    continue
                 fh.flush()
                 fh.close()
             self._closed = True

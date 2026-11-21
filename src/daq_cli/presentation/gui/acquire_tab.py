@@ -15,6 +15,7 @@ from daq_cli.presentation.gui import formatting, threads
 from daq_cli.presentation.gui.widgets import ResultArea, ScrollableFrame
 from daq_cli.presentation.wave_monitor_viewer import (
     DEFAULT_MULTI_BOARD_HISTORY_LIMIT,
+    EMBEDDED_FIGSIZE,
     MultiBoardViewerState,
     WaveMonitorFigure,
     WaveMonitorRunState,
@@ -135,19 +136,53 @@ class AcquireTab:
             side=tk.LEFT, padx=(4, 0)
         )
 
+        mode_row = ttk.Frame(group)
+        mode_row.pack(fill=tk.X, pady=(6, 0))
+        ttk.Label(mode_row, text="存储模式:").pack(side=tk.LEFT)
+        self._single_storage_modes = {
+            "聚合 (complete_events.dat)": "aggregate",
+            "只记事例率": "rate",
+            "旧格式 (event_*.bin)": "legacy",
+        }
+        self._storage_mode_var = tk.StringVar(value="聚合 (complete_events.dat)")
+        self._storage_mode_combo = ttk.Combobox(
+            mode_row,
+            textvariable=self._storage_mode_var,
+            state="readonly",
+            width=24,
+            values=tuple(self._single_storage_modes),
+        )
+        self._storage_mode_combo.pack(side=tk.LEFT, padx=(4, 12))
+        self._storage_mode_combo.bind(
+            "<<ComboboxSelected>>", self._on_storage_mode_changed
+        )
+        ttk.Label(mode_row, text="率间隔 (s):").pack(side=tk.LEFT)
+        self._rate_interval_var = tk.StringVar(value="1.0")
+        ttk.Entry(mode_row, textvariable=self._rate_interval_var, width=6).pack(
+            side=tk.LEFT, padx=(4, 0)
+        )
+        ttk.Label(
+            group,
+            text="聚合/只记率模式只写 run 目录；旧格式才使用存储区的 raw/json/text/log 目录",
+            foreground="#666666",
+        ).pack(anchor="w", pady=(2, 0))
+
         output_row = ttk.Frame(group)
         output_row.pack(fill=tk.X, pady=(6, 0))
         self._json_enabled = tk.BooleanVar(value=False)
         self._text_enabled = tk.BooleanVar(value=False)
         self._log_enabled = tk.BooleanVar(value=True)
-        for text, var in (
-            ("JSON", self._json_enabled),
-            ("TXT", self._text_enabled),
-            ("LOG", self._log_enabled),
-        ):
-            ttk.Checkbutton(output_row, text=text, variable=var).pack(
-                side=tk.LEFT, padx=(0, 10)
-            )
+        self._json_check = ttk.Checkbutton(
+            output_row, text="JSON", variable=self._json_enabled
+        )
+        self._json_check.pack(side=tk.LEFT, padx=(0, 10))
+        self._text_check = ttk.Checkbutton(
+            output_row, text="TXT", variable=self._text_enabled
+        )
+        self._text_check.pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Checkbutton(
+            output_row, text="LOG", variable=self._log_enabled
+        ).pack(side=tk.LEFT, padx=(0, 10))
         watch_row = ttk.Frame(group)
         watch_row.pack(fill=tk.X, pady=(6, 0))
         self._watch_enabled = tk.BooleanVar(value=False)
@@ -172,6 +207,18 @@ class AcquireTab:
         self._progress.pack(fill=tk.X, pady=(6, 0))
         self._progress_label = ttk.Label(group, text="")
         self._progress_label.pack(anchor="w")
+        self._on_storage_mode_changed()
+
+    def _selected_storage_mode(self) -> str:
+        return self._single_storage_modes.get(
+            self._storage_mode_var.get(), "aggregate"
+        )
+
+    def _on_storage_mode_changed(self, _event=None) -> None:
+        state = tk.NORMAL if self._selected_storage_mode() == "legacy" else tk.DISABLED
+        if hasattr(self, "_json_check"):
+            self._json_check.configure(state=state)
+            self._text_check.configure(state=state)
 
     def _build_multi_group(self, parent) -> None:
         group = ttk.LabelFrame(parent, text="多板采集", padding=(8, 4))
@@ -254,6 +301,15 @@ class AcquireTab:
         except ValueError as exc:
             self.single_result.show(f"参数错误: {exc}")
             return
+        storage_mode = self._selected_storage_mode()
+        try:
+            rate_interval_s = float(self._rate_interval_var.get())
+        except ValueError as exc:
+            self.single_result.show(f"参数错误: 率间隔必须是数字 ({exc})")
+            return
+        if rate_interval_s < 0.1:
+            self.single_result.show("参数错误: 率间隔需 >= 0.1 秒")
+            return
         output_base_dir, run_name_prefix, outputs = self._collect_storage(
             self._single_storage, "single"
         )
@@ -297,6 +353,8 @@ class AcquireTab:
                 watch_frame_callback=watch_callback,
                 run_name_prefix=run_name_prefix,
                 cancel_event=self._single_cancel,
+                storage_mode=storage_mode,
+                rate_interval_s=rate_interval_s,
             )
 
         threads.run_in_background(
@@ -333,7 +391,7 @@ class AcquireTab:
         self._watch_figure = WaveMonitorFigure(
             source_label=self._watch_device_name,
             help_text="采集开始后实时滚动（每 N 帧采样）",
-            figsize=(11.0, 6.5),
+            figsize=EMBEDDED_FIGSIZE,
         )
         self._watch_canvas = FigureCanvasTkAgg(
             self._watch_figure.figure, master=self._watch_host
@@ -526,7 +584,7 @@ class AcquireTab:
         self._multi_watch_figure = WaveMonitorFigure(
             source_label=f"multi-watch:{self._multi_group_label or '未开始'}",
             help_text="采集开始后实时滚动（板/事件可切换）",
-            figsize=(11.0, 6.5),
+            figsize=EMBEDDED_FIGSIZE,
         )
         self._multi_watch_canvas = FigureCanvasTkAgg(
             self._multi_watch_figure.figure, master=self._multi_watch_host

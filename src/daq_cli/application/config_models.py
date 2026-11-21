@@ -14,3 +14,13 @@ class BoardConfigOptions:
     timestamp_clean_enabled: bool = False
     ext_trigger_enabled: bool = False
     send_mode: int | None = None
+
+    def __post_init__(self) -> None:
+        # 0x10 Trigger_model is an 8-bit register.  Accept the full byte
+        # range so new firmware modes (10/11/12 today) do not require a
+        # script update; the current firmware defines 0..12.
+        if not 0 <= self.trigger_mode <= 0xFF:
+            raise ValueError(
+                "trigger_mode must be in 0..255 (register 0x10 is 8-bit; "
+                f"current firmware defines 0..12), got {self.trigger_mode}"
+            )

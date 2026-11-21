@@ -22,6 +22,12 @@ matplotlib.rcParams["axes.unicode_minus"] = False
 
 
 def main() -> None:
+    from daq_cli.presentation.gui.fonts import enable_dpi_awareness
+
+    # Tk does not mark the process DPI-aware; on a scaled laptop that makes
+    # the default UI font physically tiny.  Must run before the first tk.Tk().
+    enable_dpi_awareness()
+
     # PyInstaller + multiprocessing spawn on Windows: the frozen child
     # re-executes this entry point, so this must run before argparse or any
     # GUI construction.  Without it, capture backends (decode / wave watch)

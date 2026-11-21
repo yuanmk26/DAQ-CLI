@@ -102,7 +102,15 @@ def board_config(
     ] = 2300,
     trigger_mode: Annotated[
         int,
-        typer.Option("--trigger-mode", help="Trigger mode register value."),
+        typer.Option(
+            "--trigger-mode",
+            min=0,
+            max=0xFF,
+            help=(
+                "Trigger mode register value (0x10 is an 8-bit register; "
+                "current firmware defines 0..12)."
+            ),
+        ),
     ] = 1,
     trigger_position: Annotated[
         int,

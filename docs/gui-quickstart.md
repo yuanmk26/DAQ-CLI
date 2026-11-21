@@ -8,11 +8,13 @@
 **方案 A：exe（推荐，免 Python）**
 
 ```text
-1. 拷贝 daq-gui-0.4.0.exe + profiles/daq.yaml（或整个 daq-gui-0.4.0-win64 目录）
+1. 拷贝 daq-gui-0.4.6.exe + profiles/daq.yaml（或整个 daq-gui-0.4.6-win64 目录）
    到新电脑
 2. 按需修改 profiles/daq.yaml 里的 IP（默认 192.168.10.10/.12/.13/.14 + TCM .16）
-3. 双击 daq-gui-0.4.0.exe
+3. 双击 daq-gui-0.4.6.exe
 4. 启动后自动加载 profiles/daq.yaml；若未加载，点顶部 [加载 Profile] 手动选择
+5. 界面文字偏小/偏大：右上角“字号”下拉可选 100% / 115% / 130% / 150%，
+   立即生效并保存到当前用户的 %APPDATA%\daq-cli\gui.json
 ```
 
 **方案 B：zip（Python 3.12）**
@@ -97,6 +99,20 @@ TCM tab → show → 看 sticky/最近触发通道；或用示波器看 M21 脉�
 6. 点 [开始采集]，看 busy 指示；完成后结果区显示 complete/partial 事件数
 ```
 
+### 单板采集的存储模式（v0.4.4+）
+
+```text
+存储模式:
+  聚合（默认）  complete_events.dat + idx + run_meta.json
+                + rate.csv + monitor.jsonl + log.txt（无 partial）
+  只记事例率    rate.csv + monitor.jsonl + run_meta.json + log.txt
+                （不存任何事件数据）
+  旧格式        raw/event_XXXXX.bin + 可选 JSON/TXT/log + capture_info.txt
+
+率间隔(s): 默认 1.0；rate.csv 可直接画“事例率-时间”曲线
+聚合/只记率模式只写 run 目录，忽略存储区的 raw/json/text/log 目录
+```
+
 ## 4. 结果检查
 
 ```text
@@ -114,7 +130,7 @@ TCM tab → show → 看 sticky/最近触发通道；或用示波器看 M21 脉�
 | 现象 | 原因 | 处理 |
 |---|---|---|
 | 标定采到全 0 | 固件重烧后 ADC/时钟未配 | 回到 1.1 |
-| 应用全部后 TCM 无触发 | 阈值全 0 / 字节序旧版 | 重新标定；确认用 v0.4.0 包 |
+| 应用全部后 TCM 无触发 | 阈值全 0 / 字节序旧版 | 重新标定；确认用 v0.4.6 包 |
 | TCM show 无 sticky | M21 未连 TCM / 阈值没穿越 | 查线缆；看板卡 tab 自动标定值 |
 | 多板采集卡在 align | ack 不全但放行没开 | 勾选 ☑ 无 ack 放行 |
 | 信号不在窗口中间 | Trigger_position 不对 | 换拓扑后重新标定（见 traps §1.5） |

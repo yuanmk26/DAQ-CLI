@@ -206,7 +206,9 @@ daq board config dev1 \
 
 Supported options:
 
-- `--trigger-mode`
+- `--trigger-mode`（`0x10`，8-bit；0..255，当前固件定义 0..12：
+  9=TCM 返回，10=四组正符合，11=四组负符合，12=全通道负或；
+  11/12 使用 `--threshold-1..4`，不是 TCM-link 的 0x45..0x64 阈值）
 - `--trigger-position`
 - `--threshold-1`
 - `--threshold-2`
@@ -349,39 +351,67 @@ Examples:
 daq acquire single dev1 --events 100 --profile profiles/examples/example.yaml
 daq acquire single dev1 --events 1000 --timeout 10 --profile profiles/examples/example.yaml
 daq acquire single dev1 --events 200 --output-dir out/single --profile profiles/examples/example.yaml
-daq acquire single dev1 --events 100 --decode-json --profile profiles/examples/example.yaml
+daq acquire single dev1 --events 100 --storage legacy --decode-json --profile profiles/examples/example.yaml
+daq acquire single dev1 --events 100000 --storage rate --rate-interval 1.0 --profile profiles/examples/example.yaml
 daq acquire single dev1 --events 1000 --watch-every 100 --profile profiles/examples/example.yaml
 daq acquire single dev1 --events 1000 --progress-every 50 --profile profiles/examples/example.yaml
 ```
+
+Single-board storage modes (`--storage`):
+
+- `aggregate` (default): multi-board-style aggregate for one board:
+  `complete_events.dat` + `complete_events.idx` + `run_meta.json` +
+  `rate.csv` + `monitor.jsonl` + `log.txt`.  There is no
+  `partial_events.dat`; each event has exactly one board chunk.  JSON/TXT are
+  not generated online in this mode (offline decode is a later step).
+- `rate`: only `rate.csv` + `monitor.jsonl` + `run_meta.json` + `log.txt`;
+  no event payload files.  Use this when only the event-rate history matters.
+- `legacy`: the previous per-event format: `raw/event_XXXXX.bin` (or the
+  configured raw directory), optional JSON/TXT/log, and `capture_info.txt`.
+
+`--rate-interval` (default 1.0s) controls rate sampling in aggregate/rate
+modes.  `rate.csv` columns are
+`elapsed_s,unix_time,total_events,window_events,rate_hz`; `monitor.jsonl`
+contains the same samples as JSON.  In aggregate/rate modes the core files
+always live in the run directory; the profile/GUI `outputs.*` directories
+apply only to `legacy`.  `log.txt` is written continuously in these modes:
+every `rate_interval` it appends a multi-board-style `[MON]` line with
+`elapsed`, `total_events`, `window_events`, and `rate`, then appends the
+final summary at stop.
 
 Current behavior:
 
 - The command reads the board's current `send_mode` before capture
 - The native single-board receiver parses packet length from that `send_mode`
 - Current single-board capture supports firmware `send_mode` 0, 1, 2, and 3
-- A timestamped run directory is created under the selected output base directory
-- Raw event files are written by the native runner in the same per-event format as before
-- `--decode-json` adds a separate online decode pipeline that writes JSON when `outputs.json.enabled` is on
-- The online decode pipeline is best-effort and does not take priority over raw capture throughput
-- `--watch-every N` opens a waveform watch viewer and refreshes it with every Nth captured event
-- The watch viewer is a best-effort sampling path that always yields to raw capture throughput
+- A run directory `<prefix>_00001` is created under the selected output base
+- The default storage is `aggregate`; use `--storage legacy` for per-event raw files
+- `--decode-json` and TXT output are only available in `legacy` storage mode
+- `--watch-every N` opens the CLI waveform watch viewer only in `legacy` mode;
+  the GUI embedded watch works in all single-board modes
 - A line-by-line live monitor shows progress, event rate, latest `hit_mask`, packet bytes, and output directory during capture
 - `--progress-every N` throttles those live progress lines while still forcing the final `events=N/N` line
-- `defaults.acquire_single` in the profile can provide default values for `events`, `timeout_s`, `output_dir`, `watch_every`, `progress_every`, and `outputs.*`
+- `defaults.acquire_single` in the profile can provide default values for `events`, `timeout_s`, `output_dir`, `watch_every`, `progress_every`, `storage_mode`, `rate_interval_s`, and `outputs.*`
 - A summary table is printed after the run
 - A final native capture summary is also shown
 
 Typical output data includes:
 
-- Event binary files
-- Optional decoded JSON files under the configured JSON output directory
-- Optional TXT files such as `events_00001.txt` under the configured text output directory
-- Optional capture log file under the configured log output directory
-- `capture_info.txt`
+- `aggregate`: `complete_events.dat`, `complete_events.idx`, `run_meta.json`,
+  `rate.csv`, `monitor.jsonl`, `log.txt`
+- `rate`: `rate.csv`, `monitor.jsonl`, `run_meta.json`, `log.txt`
+- `legacy`: event binary files; optional decoded JSON files under the
+  configured JSON output directory; optional TXT files such as
+  `events_00001.txt` under the configured text output directory; optional
+  capture log; `capture_info.txt`
 
 ## 10. Offline Decode
 
 Use `decode` to convert raw single-board event packets into structured JSON.
+
+> Aggregate-mode offline decode (`complete_events.dat` → JSON) is not
+> implemented yet.  `decode run` applies to `--storage legacy` runs with
+> `event_*.bin` files; `/storage rate` runs have no event data to decode.
 
 Run-level decode:
 

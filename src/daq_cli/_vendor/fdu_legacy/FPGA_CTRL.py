@@ -148,7 +148,10 @@ class FPGAControl:
 
 
     def trigger_model(self, mode):
-        if mode < 0 or mode > 9:
+        # 0x10 is an 8-bit register.  Accept the full byte so new firmware
+        # modes do not need a vendored-script update; the current firmware
+        # defines modes 0..12 (9=TCM return, 10/11/12=coincidence modes).
+        if mode < 0 or mode > 0xFF:
             print("Error: Invalid trigger mode")
             return
         self.rbcp.write(0x10, bytes([mode]))
@@ -208,6 +211,20 @@ class FPGAControl:
         self.rbcp.write(0x6A, bytes([debounce & 0xFF]))
         self.rbcp.write(0x6C, bytes([pulse_width]))
         self.rbcp.write(0x6B, bytes([0x01 if enable else 0x00]))
+
+    def set_coinc_window(self, samples):
+        """配置 Trigger_model=10 的四组符合保持窗口（0x6F）。
+
+        samples: 保持窗口长度，单位 clk_sample 周期；0 表示严格同一周期符合。
+        """
+        if samples < 0 or samples > 0xFF:
+            print("Error: Invalid COINC_WINDOW value")
+            return
+        self.rbcp.write(0x6F, bytes([samples]))
+
+    def read_coinc_window(self):
+        """回读 Trigger_model=10 的四组符合保持窗口（0x6F）。"""
+        return self.rbcp.read(0x6F, 1)[0]
 
     def read_tcm_config(self):
         """回读 TCM 触发链路配置。"""

@@ -15,6 +15,7 @@ from daq_cli.application.monitor_service import MonitorService
 from daq_cli.presentation.gui import threads
 from daq_cli.presentation.gui.widgets import ResultArea
 from daq_cli.presentation.wave_monitor_viewer import (
+    EMBEDDED_FIGSIZE,
     WaveMonitorFigure,
     WaveMonitorLoopState,
     WaveMonitorRunState,
@@ -91,6 +92,8 @@ class MonitorTab:
         self._figure = WaveMonitorFigure(
             source_label=source_label,
             help_text="启动监视后实时滚动（RUN/STOP/SINGLE 按钮控制）",
+            figsize=EMBEDDED_FIGSIZE,
+            grid=(2, 8),
         )
         self._canvas = FigureCanvasTkAgg(self._figure.figure, master=self._canvas_frame)
         self._canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)

@@ -52,7 +52,7 @@ daq-gui-<version>-win64\
 也可以用快捷方式显式指定：
 
 ```
-daq-gui-0.4.0.exe --profile "D:\daq\profiles\daq.yaml"
+daq-gui-0.4.6.exe --profile "D:\daq\profiles\daq.yaml"
 ```
 
 ## 5. 输出位置

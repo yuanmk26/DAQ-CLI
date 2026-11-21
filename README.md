@@ -67,7 +67,7 @@ To build both the GUI and the CLI as one-file executables instead:
 Outputs land in `dist-exe\` (`daq-gui.exe` + `daq.exe`).
 
 ```bash
-dist\daq-gui-0.4.0.exe --profile profiles\examples\example.tcm-trigger.yaml
+dist\daq-gui-0.4.6.exe --profile profiles\examples\example.tcm-trigger.yaml
 dist-exe\daq.exe --help
 ```
 

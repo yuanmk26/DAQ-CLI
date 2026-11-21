@@ -67,6 +67,25 @@ def acquire_single(
             help="Print one live progress line every N captured events.",
         ),
     ] = None,
+    storage: Annotated[
+        str | None,
+        typer.Option(
+            "--storage",
+            help=(
+                "Single-board storage mode: aggregate (complete_events.dat, "
+                "default), rate (rate.csv/monitor.jsonl only), or legacy "
+                "(per-event raw/JSON/TXT files)."
+            ),
+        ),
+    ] = None,
+    rate_interval: Annotated[
+        float | None,
+        typer.Option(
+            "--rate-interval",
+            min=0.1,
+            help="Rate-log sample interval in seconds (aggregate/rate modes).",
+        ),
+    ] = None,
     profile: RequiredProfileOption = ...,
 ) -> None:
     """Capture raw TCP_SENT packets from one device."""
@@ -80,7 +99,22 @@ def acquire_single(
         decoded_output_dir=decoded_output_dir,
         watch_every=watch_every,
         progress_every=progress_every,
+        storage=storage,
+        rate_interval=rate_interval,
     )
+    storage_mode = str(resolved["storage_mode"]).lower()
+    if storage_mode not in {"aggregate", "rate", "legacy"}:
+        raise typer.BadParameter(
+            "storage must be one of: aggregate, rate, legacy"
+        )
+    if storage_mode != "legacy" and (
+        resolved["outputs"].json.enabled or resolved["outputs"].text.enabled
+    ):
+        typer.echo(
+            "Warning: JSON/TXT outputs are only available in legacy storage "
+            "mode; they are ignored in aggregate/rate mode.",
+            err=True,
+        )
     service = AcquireService()
     last_printed_events = 0
 
@@ -130,6 +164,8 @@ def acquire_single(
         outputs=resolved["outputs"],
         watch_every=resolved["watch_every"],
         progress_callback=on_progress,
+        storage_mode=storage_mode,
+        rate_interval_s=float(resolved["rate_interval_s"]),
     )
     print_single_acquire_result(result)
 
@@ -267,6 +303,8 @@ def _resolve_single_acquire_options(
     decoded_output_dir: Path | None,
     watch_every: int | None,
     progress_every: int | None,
+    storage: str | None = None,
+    rate_interval: float | None = None,
 ) -> dict[str, object]:
     acquire_defaults = defaults.get("acquire_single")
     if not isinstance(acquire_defaults, dict):
@@ -305,6 +343,19 @@ def _resolve_single_acquire_options(
             progress_every
             if progress_every is not None
             else int(acquire_defaults.get("progress_every", 50))
+        ),
+        "storage_mode": (
+            str(storage).lower()
+            if storage is not None
+            else str(acquire_defaults.get("storage_mode", "aggregate")).lower()
+        ),
+        "rate_interval_s": max(
+            0.1,
+            float(
+                rate_interval
+                if rate_interval is not None
+                else acquire_defaults.get("rate_interval_s", 1.0)
+            ),
         ),
     }
 

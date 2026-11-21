@@ -96,6 +96,26 @@ def print_single_acquire_result(result: SingleAcquireResult) -> None:
     table.add_row("requested_events", str(result.requested_events))
     table.add_row("captured_events", str(result.captured_events or "-"))
     table.add_row("send_mode", str(result.send_mode))
+    table.add_row(
+        "storage_mode", str(getattr(result, "storage_mode", "legacy"))
+    )
+    table.add_row(
+        "aggregate_output",
+        str(getattr(result, "aggregate_output_path", None) or "-"),
+    )
+    table.add_row(
+        "aggregate_index",
+        str(getattr(result, "aggregate_index_path", None) or "-"),
+    )
+    table.add_row(
+        "rate_csv", str(getattr(result, "rate_csv_path", None) or "-")
+    )
+    table.add_row(
+        "run_meta", str(getattr(result, "run_meta_path", None) or "-")
+    )
+    table.add_row(
+        "rate_interval_s", f"{getattr(result, 'rate_interval_s', 1.0)}"
+    )
     table.add_row("decode_enabled", str(result.decode_enabled))
     table.add_row("raw_output_dir", str(getattr(result, "raw_output_dir", None) or "-"))
     table.add_row(
