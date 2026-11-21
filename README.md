@@ -38,6 +38,20 @@ Not implemented yet:
 
 ## Quick start
 
+### Qt waveform replay prototype
+
+The optional Qt workstation reads a recorded run locally. Install with
+`pip install -e ".[qt-replay]"`, then run `daq-replay path/to/run`. On Windows
+you can also launch `scripts\run_qt_replay.cmd`; it uses the project-local
+`.venv-qt` if available and opens `samples/four_board_00001` by default.
+Real capture samples are local files and are excluded from Git.
+
+The timeline combines complete and partial events in recorded flush-time order.
+The default preview loads up to 256 events; use `--limit N` to change it.
+Select a board to see its 16 channels, or use the channel selector to inspect
+one trace. Playback follows recorded intervals. Stepping or scrubbing pauses
+the replay. The TCM panel shows the saved alignment snapshot.
+
 Install in editable mode:
 
 ```bash

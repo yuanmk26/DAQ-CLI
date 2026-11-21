@@ -15,9 +15,13 @@ dependencies = [
     "rich>=13.0",
 ]
 
+[project.optional-dependencies]
+qt-replay = ["PySide6-Essentials>=6.7,<7", "pyqtgraph>=0.13.7,<0.15", "numpy>=1.25"]
+
 [project.scripts]
 daq = "daq_cli.main:main"
 daq-gui = "daq_cli.gui_main:main"
+daq-replay = "daq_cli.qt_replay:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
