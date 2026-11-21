@@ -98,7 +98,7 @@ class Workstation(W.QMainWindow):
         header.addWidget(label("DAQ  /  波形工作台", "title"))
         header.addSpacing(10)
         self.mode = W.QComboBox()
-        self.mode.addItems(["离线回放", "单板采样", "多板采样"])
+        self.mode.addItems(["离线回放", "单板工作台", "多板采样"])
         self.mode.model().item(0).setEnabled(replay is not None)
         header.addWidget(self.mode)
         header.addStretch()
@@ -208,6 +208,7 @@ class Workstation(W.QMainWindow):
         self.play.setToolTip("播放 / 暂停 (空格)")
         self.single.updated.connect(self.live_updated)
         self.single.active_changed.connect(self.capture_active_changed)
+        self.single.restore_failed.connect(self.show_restore_failure)
         self.multi.updated.connect(self.live_updated)
         self.multi.active_changed.connect(self.capture_active_changed)
         self.closing = False
@@ -250,6 +251,14 @@ class Workstation(W.QMainWindow):
         self.single.refresh_interlock()
         self.multi.refresh_interlock()
         self.finish_close()
+
+    def show_restore_failure(self, message):
+        if self.closing:
+            self.closing = False
+            self.centralWidget().setEnabled(True)
+        notice = W.QMessageBox(W.QMessageBox.Icon.Warning, "发送模式恢复失败", message, parent=self)
+        notice.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
+        notice.show()
 
     def finish_close(self):
         if self.closing and not self.single.active and not self.multi.active and self.config.task is None:
@@ -365,7 +374,7 @@ def main():
     parser = argparse.ArgumentParser(description="Qt 单板、多板采样与波形回放工作台")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--multi", action="store_true", help="打开多板采样页面")
-    modes.add_argument("--single", action="store_true", help="打开单板采样页面")
+    modes.add_argument("--single", action="store_true", help="打开单板工作台")
     parser.add_argument("run_dir", nargs="?", type=Path, default=None)
     parser.add_argument("-p", "--profile", type=Path, help="单板采样配置文件")
     parser.add_argument("--limit", type=int, default=256, help="最多载入的事件数（默认 256）")

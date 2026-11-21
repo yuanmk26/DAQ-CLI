@@ -220,3 +220,93 @@ def test_concurrent_boards_pause_stop_restart_and_close(tmp_path):
             pane.stop_all()
             wait_for(app, lambda: not pane.active)
             window.close()
+
+
+@pytest.mark.parametrize("restore_failure", [False, True])
+def test_monitor_alongside_capture_and_restore(tmp_path, restore_failure):
+    from PySide6.QtWidgets import QMessageBox
+    from daq_cli.infrastructure.wave_monitor import LiveWaveMonitorSource, WaveMonitorFrame
+    import threading
+
+    app = QApplication.instance() or QApplication([])
+    profile = tmp_path / "profile.yaml"
+    profile.write_text("devices:\n  a: {ip: 127.0.0.1}\n  alias: {ip: 127.0.0.1}\n"
+                       "  b: {ip: 127.0.0.2}\n")
+    window = Workstation(profile_path=profile)
+    window.show()
+    pane, panel = window.single, window.config
+    monitor_dir = tmp_path / "monitor"
+    pane.output.setText(str(monitor_dir))
+    frames = queue.Queue()
+    restoring, release = threading.Event(), threading.Event()
+    modes = {"a": 3, "b": 1}
+    stream = ControlledStream()
+
+    def write_mode(device, mode):
+        if mode == 3:
+            restoring.set()
+            release.wait(4)
+            if restore_failure:
+                return  # Simulate a write acknowledged with the wrong readback.
+        modes[device.name] = mode
+
+    def receive(source, stop_event):
+        while not stop_event.is_set():
+            try:
+                event = frames.get(timeout=0.02)
+            except queue.Empty:
+                continue
+            yield WaveMonitorFrame("a", event, 100, 1, 1, [[event, 5]] * 16)
+
+    with patch.object(LegacyBoardAdapter, "read_tcp_mode2_config",
+                      side_effect=lambda d: SimpleNamespace(send_mode=modes[d.name])), \
+         patch.object(LegacyBoardAdapter, "write_send_mode", side_effect=write_mode), \
+         patch.object(LiveWaveMonitorSource, "frames", receive), \
+         patch.object(LegacySingleCaptureRunner, "_open_socket", return_value=stream):
+        try:
+            pane.monitor.click()
+            frames.put(7)
+            wait_for(app, lambda: pane.displayed is not None)
+            assert modes["a"] == 1 and pane.state.text() == "监视中"
+            panel.tabs.setCurrentIndex(1)
+            assert not panel.write.isEnabled() and not panel.calibrate.isEnabled()
+            assert panel.read.isEnabled()
+            pane.pause.click()
+            frames.put(8)
+            wait_for(app, lambda: pane.latest[0] == 8)
+            assert pane.displayed[0] == 7
+            pane.buttons["alias"].click()
+            assert not pane.monitor.isEnabled() and not pane.start.isEnabled()
+            pane.buttons["b"].click()
+            pane.output.setText(str(tmp_path / "runs"))
+            pane.start.click()
+            stream.packets.put(_build_tcp_sent_packet(1, 1, 42))
+            wait_for(app, lambda: pane.displayed is not None)
+            recorded = Path(pane.message) / "complete_events.dat"
+            pane.buttons["a"].click()
+            pane.pause.click()
+            assert pane.displayed[0] == 8
+            if restore_failure:
+                window.close()
+            else:
+                pane.stop_button.click()
+            wait_for(app, restoring.is_set)
+            assert "127.0.0.1" in pane.reserved_ips and not panel.write.isEnabled()
+            release.set()
+            wait_for(app, lambda: pane.boards["a"].session is None)
+            assert not monitor_dir.exists() and panel.write.isEnabled()
+            if restore_failure:
+                notices = window.findChildren(QMessageBox)
+                assert any(n.isVisible() and "a：恢复原发送模式 3 失败" in n.text() for n in notices)
+                assert window.isVisible() and not window.closing
+            else:
+                assert modes["a"] == 3 and pane.start.isEnabled()
+                assert pane.boards["b"].session is not None
+            window.close()
+            wait_for(app, lambda: not pane.active)
+            assert len(list(MultiBoardAggregatedEventReader(recorded, event_kind="complete").iter_events())) == 1
+        finally:
+            release.set()
+            pane.stop_all()
+            wait_for(app, lambda: not pane.active)
+            window.close()

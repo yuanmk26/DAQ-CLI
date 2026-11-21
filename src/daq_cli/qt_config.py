@@ -341,7 +341,7 @@ class ConfigPanel(W.QFrame):
         self.calibrate.setEnabled(writable and mode9)
         self.copy.setEnabled(ready and bool(form.snapshot))
         self.note.setText("操作进行中…" if self.task else
-                          "该板正在采样，仅允许回读和编辑草稿。" if self.locked() else
+                          "该板正在监视或采样，仅允许回读和编辑草稿。" if self.locked() else
                           "表单为草稿。应用时写入所选硬件。")
         message = self.reports.get(form, "")
         last_read = form.readback_text if form else ""

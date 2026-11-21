@@ -51,22 +51,34 @@ class LiveWaveMonitorContext(AbstractContextManager["WaveMonitorSession"]):
         self._device = device
         self._source = source
         self._original_send_mode = original_send_mode
+        self.restore_error = ""
         self._session: WaveMonitorSession | None = None
 
     def __enter__(self) -> WaveMonitorSession:
-        self._adapter.write_send_mode(self._device, 1)
-        self._session = _make_session(self._source)
+        try:
+            self._adapter.write_send_mode(self._device, 1)
+            self._session = _make_session(self._source)
+        except Exception:
+            self._restore_mode()
+            raise
         return self._session
 
     def __exit__(self, exc_type, exc, tb) -> bool | None:
         if self._session is not None:
             self._session.stop_event.set()
-            self._session.producer.join(timeout=2.0)
+            self._session.producer.join()
+        self._restore_mode()
+        return None
+
+    def _restore_mode(self) -> None:
         try:
             self._adapter.write_send_mode(self._device, self._original_send_mode)
+            actual = self._adapter.read_tcp_mode2_config(self._device).send_mode
+            if actual != self._original_send_mode:
+                raise RuntimeError(f"回读发送模式为 {actual}")
         except Exception as restore_exc:
+            self.restore_error = f"恢复原发送模式 {self._original_send_mode} 失败：{restore_exc}"
             print(f"Warning: failed to restore send_mode: {restore_exc}")
-        return None
 
 
 class OfflineWaveMonitorContext(AbstractContextManager["WaveMonitorSession"]):

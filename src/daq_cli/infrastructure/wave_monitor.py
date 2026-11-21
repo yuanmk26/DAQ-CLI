@@ -284,10 +284,10 @@ class LiveWaveMonitorSource(BaseWaveMonitorSource):
 
     def frames(self, stop_event: threading.Event) -> Iterator[WaveMonitorFrame]:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(self._tcp_timeout_s)
-        sock.connect((self._device.ip, self._device.tcp_port))
         buffer = bytearray()
         try:
+            sock.settimeout(self._tcp_timeout_s)
+            sock.connect((self._device.ip, self._device.tcp_port))
             while not stop_event.is_set():
                 try:
                     chunk = sock.recv(8192)

@@ -4,6 +4,7 @@ import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from queue import Empty
 
 import numpy as np
 from PySide6 import QtCore, QtWidgets as W
@@ -11,6 +12,7 @@ from PySide6 import QtCore, QtWidgets as W
 from daq_cli.application.acquire_options import default_output_base_dir, resolve_single_acquire_options
 from daq_cli.application.acquire_service import AcquireService
 from daq_cli.application.config_models import board_profile_options
+from daq_cli.application.monitor_service import MonitorService
 from daq_cli.application.profile_service import ProfileService
 from daq_cli.infrastructure.tcp_sent_decode import decode_tcp_sent_packet
 from daq_cli.qt_scope import label
@@ -75,26 +77,67 @@ class CaptureSession(threading.Thread):
             decoder.join()
 
 
+class MonitorSession(threading.Thread):
+    """Own the live monitor context through TCP teardown and mode restoration."""
+
+    def __init__(self, name, profile):
+        super().__init__(name=f"qt-monitor-{name}")
+        self.device_name = name
+        self.profile = profile
+        self.cancel = threading.Event()
+        self.ready = threading.Event()
+        self.lock = threading.Lock()
+        self.frame = None
+        self.error = ""
+        self.restore_error = ""
+
+    def run(self):
+        context = None
+        try:
+            service = MonitorService(ProfileService(self.profile))
+            context = service.open_live_wave_session(self.device_name, self.profile.path)
+            if self.cancel.is_set():
+                return
+            with context as live:
+                self.ready.set()
+                while not self.cancel.is_set():
+                    try:
+                        item = live.frame_queue.get(timeout=0.05)
+                    except Empty:
+                        continue
+                    if isinstance(item, Exception):
+                        raise item
+                    with self.lock:
+                        self.frame = (item.event_count, item.hit_mask, item.channels)
+        except Exception as exc:
+            self.error = str(exc) or type(exc).__name__
+        finally:
+            if context is not None:
+                self.restore_error = context.restore_error
+
+
 @dataclass
 class BoardCapture:
     events: int
     storage_mode: str
     stride: int
     output: str
-    session: CaptureSession | None = None
+    session: CaptureSession | MonitorSession | None = None
+    monitoring: bool = False
     latest: tuple | None = None
     displayed: tuple | None = None
     paused: bool = False
     count: int = 0
     requested: int = 0
     state: str = "就绪"
-    message: str = "等待开始采样"
+    message: str = "请选择监视或采样"
 
 
 class SingleCapturePane(W.QFrame):
     updated = QtCore.Signal(bool)
     active_changed = QtCore.Signal(bool)
     profile_changed = QtCore.Signal(object)
+    restore_failed = QtCore.Signal(str)
 
     def __init__(self, profile_path=None):
         super().__init__(objectName="panel")
@@ -109,7 +152,7 @@ class SingleCapturePane(W.QFrame):
         self.timer.setInterval(50)
         self.timer.timeout.connect(self.poll)
         side = W.QVBoxLayout(self)
-        side.addWidget(label("单板采样", "section"))
+        side.addWidget(label("单板工作台", "section"))
         self.load = W.QPushButton("选择配置…")
         self.load.clicked.connect(self.choose_profile)
         side.addWidget(self.load)
@@ -139,7 +182,8 @@ class SingleCapturePane(W.QFrame):
         self.browse.clicked.connect(self.choose_output)
         side.addWidget(self.browse)
         side.addStretch()
-        side.addWidget(label("已采事件", "muted"))
+        self.count_label = label("已采事件", "muted")
+        side.addWidget(self.count_label)
         self.count = label("0", "title")
         side.addWidget(self.count)
         self.state = label("就绪", "section")
@@ -147,16 +191,19 @@ class SingleCapturePane(W.QFrame):
         self.controls = W.QFrame(objectName="panel")
         bar = W.QHBoxLayout(self.controls)
         self.start = W.QPushButton("开始采样", objectName="primary")
+        self.monitor = W.QPushButton("开始监视")
+        self.monitor.clicked.connect(lambda: self.begin(monitoring=True))
         self.stop_button = W.QPushButton("停止采样")
         self.pause = W.QPushButton("暂停波形", checkable=True)
         self.pause.setToolTip("冻结当前波形，继续采样和写盘")
         self.start.clicked.connect(self.begin)
         self.stop_button.clicked.connect(self.stop)
         self.pause.toggled.connect(self.pause_changed)
-        for button in (self.start, self.stop_button, self.pause):
+        for button in (self.monitor, self.start, self.stop_button, self.pause):
             bar.addWidget(button)
         bar.addStretch()
         self.start.setEnabled(False)
+        self.monitor.setEnabled(False)
         self.stop_button.setEnabled(False)
         self.pause.setEnabled(False)
         path = profile_path or os.getenv("DAQ_PROFILE")
@@ -255,7 +302,8 @@ class SingleCapturePane(W.QFrame):
 
     def update_card(self, name):
         board = self.boards[name]
-        text = f"{name}    {board.state}\n{board.count} 事件"
+        detail = f"事件号 {board.latest[0] if board.latest else '—'}" if board.monitoring else f"{board.count} 事件"
+        text = f"{name}    {board.state}\n{detail}"
         if board.paused:
             text += "   ·   波形已暂停"
         button = self.buttons[name]
@@ -265,7 +313,11 @@ class SingleCapturePane(W.QFrame):
     def show_selected(self, redraw):
         board = self.boards[self.selected]
         self.state.setText(board.state)
-        self.count.setText(f"{board.count} / {board.requested}" if board.requested else "0")
+        self.count_label.setText("最近事件号" if board.monitoring else "已采事件")
+        if board.monitoring:
+            self.count.setText(str(board.latest[0]) if board.latest else "—")
+        else:
+            self.count.setText(f"{board.count} / {board.requested}" if board.requested else "0")
         self.message = board.message
         self.updated.emit(redraw)
 
@@ -275,14 +327,18 @@ class SingleCapturePane(W.QFrame):
         blocked = bool(ip and (ip == self.config_write_ip or ip in self.reserved_ips))
         busy = bool(board and board.session)
         self.start.setEnabled(bool(board) and not blocked)
-        self.start.setToolTip("该板正在采样、配置或标定" if blocked else "")
+        self.monitor.setEnabled(self.start.isEnabled())
+        self.start.setToolTip("该板正在监视、采样、配置或标定" if blocked else "")
+        self.monitor.setToolTip(self.start.toolTip() if blocked else "仅显示实时波形")
+        self.stop_button.setText("停止监视" if board and board.monitoring else "停止采样")
+        self.pause.setToolTip("冻结当前波形，后台继续接收" if board and board.monitoring else "冻结当前波形，继续采样和写盘")
         self.stop_button.setEnabled(busy and not board.session.cancel.is_set())
         self.pause.setEnabled(busy or bool(board and board.paused))
         for widget in (self.form, self.output, self.browse):
             widget.setDisabled(busy)
         self.load.setEnabled(not self.active and not self.config_busy)
 
-    def begin(self):
+    def begin(self, *, monitoring=False):
         if not self.selected:
             return
         ip = self.profile.devices[self.selected].ip
@@ -290,18 +346,22 @@ class SingleCapturePane(W.QFrame):
             return
         self.save_settings()
         board = self.boards[self.selected]
-        board.session = CaptureSession(dict(
-            device_name=self.selected, profile_path=self.profile.path,
-            events=board.events, timeout_s=self.options["timeout_s"],
-            outputs=self.options["outputs"], storage_mode=board.storage_mode,
-            rate_interval_s=self.options["rate_interval_s"], watch_every=board.stride,
-            output_base_dir=Path(board.output.strip()) if board.output.strip() else self.options["output_dir"],
-        ), self.profile)
+        board.monitoring = monitoring
+        if monitoring:
+            board.session = MonitorSession(self.selected, self.profile)
+        else:
+            board.session = CaptureSession(dict(
+                device_name=self.selected, profile_path=self.profile.path,
+                events=board.events, timeout_s=self.options["timeout_s"],
+                outputs=self.options["outputs"], storage_mode=board.storage_mode,
+                rate_interval_s=self.options["rate_interval_s"], watch_every=board.stride,
+                output_base_dir=Path(board.output.strip()) if board.output.strip() else self.options["output_dir"],
+            ), self.profile)
         board.latest = board.displayed = None
         board.paused = False
         board.count = 0
-        board.requested = board.events
-        board.message = "正在启动采样"
+        board.requested = 0 if monitoring else board.events
+        board.message = "正在启动监视" if monitoring else "正在启动采样"
         board.state = "正在连接"
         self.update_card(self.selected)
         with QtCore.QSignalBlocker(self.pause):
@@ -321,7 +381,7 @@ class SingleCapturePane(W.QFrame):
         board = self.boards[name]
         if board.session:
             board.session.cancel.set()
-            board.state = "正在停止并收尾"
+            board.state = "正在结束监视" if board.monitoring else "正在停止并收尾"
             self.update_card(name)
             if name == self.selected:
                 self.refresh_interlock()
@@ -350,7 +410,14 @@ class SingleCapturePane(W.QFrame):
                 continue
             finished = not session.is_alive()
             with session.lock:
-                progress, board.latest, error = session.progress, session.frame, session.preview_error
+                board.latest = session.frame
+                if isinstance(session, CaptureSession):
+                    progress, error = session.progress, session.preview_error
+                else:
+                    progress = None
+                    if session.ready.is_set() and not session.cancel.is_set():
+                        board.state = "监视中"
+                        board.message = "实时波形 · 仅监视"
             if not board.paused and board.latest is not board.displayed:
                 board.displayed = board.latest
                 if name == self.selected:
@@ -366,7 +433,14 @@ class SingleCapturePane(W.QFrame):
                 session.join()
                 board.session = None
                 released = True
-                if session.result:
+                if isinstance(session, MonitorSession):
+                    board.state = "监视失败" if session.error else "监视已停止"
+                    board.message = session.error or "监视已结束"
+                    if session.restore_error:
+                        board.state = "发送模式恢复失败"
+                        board.message = "；".join(filter(None, (session.error, session.restore_error)))
+                        self.restore_failed.emit(f"{name}：{board.message}")
+                elif session.result:
                     result = session.result
                     board.count = result.captured_events
                     board.state = "已完成" if result.captured_events == result.requested_events else "已停止"
@@ -385,7 +459,7 @@ class SingleCapturePane(W.QFrame):
     def draw(self, scope):
         frame = self.displayed
         count, mask, channels = frame if frame else (None, 0, [None] * 16)
-        heading = self.selected or "单板采样"
+        heading = self.selected or "单板工作台"
         if count is not None:
             heading += f"   /   事件 {count}"
         if self.pause.isChecked():

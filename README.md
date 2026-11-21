@@ -46,7 +46,12 @@ you can also launch `scripts\run_qt_replay.cmd`; it uses the project-local
 `.venv-qt` if available and opens `samples/four_board_00001` by default.
 Real capture samples are local files and are excluded from Git.
 
-Select **单板采样** or launch with `daq-replay --single -p path/to/profile.yaml`.
+Select **单板工作台** or launch with `daq-replay --single -p path/to/profile.yaml`.
+Choose **开始监视** for live waveforms without recording. The monitor temporarily
+sets send mode 1 and restores the board's original mode when monitoring ends.
+A restoration failure appears on the board card and in a warning dialog.
+Monitoring reserves that board for the session, including teardown. Other boards
+can monitor or record independently.
 Click a board card, choose its event count, storage mode and output directory,
 then press **开始采样**. You can select another card and start a second capture
 while the first is running. Each card shows its own state and event count.
