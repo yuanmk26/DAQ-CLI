@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from itertools import count
+from math import isfinite
 import multiprocessing
 import queue
 import shutil
@@ -72,6 +74,7 @@ class LegacySingleCaptureResult:
     aggregate_output_path: Path | None = None
     aggregate_index_path: Path | None = None
     monitor_jsonl_path: Path | None = None
+    duration_reached: bool = False
 
 
 @dataclass(slots=True)
@@ -125,7 +128,7 @@ class WatchWorkerResult:
 
 @dataclass(slots=True)
 class ParallelCaptureStats:
-    requested_events: int
+    requested_events: int | None
     captured_events: int = 0
     received_events: int = 0
     writer_errors: int = 0
@@ -154,6 +157,44 @@ class WatchBackendRuntime:
     process: multiprocessing.Process
 
 
+@dataclass
+class _CaptureLimit:
+    """Apply one stopping condition to the connected board's receive loop."""
+    events: int | None
+    duration_s: float | None
+    duration_reached: bool = False
+
+    def frames(self, sock, send_mode, timeout_s, cancelled):
+        deadline = time.monotonic() + self.duration_s if self.duration_s is not None else None
+
+        def should_stop():
+            if cancelled is not None and cancelled():
+                return True
+            if deadline is not None and time.monotonic() >= deadline:
+                self.duration_reached = True
+                return True
+            return False
+
+        # Timed runs may legitimately receive no triggers for the whole window.
+        read_timeout = max(timeout_s or 0, self.duration_s) if deadline is not None else timeout_s
+        reader = _TcpSentRawStreamReader(
+            sock, expected_send_mode=send_mode,
+            cancelled=should_stop if cancelled is not None or deadline is not None else None,
+            timeout_s=read_timeout,
+        )
+        indices = count() if self.events is None else range(self.events)
+        for _ in indices:
+            if should_stop():
+                break
+            try:
+                frame = reader.read_frame()
+            except _ReadCancelled:
+                break
+            if deadline is not None and should_stop():
+                break
+            yield frame
+
+
 class LegacySingleCaptureRunner:
     """Native single-board TCP_SENT mode-2 capture with parallel receive/write."""
 
@@ -161,7 +202,7 @@ class LegacySingleCaptureRunner:
         self,
         device: DeviceConfig,
         output_base_dir: Path,
-        events: int,
+        events: int | None,
         timeout_s: float,
         send_mode: int,
         outputs: AcquireOutputsConfig | None = None,
@@ -178,7 +219,13 @@ class LegacySingleCaptureRunner:
         cancel_event: threading.Event | None = None,
         storage_mode: str = "legacy",
         rate_interval_s: float = 1.0,
+        duration_s: float | None = None,
     ) -> LegacySingleCaptureResult:
+        if (events is None) == (duration_s is None):
+            raise ValueError("Specify either an event limit or a duration")
+        if duration_s is not None and (not isfinite(duration_s) or duration_s <= 0):
+            raise ValueError("Capture duration must be finite and positive")
+        limit = _CaptureLimit(events, duration_s)
         if storage_mode not in {"legacy", "aggregate", "rate"}:
             raise ValueError(
                 "storage_mode must be 'legacy', 'aggregate', or 'rate'"
@@ -187,7 +234,7 @@ class LegacySingleCaptureRunner:
             return self._capture_single_compact(
                 device=device,
                 output_base_dir=output_base_dir,
-                events=events,
+                limit=limit,
                 timeout_s=timeout_s,
                 send_mode=send_mode,
                 storage_mode=storage_mode,
@@ -304,9 +351,9 @@ class LegacySingleCaptureRunner:
                 packet_queue,
                 stop_event,
                 exception_queue,
-                events,
+                limit,
                 send_mode,
-                timeout_s if cancel_event is not None else None,
+                timeout_s if cancel_event is not None or duration_s is not None else None,
                 cancel_event,
             ),
         )
@@ -339,6 +386,8 @@ class LegacySingleCaptureRunner:
             ),
         )
 
+        if duration_s is not None and progress_callback is not None:
+            progress_callback(LegacySingleCaptureProgress(0, None, None, run_output_dir))
         receiver.start()
         writer.start()
         receiver.join()
@@ -381,6 +430,7 @@ class LegacySingleCaptureRunner:
             run_output_dir=run_output_dir,
             device=device,
             requested_events=events,
+            duration_s=duration_s,
             captured_events=stats.captured_events,
             send_mode=send_mode,
             queue_maxsize=DEFAULT_PACKET_QUEUE_SIZE,
@@ -413,6 +463,7 @@ class LegacySingleCaptureRunner:
             raise first_error
 
         return LegacySingleCaptureResult(
+            duration_reached=limit.duration_reached,
             run_output_dir=run_output_dir,
             captured_events=stats.captured_events,
             send_mode=send_mode,
@@ -443,7 +494,7 @@ class LegacySingleCaptureRunner:
         *,
         device: DeviceConfig,
         output_base_dir: Path,
-        events: int,
+        limit: _CaptureLimit,
         timeout_s: float,
         send_mode: int,
         storage_mode: str,
@@ -478,7 +529,7 @@ class LegacySingleCaptureRunner:
         log_path = run_dir / "log.txt"
         start_time = datetime.now().astimezone().isoformat(timespec="seconds")
         stats = ParallelCaptureStats(
-            requested_events=events,
+            requested_events=limit.events,
             watch_enabled=watch_every is not None,
             watch_every=watch_every,
         )
@@ -534,7 +585,8 @@ class LegacySingleCaptureRunner:
                 storage_mode=storage_mode,
                 send_mode=send_mode,
                 adc_length=ADC_LENGTH,
-                requested_events=events,
+                requested_events=limit.events,
+                duration_s=limit.duration_s,
                 captured_events=0,
                 status="running",
                 start_time=start_time,
@@ -555,17 +607,10 @@ class LegacySingleCaptureRunner:
             )
             rate_recorder.start()
             sock = self._open_socket(device=device, timeout_s=timeout_s)
-            reader = _TcpSentRawStreamReader(
-                sock=sock,
-                expected_send_mode=send_mode,
-                cancelled=cancel_event.is_set if cancel_event is not None else None,
-                timeout_s=timeout_s,
-            )
-            for _ in range(events):
-                if cancel_event is not None and cancel_event.is_set():
-                    status = "stopped"
-                    break
-                fields = reader.read_frame()
+            if limit.duration_s is not None and progress_callback is not None:
+                progress_callback(LegacySingleCaptureProgress(0, None, None, run_dir))
+            cancelled = cancel_event.is_set if cancel_event is not None else None
+            for fields in limit.frames(sock, send_mode, timeout_s, cancelled):
                 stats.received_events += 1
                 if aggregate_writer is not None:
                     aggregate_writer.write(
@@ -589,8 +634,8 @@ class LegacySingleCaptureRunner:
                             output_dir=run_dir,
                         )
                     )
-        except _ReadCancelled:
-            status = "stopped"
+            if cancel_event is not None and cancel_event.is_set() and not limit.duration_reached:
+                status = "stopped"
         except socket.timeout as exc:
             if cancel_event is not None and cancel_event.is_set():
                 status = "stopped"
@@ -655,7 +700,8 @@ class LegacySingleCaptureRunner:
                 storage_mode=storage_mode,
                 send_mode=send_mode,
                 adc_length=ADC_LENGTH,
-                requested_events=events,
+                requested_events=limit.events,
+                duration_s=limit.duration_s,
                 captured_events=stats.captured_events,
                 status=status,
                 start_time=start_time,
@@ -678,6 +724,7 @@ class LegacySingleCaptureRunner:
         if error is not None:
             raise error
         return LegacySingleCaptureResult(
+            duration_reached=limit.duration_reached,
             run_output_dir=run_dir,
             captured_events=stats.captured_events,
             send_mode=send_mode,
@@ -714,7 +761,7 @@ class LegacySingleCaptureRunner:
         packet_queue: queue.Queue[RawCapturePacket | None],
         stop_event: threading.Event,
         exception_queue: queue.Queue[BaseException],
-        events: int,
+        limit: _CaptureLimit,
         expected_send_mode: int,
         timeout_s: float | None = None,
         cancel_event: threading.Event | None = None,
@@ -723,17 +770,9 @@ class LegacySingleCaptureRunner:
             return stop_event.is_set() or (cancel_event is not None and cancel_event.is_set())
 
         try:
-            reader = _TcpSentRawStreamReader(
-                sock=sock,
-                expected_send_mode=expected_send_mode,
-                cancelled=cancelled,
-                timeout_s=timeout_s,
-            )
-            for event_idx in range(events):
-                if cancelled():
-                    return
-                packet = reader.read_packet()
-                hit_mask = _u16_be(packet, 16)
+            for event_idx, frame in enumerate(limit.frames(sock, expected_send_mode, timeout_s, cancelled)):
+                packet = frame.packet
+                hit_mask = frame.hit_mask
                 self._put_packet(
                     packet_queue=packet_queue,
                     packet=RawCapturePacket(
@@ -1072,7 +1111,7 @@ class LegacySingleCaptureRunner:
         self,
         run_output_dir: Path,
         device: DeviceConfig,
-        requested_events: int,
+        requested_events: int | None,
         captured_events: int,
         send_mode: int,
         queue_maxsize: int,
@@ -1085,6 +1124,7 @@ class LegacySingleCaptureRunner:
         watch_enabled: bool,
         watch_every: int | None,
         watched_frames: int,
+        duration_s: float | None = None,
     ) -> None:
         info_path = run_output_dir / "capture_info.txt"
         info_path.write_text(
@@ -1092,7 +1132,8 @@ class LegacySingleCaptureRunner:
                 [
                     f"tcp_ip={device.ip}",
                     f"tcp_port={device.tcp_port}",
-                    f"requested_events={requested_events}",
+                    (f"requested_duration_s={duration_s}" if duration_s is not None
+                     else f"requested_events={requested_events}"),
                     f"captured_events={captured_events}",
                     f"send_mode={send_mode}",
                     f"adc_length={ADC_LENGTH}",

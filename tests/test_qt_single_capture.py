@@ -310,3 +310,48 @@ def test_monitor_alongside_capture_and_restore(tmp_path, restore_failure):
             pane.stop_all()
             wait_for(app, lambda: not pane.active)
             window.close()
+
+
+@pytest.mark.parametrize("storage", ["aggregate", "rate", "legacy"])
+def test_timed_capture_finishes_with_idle_stream(tmp_path, storage):
+    app = QApplication.instance() or QApplication([])
+    profile = tmp_path / "profile.yaml"
+    profile.write_text("devices:\n  a: {ip: 127.0.0.1}\n  b: {ip: 127.0.0.2}\n"
+                       "defaults:\n  acquire_single: {timeout_s: 0.25}\n")
+    window = Workstation(profile_path=profile)
+    pane = window.single
+    stream = ControlledStream()
+    pane.events.setValue(1)
+    pane.limit.setCurrentIndex(1)
+    pane.duration.setValue(1)
+    pane.storage.setCurrentIndex(pane.storage.findData(storage))
+    pane.output.setText(str(tmp_path / "runs"))
+    with patch.object(LegacyBoardAdapter, "read_tcp_mode2_config", return_value=SimpleNamespace(send_mode=1)), \
+         patch.object(LegacySingleCaptureRunner, "_open_socket", return_value=stream):
+        try:
+            start = time.monotonic()
+            pane.start.click()
+            if storage != "rate":
+                stream.packets.put(_build_tcp_sent_packet(1, 1, 1) * 2)
+                wait_for(app, lambda: pane.displayed is not None)
+                pane.pause.click()
+            pane.buttons["b"].click()
+            assert pane.limit.currentIndex() == 0
+            pane.buttons["a"].click()
+            assert pane.limit.currentIndex() == 1
+            wait_for(app, lambda: not pane.active)
+            assert time.monotonic() - start >= 1
+            assert pane.state.text() == "已完成" and stream.closed
+            directory = Path(pane.message)
+            if storage == "legacy":
+                assert "requested_duration_s=1" in (directory / "capture_info.txt").read_text()
+                assert len(list((directory / "raw").glob("*.bin"))) == 2
+            else:
+                meta = json.loads((directory / "run_meta.json").read_text())
+                assert meta["status"] == "complete" and meta["requested_events"] is None
+                assert meta["requested_duration_s"] == 1
+                assert meta["captured_events"] == (0 if storage == "rate" else 2)
+        finally:
+            pane.stop_all()
+            wait_for(app, lambda: not pane.active)
+            window.close()

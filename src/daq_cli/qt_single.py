@@ -122,6 +122,8 @@ class BoardCapture:
     storage_mode: str
     stride: int
     output: str
+    timed: bool = False
+    duration_s: int = 60
     session: CaptureSession | MonitorSession | None = None
     monitoring: bool = False
     latest: tuple | None = None
@@ -165,14 +167,22 @@ class SingleCapturePane(W.QFrame):
         fields.setContentsMargins(0, 8, 0, 8)
         self.events = W.QSpinBox()
         self.events.setRange(1, 2_147_483_647)
+        self.limit = W.QComboBox()
+        self.limit.addItems(["按事例数", "按时长"])
+        self.duration = W.QSpinBox()
+        self.duration.setRange(1, 2_147_483_647)
+        self.duration.setSuffix(" 秒")
         self.storage = W.QComboBox()
         for name, value in (("聚合文件", "aggregate"), ("仅事例率", "rate"), ("逐事件", "legacy")):
             self.storage.addItem(name, value)
         self.stride = W.QSpinBox()
         self.stride.setRange(1, 2_147_483_647)
-        for title, widget in (("事件数", self.events),
+        for title, widget in (("停止条件", self.limit), ("事例数上限", self.events), ("采样时长", self.duration),
                               ("存储", self.storage), ("每 N 帧预览", self.stride)):
             fields.addRow(title, widget)
+        fields.setRowVisible(self.duration, False)
+        self.limit.currentIndexChanged.connect(lambda index: fields.setRowVisible(self.events, index == 0))
+        self.limit.currentIndexChanged.connect(lambda index: fields.setRowVisible(self.duration, index == 1))
         side.addWidget(self.form)
         self.output = W.QLineEdit()
         self.output.setClearButtonEnabled(True)
@@ -279,6 +289,8 @@ class SingleCapturePane(W.QFrame):
     def save_settings(self):
         board = self.boards[self.selected]
         board.events = self.events.value()
+        board.timed = self.limit.currentIndex() == 1
+        board.duration_s = self.duration.value()
         board.storage_mode = self.storage.currentData()
         board.stride = self.stride.value()
         board.output = self.output.text()
@@ -291,6 +303,8 @@ class SingleCapturePane(W.QFrame):
         self.buttons[name].setChecked(True)
         board = self.boards[name]
         self.events.setValue(board.events)
+        self.limit.setCurrentIndex(int(board.timed))
+        self.duration.setValue(board.duration_s)
         self.storage.setCurrentIndex(self.storage.findData(board.storage_mode))
         self.stride.setValue(board.stride)
         self.output.setText(board.output)
@@ -317,7 +331,7 @@ class SingleCapturePane(W.QFrame):
         if board.monitoring:
             self.count.setText(str(board.latest[0]) if board.latest else "—")
         else:
-            self.count.setText(f"{board.count} / {board.requested}" if board.requested else "0")
+            self.count.setText(f"{board.count} / {board.requested}" if board.requested else str(board.count))
         self.message = board.message
         self.updated.emit(redraw)
 
@@ -352,7 +366,8 @@ class SingleCapturePane(W.QFrame):
         else:
             board.session = CaptureSession(dict(
                 device_name=self.selected, profile_path=self.profile.path,
-                events=board.events, timeout_s=self.options["timeout_s"],
+                events=None if board.timed else board.events, timeout_s=self.options["timeout_s"],
+                duration_s=board.duration_s if board.timed else None,
                 outputs=self.options["outputs"], storage_mode=board.storage_mode,
                 rate_interval_s=self.options["rate_interval_s"], watch_every=board.stride,
                 output_base_dir=Path(board.output.strip()) if board.output.strip() else self.options["output_dir"],
@@ -360,7 +375,7 @@ class SingleCapturePane(W.QFrame):
         board.latest = board.displayed = None
         board.paused = False
         board.count = 0
-        board.requested = 0 if monitoring else board.events
+        board.requested = 0 if monitoring or board.timed else board.events
         board.message = "正在启动监视" if monitoring else "正在启动采样"
         board.state = "正在连接"
         self.update_card(self.selected)
@@ -443,7 +458,8 @@ class SingleCapturePane(W.QFrame):
                 elif session.result:
                     result = session.result
                     board.count = result.captured_events
-                    board.state = "已完成" if result.captured_events == result.requested_events else "已停止"
+                    completed = result.captured_events == result.requested_events or getattr(result, "duration_reached", False)
+                    board.state = "已完成" if completed else "已停止"
                     board.message = str(result.run_output_dir or "")
                 else:
                     board.state = "采样失败"

@@ -56,7 +56,7 @@ class SingleAcquireResult:
     source_profile: Path
     output_base_dir: Path
     run_output_dir: Path | None
-    requested_events: int
+    requested_events: int | None
     captured_events: int | None
     send_mode: int
     decode_enabled: bool
@@ -83,12 +83,13 @@ class SingleAcquireResult:
     aggregate_output_path: Path | None = None
     aggregate_index_path: Path | None = None
     monitor_jsonl_path: Path | None = None
+    duration_reached: bool = False
 
 
 @dataclass(slots=True)
 class SingleAcquireProgress:
     captured_events: int
-    requested_events: int
+    requested_events: int | None
     packet_bytes: int | None
     hit_mask: int | None
     output_dir: Path | None
@@ -140,7 +141,7 @@ class AcquireService:
         self,
         device_name: str,
         profile_path: Path | str,
-        events: int,
+        events: int | None,
         timeout_s: float,
         output_base_dir: Path | None = None,
         outputs: AcquireOutputsConfig | None = None,
@@ -157,6 +158,7 @@ class AcquireService:
         cancel_event: threading.Event | None = None,
         storage_mode: str = "legacy",
         rate_interval_s: float = 1.0,
+        duration_s: float | None = None,
     ) -> SingleAcquireResult:
         profile = self._profile_service.load_profile(profile_path)
         try:
@@ -238,6 +240,7 @@ class AcquireService:
 
         raw_result = runner.capture_single(
             device=device,
+            **({"duration_s": duration_s} if duration_s is not None else {}),
             output_base_dir=base_dir,
             events=events,
             timeout_s=timeout_s,
@@ -258,6 +261,7 @@ class AcquireService:
             rate_interval_s=rate_interval_s,
         )
         return SingleAcquireResult(
+            duration_reached=getattr(raw_result, "duration_reached", False),
             device=device,
             source_profile=profile.path,
             output_base_dir=base_dir,

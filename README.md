@@ -52,13 +52,17 @@ sets send mode 1 and restores the board's original mode when monitoring ends.
 A restoration failure appears on the board card and in a warning dialog.
 Monitoring reserves that board for the session, including teardown. Other boards
 can monitor or record independently.
-Click a board card, choose its event count, storage mode and output directory,
+Click a board card, choose **按事例数** or **按时长**, storage mode and output directory,
 then press **开始采样**. You can select another card and start a second capture
 while the first is running. Each card shows its own state and event count.
 The scope shows the selected board's 16 channels. **暂停波形** freezes that
 board's preview while all captures continue writing. **停止采样** stops only
 the selected board. Each start creates a separate run directory. Closing the
 workstation stops all active captures and waits for their files to close.
+The event limit is the default. In timed mode, enter a duration in seconds.
+The timer starts when the receiver begins reading the connected stream and
+expires even if no triggers arrive. Pausing the waveform leaves the timer
+and storage running.
 The existing `daq-gui` entry point opens the Tk application.
 
 Select **多板采样** (or launch with `daq-replay --multi`) for group acquisition.
