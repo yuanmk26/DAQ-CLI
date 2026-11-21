@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-qt-replay = ["PySide6-Essentials>=6.7,<7", "pyqtgraph>=0.13.7,<0.15", "numpy>=1.25"]
+qt-replay = ["PySide6-Essentials>=6.7,<7", "pyqtgraph>=0.13.7,<0.15", "numpy>=1.25", "ruamel.yaml>=0.18,<0.20"]
 
 [project.scripts]
 daq = "daq_cli.main:main"

@@ -75,6 +75,10 @@ profile's aggregation and output settings. Waveform preview requires send
 mode 1 or 3 on each ADC.
 
 In either capture mode, toggle **硬件配置** to open or collapse the right-hand panel.
+Use **板卡与采样组** in the header to edit ADC/TCM IPv4 addresses, assign ADC
+board IDs, and create or edit sampling groups by selecting their ADCs and TCM.
+**保存并应用** updates the current YAML profile and reloads the workstation.
+The editor is available when acquisition, monitoring and hardware operations are idle.
 Its ADC/TCM target is independent of the capture target. Each target keeps its
 own editable draft. **读取当前值** shows a timestamped hardware snapshot;
 **回读载入草稿** copies its settings into the form. **应用并回读** writes the draft

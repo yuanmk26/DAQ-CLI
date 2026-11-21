@@ -13,6 +13,7 @@ from daq_cli.qt_scope import WaveformScope, label
 from daq_cli.qt_single import SingleCapturePane
 from daq_cli.qt_multi import MultiCapturePane
 from daq_cli.qt_config import ConfigPanel
+from daq_cli.qt_profile import ProfileEditor
 
 from daq_cli.infrastructure.multi_board_decode import (
     MultiBoardAggregatedEventReader, build_board_context, build_board_packet,
@@ -107,6 +108,9 @@ class Workstation(W.QMainWindow):
         header.addSpacing(8)
         self.run_time = label("", "muted")
         header.addWidget(self.run_time)
+        self.profile_edit = W.QPushButton("板卡与采样组")
+        self.profile_edit.clicked.connect(self.edit_profile)
+        header.addWidget(self.profile_edit)
         self.config_toggle = W.QPushButton("硬件配置", checkable=True)
         header.addWidget(self.config_toggle)
         layout.addLayout(header)
@@ -207,6 +211,7 @@ class Workstation(W.QMainWindow):
                 button.setToolTip(f"切换板卡 ({n})")
         self.play.setToolTip("播放 / 暂停 (空格)")
         self.single.updated.connect(self.live_updated)
+        self.single.profile_changed.connect(self.refresh_profile_button)
         self.single.active_changed.connect(self.capture_active_changed)
         self.single.restore_failed.connect(self.show_restore_failure)
         self.multi.updated.connect(self.live_updated)
@@ -218,12 +223,32 @@ class Workstation(W.QMainWindow):
         available = self.screen().availableGeometry()
         self.resize(min(1320, available.width()-32), min(820, available.height()-56))
         self.switch_mode(self.mode.currentIndex())
+        self.refresh_profile_button()
+
+    def refresh_profile_button(self):
+        busy = self.single.active or self.multi.active or self.config.task is not None
+        self.profile_edit.setEnabled(self.single.profile is not None and not busy)
+        self.profile_edit.setToolTip("设备操作结束后可编辑" if busy else "编辑当前配置文件的网络地址和采样组")
+
+    def edit_profile(self):
+        if not self.profile_edit.isEnabled():
+            return
+        path = self.single.profile.path
+        try:
+            dialog = ProfileEditor(path, self)
+        except Exception as exc:
+            W.QMessageBox.warning(self, "无法打开配置", str(exc))
+            return
+        if dialog.exec() and dialog.changed:
+            self.single.load_profile(path)
+        dialog.deleteLater()
 
     def switch_mode(self, mode):
         self.set_playing(False)
         self.sides.setCurrentIndex(mode)
         self.bars.setCurrentIndex(mode)
         self.config_toggle.setVisible(mode != 0)
+        self.profile_edit.setVisible(mode != 0)
         self.config.setVisible(mode != 0 and self.config_toggle.isChecked())
         for shortcut in self.replay_shortcuts:
             shortcut.setEnabled(mode == 0)
@@ -241,10 +266,12 @@ class Workstation(W.QMainWindow):
                 pane.draw(self.scope)
 
     def capture_active_changed(self, active):
+        self.refresh_profile_button()
         self.mode.setDisabled(active or self.config.task is not None)
         self.finish_close()
 
     def config_busy_changed(self):
+        self.refresh_profile_button()
         self.mode.setDisabled(self.single.active or self.multi.active or self.config.task is not None)
         self.single.config_busy = self.config.task is not None
         self.single.config_write_ip = self.config.write_ip
