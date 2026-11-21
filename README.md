@@ -40,7 +40,7 @@ Not implemented yet:
 
 ### Qt waveform workstation
 
-The optional Qt workstation supports offline replay and single-board capture. Install with
+The optional Qt workstation supports offline replay, single-board and multi-board capture. Install with
 `pip install -e ".[qt-replay]"`, then run `daq-replay path/to/run`. On Windows
 you can also launch `scripts\run_qt_replay.cmd`; it uses the project-local
 `.venv-qt` if available and opens `samples/four_board_00001` by default.
@@ -56,7 +56,16 @@ and **停止采样** cancels capture and waits for the output files to close.
 After completion or stop, **开始采样** creates a new run directory.
 The existing `daq-gui` entry point opens the Tk application.
 
-In **单板采样**, toggle **硬件配置** to open or collapse the right-hand panel.
+Select **多板采样** (or launch with `daq-replay --multi`) for group acquisition.
+The largest group in the profile is selected initially. Each board card shows
+its connection state and received frame count. Click a card to view its 16
+channels. **暂停波形** freezes a preview for every board, so you can switch
+boards while reception, event aggregation and disk output continue. The
+complete and partial event counters stay live. The selected group uses its
+profile's aggregation and output settings. Waveform preview requires send
+mode 1 or 3 on each ADC.
+
+In either capture mode, toggle **硬件配置** to open or collapse the right-hand panel.
 Its ADC/TCM target is independent of the capture target. Each target keeps its
 own editable draft. **读取当前值** shows a timestamped hardware snapshot;
 **回读载入草稿** copies its settings into the form. **应用并回读** writes the draft
@@ -68,7 +77,9 @@ coincidence groups. Hardware tasks use the currently loaded profile.
 While a single-board run is active or stopping, its ADC permits readback
 and draft editing. Writes and calibration become available after capture
 finalization. A pending write or calibration also holds that board until it
-finishes. The interlock applies within this workstation.
+finishes. Group capture extends the same interlock to every ADC and the TCM
+in the selected group, including while the output files are being finalized.
+The interlock applies within this workstation.
 
 The timeline combines complete and partial events in recorded flush-time order.
 The default preview loads up to 256 events; use `--limit N` to change it.

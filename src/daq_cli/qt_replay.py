@@ -11,6 +11,7 @@ import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets as W
 from daq_cli.qt_scope import WaveformScope, label
 from daq_cli.qt_single import SingleCapturePane
+from daq_cli.qt_multi import MultiCapturePane
 from daq_cli.qt_config import ConfigPanel
 
 from daq_cli.infrastructure.multi_board_decode import (
@@ -97,7 +98,7 @@ class Workstation(W.QMainWindow):
         header.addWidget(label("DAQ  /  波形工作台", "title"))
         header.addSpacing(10)
         self.mode = W.QComboBox()
-        self.mode.addItems(["离线回放", "单板采样"])
+        self.mode.addItems(["离线回放", "单板采样", "多板采样"])
         self.mode.model().item(0).setEnabled(replay is not None)
         header.addWidget(self.mode)
         header.addStretch()
@@ -144,15 +145,17 @@ class Workstation(W.QMainWindow):
         complete = sum(e.event_kind == "complete" for e in replay.events) if replay else 0
         side_layout.addWidget(label(f"完整    {complete}      缺板    {len(replay.events)-complete if replay else 0}", "muted"))
         self.single = SingleCapturePane(profile_path)
+        self.multi = MultiCapturePane(self.single)
         self.sides = W.QStackedWidget()
         self.sides.addWidget(side)
         self.sides.addWidget(self.single)
+        self.sides.addWidget(self.multi)
         splitter.addWidget(self.sides)
 
         self.scope = WaveformScope()
         self.scope.view_changed.connect(self.render)
         splitter.addWidget(self.scope)
-        self.config = ConfigPanel(self.single)
+        self.config = ConfigPanel(self.single, self.multi)
         splitter.addWidget(self.config)
         self.config.hide()
         self.config_toggle.toggled.connect(self.config.setVisible)
@@ -188,6 +191,7 @@ class Workstation(W.QMainWindow):
         self.bars = W.QStackedWidget()
         self.bars.addWidget(controls)
         self.bars.addWidget(self.single.controls)
+        self.bars.addWidget(self.multi.controls)
         self.bars.setSizePolicy(W.QSizePolicy.Policy.Preferred, W.QSizePolicy.Policy.Maximum)
         layout.addWidget(self.bars)
         self.status = label("", "muted")
@@ -204,6 +208,8 @@ class Workstation(W.QMainWindow):
         self.play.setToolTip("播放 / 暂停 (空格)")
         self.single.updated.connect(self.live_updated)
         self.single.active_changed.connect(self.capture_active_changed)
+        self.multi.updated.connect(self.live_updated)
+        self.multi.active_changed.connect(self.capture_active_changed)
         self.closing = False
         self.mode.setCurrentIndex(0 if replay else 1)
         self.mode.currentIndexChanged.connect(self.switch_mode)
@@ -216,41 +222,45 @@ class Workstation(W.QMainWindow):
         self.set_playing(False)
         self.sides.setCurrentIndex(mode)
         self.bars.setCurrentIndex(mode)
-        self.config_toggle.setVisible(mode == 1)
-        self.config.setVisible(mode == 1 and self.config_toggle.isChecked())
+        self.config_toggle.setVisible(mode != 0)
+        self.config.setVisible(mode != 0 and self.config_toggle.isChecked())
         for shortcut in self.replay_shortcuts:
             shortcut.setEnabled(mode == 0)
         self.scope.allow_comparison(mode == 0 and len(self.run.boards) == 4)
         self.render()
 
     def live_updated(self, redraw):
-        if self.mode.currentIndex() == 1:
-            self.run_name.setText(self.single.target.currentText())
-            self.run_time.setText(self.single.state.text())
-            self.status.setText(self.single.message)
+        if self.mode.currentIndex():
+            pane = self.sides.currentWidget()
+            name = pane.group.currentText() if pane is self.multi else self.single.target.currentText()
+            self.run_name.setText(name)
+            self.run_time.setText(pane.state.text())
+            self.status.setText(pane.message)
             if redraw:
-                self.single.draw(self.scope)
+                pane.draw(self.scope)
 
     def capture_active_changed(self, active):
         self.mode.setDisabled(active or self.config.task is not None)
         self.finish_close()
 
     def config_busy_changed(self):
-        self.mode.setDisabled(self.single.active or self.config.task is not None)
+        self.mode.setDisabled(self.single.active or self.multi.active or self.config.task is not None)
         self.single.config_busy = self.config.task is not None
         self.single.config_write_ip = self.config.write_ip
         self.single.refresh_interlock()
+        self.multi.refresh_interlock()
         self.finish_close()
 
     def finish_close(self):
-        if self.closing and not self.single.active and self.config.task is None:
+        if self.closing and not self.single.active and not self.multi.active and self.config.task is None:
             QtCore.QTimer.singleShot(0, self.close)
 
     def closeEvent(self, event):
-        if self.single.active or self.config.task is not None:
+        if self.single.active or self.multi.active or self.config.task is not None:
             self.closing = True
             self.centralWidget().setEnabled(False)
             self.single.stop()
+            self.multi.stop()
             event.ignore()
         else:
             event.accept()
@@ -268,7 +278,7 @@ class Workstation(W.QMainWindow):
 
     def toggle(self):
         if self.mode.currentIndex():
-            self.single.pause.click()
+            self.sides.currentWidget().pause.click()
             return
         if not self.playing and self.index == len(self.run.events)-1:
             self.index = 0
@@ -304,7 +314,7 @@ class Workstation(W.QMainWindow):
         self.schedule()
 
     def render(self):
-        if self.mode.currentIndex() == 1:
+        if self.mode.currentIndex():
             self.live_updated(True)
             return
         self.run_name.setText(self.run.directory.name)
@@ -352,7 +362,8 @@ class Workstation(W.QMainWindow):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Qt 单板采样与波形回放工作台")
+    parser = argparse.ArgumentParser(description="Qt 单板、多板采样与波形回放工作台")
+    parser.add_argument("--multi", action="store_true", help="打开多板采样页面")
     parser.add_argument("run_dir", nargs="?", type=Path, default=None)
     parser.add_argument("-p", "--profile", type=Path, help="单板采样配置文件")
     parser.add_argument("--limit", type=int, default=256, help="最多载入的事件数（默认 256）")
@@ -368,6 +379,8 @@ def main():
     app = W.QApplication([])
     app.setStyle("Fusion")
     window = Workstation(replay, args.profile)
+    if args.multi:
+        window.mode.setCurrentIndex(2)
     window.show()
     app.exec()
 

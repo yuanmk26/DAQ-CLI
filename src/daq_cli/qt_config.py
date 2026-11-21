@@ -229,9 +229,10 @@ class HardwareTask(QtCore.QThread):
 class ConfigPanel(W.QFrame):
     busy_changed = QtCore.Signal()
 
-    def __init__(self, single):
+    def __init__(self, single, multi=None):
         super().__init__(objectName="panel")
         self.single = single
+        self.multi = multi
         self.profile = None
         self.task = None
         self.write_ip = None
@@ -267,6 +268,8 @@ class ConfigPanel(W.QFrame):
         self.tabs.currentChanged.connect(self.refresh)
         single.profile_changed.connect(self.set_profile)
         single.active_changed.connect(self.refresh)
+        if multi is not None:
+            multi.active_changed.connect(self.refresh)
         self.set_profile(single.profile)
 
     def set_profile(self, profile):
@@ -321,7 +324,9 @@ class ConfigPanel(W.QFrame):
         return devices[key[1]].ip
 
     def locked(self):
-        return self.single.active and self.single.target_ip() == self.target_ip()
+        ip = self.target_ip()
+        return ((self.single.active and self.single.target_ip() == ip)
+                or (self.multi is not None and ip in self.multi.reserved_ips))
 
     def refresh(self):
         form = self.current_form()

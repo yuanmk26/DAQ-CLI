@@ -325,6 +325,7 @@ class AcquireService:
         watch_update_callback: Callable[[object], None] | None = None,
         run_name_prefix: str | None = None,
         cancel_event: threading.Event | None = None,
+        progress_callback: "Callable[[Path, dict], None] | None" = None,
     ) -> MultiAcquireResult:
         profile = self._profile_service.load_profile(profile_path)
         try:
@@ -405,6 +406,7 @@ class AcquireService:
                 watch_every=watch_every,
                 stop_capture_on_watch_close=stop_capture_on_watch_close,
             ),
+            **({"progress_callback": progress_callback} if progress_callback else {}),
             watch_update_callback=watch_update_callback,
             cancel_event=cancel_event,
         )
