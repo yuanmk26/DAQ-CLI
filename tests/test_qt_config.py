@@ -119,9 +119,9 @@ def test_bidirectional_lock_and_stop_cleanup(station):
             assert not single.start.isEnabled()
             single.begin()
             assert not single.active
-            single.target.setCurrentText("alias")
+            single.buttons["alias"].click()
             assert not single.start.isEnabled()
-            single.target.setCurrentText("b")
+            single.buttons["b"].click()
             assert single.start.isEnabled()
             single.begin()
         finally:

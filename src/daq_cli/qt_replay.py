@@ -232,7 +232,7 @@ class Workstation(W.QMainWindow):
     def live_updated(self, redraw):
         if self.mode.currentIndex():
             pane = self.sides.currentWidget()
-            name = pane.group.currentText() if pane is self.multi else self.single.target.currentText()
+            name = pane.group.currentText() if pane is self.multi else self.single.selected
             self.run_name.setText(name)
             self.run_time.setText(pane.state.text())
             self.status.setText(pane.message)
@@ -259,7 +259,7 @@ class Workstation(W.QMainWindow):
         if self.single.active or self.multi.active or self.config.task is not None:
             self.closing = True
             self.centralWidget().setEnabled(False)
-            self.single.stop()
+            self.single.stop_all()
             self.multi.stop()
             event.ignore()
         else:
@@ -363,7 +363,9 @@ class Workstation(W.QMainWindow):
 
 def main():
     parser = argparse.ArgumentParser(description="Qt 单板、多板采样与波形回放工作台")
-    parser.add_argument("--multi", action="store_true", help="打开多板采样页面")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--multi", action="store_true", help="打开多板采样页面")
+    modes.add_argument("--single", action="store_true", help="打开单板采样页面")
     parser.add_argument("run_dir", nargs="?", type=Path, default=None)
     parser.add_argument("-p", "--profile", type=Path, help="单板采样配置文件")
     parser.add_argument("--limit", type=int, default=256, help="最多载入的事件数（默认 256）")
@@ -381,6 +383,8 @@ def main():
     window = Workstation(replay, args.profile)
     if args.multi:
         window.mode.setCurrentIndex(2)
+    elif args.single:
+        window.mode.setCurrentIndex(1)
     window.show()
     app.exec()
 

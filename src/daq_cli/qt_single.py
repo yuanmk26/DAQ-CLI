@@ -1,7 +1,8 @@
-"""Single-board controls and the lifetime of one Qt workstation capture."""
+"""Independent single-board captures sharing the workstation waveform scope."""
 
 import os
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -74,6 +75,22 @@ class CaptureSession(threading.Thread):
             decoder.join()
 
 
+@dataclass
+class BoardCapture:
+    events: int
+    storage_mode: str
+    stride: int
+    output: str
+    session: CaptureSession | None = None
+    latest: tuple | None = None
+    displayed: tuple | None = None
+    paused: bool = False
+    count: int = 0
+    requested: int = 0
+    state: str = "就绪"
+    message: str = "等待开始采样"
+
+
 class SingleCapturePane(W.QFrame):
     updated = QtCore.Signal(bool)
     active_changed = QtCore.Signal(bool)
@@ -84,9 +101,9 @@ class SingleCapturePane(W.QFrame):
         self.profile = None
         self.config_write_ip = None
         self.config_busy = False
-        self.session = None
-        self.displayed = None
-        self.latest = None
+        self.boards = {}
+        self.buttons = {}
+        self.selected = ""
         self.message = "请选择采样配置"
         self.timer = QtCore.QTimer(self)
         self.timer.setInterval(50)
@@ -98,11 +115,11 @@ class SingleCapturePane(W.QFrame):
         side.addWidget(self.load)
         self.profile_label = label("尚未加载", "muted")
         side.addWidget(self.profile_label)
+        self.cards = W.QVBoxLayout()
+        side.addLayout(self.cards)
         self.form = W.QWidget()
         fields = W.QFormLayout(self.form)
         fields.setContentsMargins(0, 8, 0, 8)
-        self.target = W.QComboBox()
-        self.target.currentIndexChanged.connect(self.reset_display)
         self.events = W.QSpinBox()
         self.events.setRange(1, 2_147_483_647)
         self.storage = W.QComboBox()
@@ -110,7 +127,7 @@ class SingleCapturePane(W.QFrame):
             self.storage.addItem(name, value)
         self.stride = W.QSpinBox()
         self.stride.setRange(1, 2_147_483_647)
-        for title, widget in (("目标板", self.target), ("事件数", self.events),
+        for title, widget in (("事件数", self.events),
                               ("存储", self.storage), ("每 N 帧预览", self.stride)):
             fields.addRow(title, widget)
         side.addWidget(self.form)
@@ -150,7 +167,21 @@ class SingleCapturePane(W.QFrame):
 
     @property
     def active(self):
-        return self.session is not None
+        return any(board.session is not None for board in self.boards.values())
+
+    @property
+    def reserved_ips(self):
+        return {self.profile.devices[name].ip for name, board in self.boards.items() if board.session}
+
+    @property
+    def displayed(self):
+        board = self.boards.get(self.selected)
+        return board.displayed if board else None
+
+    @property
+    def latest(self):
+        board = self.boards.get(self.selected)
+        return board.latest if board else None
 
     def choose_profile(self):
         path, _ = W.QFileDialog.getOpenFileName(self, "选择采样配置", "", "YAML (*.yaml *.yml)")
@@ -173,116 +204,188 @@ class SingleCapturePane(W.QFrame):
         self.profile, self.options = profile, options
         self.profile_label.setText(profile.path.name)
         self.profile_label.setToolTip(str(profile.path))
-        self.target.clear()
-        self.target.addItems(sorted(profile.devices))
-        self.events.setValue(options["events"])
-        self.stride.setValue(options["watch_every"] or 1)
-        self.storage.setCurrentIndex(self.storage.findData(options["storage_mode"]))
-        self.output.setText(str(options["output_dir"] or default_output_base_dir(profile) / "single"))
+        for button in self.buttons.values():
+            self.cards.removeWidget(button)
+            button.hide()
+            button.deleteLater()
+        self.boards.clear()
+        self.buttons.clear()
+        self.selected = ""
+        output = str(options["output_dir"] or default_output_base_dir(profile) / "single")
+        for name in sorted(profile.devices):
+            self.boards[name] = BoardCapture(options["events"], options["storage_mode"],
+                                             options["watch_every"] or 1, output)
+            button = W.QPushButton(objectName="board", checkable=True)
+            button.setToolTip(profile.devices[name].ip)
+            button.clicked.connect(lambda checked, n=name: self.select_board(n))
+            self.buttons[name] = button
+            self.cards.addWidget(button)
+            self.update_card(name)
+        self.select_board(next(iter(self.boards)))
         self.profile_changed.emit(profile)
-        self.reset_display()
 
     def choose_output(self):
         path = W.QFileDialog.getExistingDirectory(self, "选择采样输出目录", self.output.text())
         if path:
             self.output.setText(path)
 
-    def reset_display(self):
-        self.latest = self.displayed = None
-        self.pause.setChecked(False)
-        self.pause.setEnabled(False)
-        self.message = "等待开始采样"
-        self.state.setText("就绪")
-        self.count.setText("0")
-        self.refresh_interlock()
-        self.updated.emit(True)
+    def save_settings(self):
+        board = self.boards[self.selected]
+        board.events = self.events.value()
+        board.storage_mode = self.storage.currentData()
+        board.stride = self.stride.value()
+        board.output = self.output.text()
 
-    def target_ip(self):
-        device = self.profile.devices.get(self.target.currentText()) if self.profile else None
-        return device.ip if device else None
+    def select_board(self, name):
+        if self.selected:
+            self.save_settings()
+            self.buttons[self.selected].setChecked(False)
+        self.selected = name
+        self.buttons[name].setChecked(True)
+        board = self.boards[name]
+        self.events.setValue(board.events)
+        self.storage.setCurrentIndex(self.storage.findData(board.storage_mode))
+        self.stride.setValue(board.stride)
+        self.output.setText(board.output)
+        with QtCore.QSignalBlocker(self.pause):
+            self.pause.setChecked(board.paused)
+        self.pause.setText("恢复波形" if board.paused else "暂停波形")
+        self.refresh_interlock()
+        self.show_selected(True)
+
+    def update_card(self, name):
+        board = self.boards[name]
+        text = f"{name}    {board.state}\n{board.count} 事件"
+        if board.paused:
+            text += "   ·   波形已暂停"
+        button = self.buttons[name]
+        if button.text() != text:
+            button.setText(text)
+
+    def show_selected(self, redraw):
+        board = self.boards[self.selected]
+        self.state.setText(board.state)
+        self.count.setText(f"{board.count} / {board.requested}" if board.requested else "0")
+        self.message = board.message
+        self.updated.emit(redraw)
 
     def refresh_interlock(self):
-        ip = self.target_ip()
-        blocked = bool(ip and ip == self.config_write_ip)
-        self.start.setEnabled(bool(ip) and not self.active and not blocked)
-        self.start.setToolTip("该板正在配置或标定" if blocked else "")
+        board = self.boards.get(self.selected)
+        ip = self.profile.devices[self.selected].ip if board else None
+        blocked = bool(ip and (ip == self.config_write_ip or ip in self.reserved_ips))
+        busy = bool(board and board.session)
+        self.start.setEnabled(bool(board) and not blocked)
+        self.start.setToolTip("该板正在采样、配置或标定" if blocked else "")
+        self.stop_button.setEnabled(busy and not board.session.cancel.is_set())
+        self.pause.setEnabled(busy or bool(board and board.paused))
+        for widget in (self.form, self.output, self.browse):
+            widget.setDisabled(busy)
         self.load.setEnabled(not self.active and not self.config_busy)
 
     def begin(self):
-        if self.active or not self.target_ip() or self.target_ip() == self.config_write_ip:
+        if not self.selected:
             return
-        self.reset_display()
-        path = self.output.text().strip()
-        self.session = CaptureSession(dict(
-            device_name=self.target.currentText(), profile_path=self.profile.path,
-            events=self.events.value(), timeout_s=self.options["timeout_s"],
-            outputs=self.options["outputs"], storage_mode=self.storage.currentData(),
-            rate_interval_s=self.options["rate_interval_s"], watch_every=self.stride.value(),
-            output_base_dir=Path(path) if path else self.options["output_dir"],
+        ip = self.profile.devices[self.selected].ip
+        if ip in self.reserved_ips or ip == self.config_write_ip:
+            return
+        self.save_settings()
+        board = self.boards[self.selected]
+        board.session = CaptureSession(dict(
+            device_name=self.selected, profile_path=self.profile.path,
+            events=board.events, timeout_s=self.options["timeout_s"],
+            outputs=self.options["outputs"], storage_mode=board.storage_mode,
+            rate_interval_s=self.options["rate_interval_s"], watch_every=board.stride,
+            output_base_dir=Path(board.output.strip()) if board.output.strip() else self.options["output_dir"],
         ), self.profile)
-        self.set_busy(True)
-        self.state.setText("正在连接")
-        self.session.start()
-        self.timer.start()
-        self.updated.emit(False)
-
-    def set_busy(self, busy):
-        for widget in (self.load, self.form, self.output, self.browse, self.start):
-            widget.setDisabled(busy)
-        self.stop_button.setEnabled(busy)
-        self.pause.setEnabled(busy)
+        board.latest = board.displayed = None
+        board.paused = False
+        board.count = 0
+        board.requested = board.events
+        board.message = "正在启动采样"
+        board.state = "正在连接"
+        self.update_card(self.selected)
+        with QtCore.QSignalBlocker(self.pause):
+            self.pause.setChecked(False)
+        self.pause.setText("暂停波形")
         self.refresh_interlock()
-        self.active_changed.emit(busy)
+        self.show_selected(True)
+        self.active_changed.emit(True)
+        board.session.start()
+        self.timer.start()
 
     def stop(self):
-        if self.session:
-            self.session.cancel.set()
-            self.stop_button.setEnabled(False)
-            self.state.setText("正在停止并收尾")
-            self.updated.emit(False)
+        if self.selected:
+            self.stop_board(self.selected)
+
+    def stop_board(self, name):
+        board = self.boards[name]
+        if board.session:
+            board.session.cancel.set()
+            board.state = "正在停止并收尾"
+            self.update_card(name)
+            if name == self.selected:
+                self.refresh_interlock()
+                self.show_selected(False)
+
+    def stop_all(self):
+        for name in self.boards:
+            self.stop_board(name)
 
     def pause_changed(self, paused):
+        board = self.boards[self.selected]
+        board.paused = paused
         self.pause.setText("恢复波形" if paused else "暂停波形")
         if not paused:
-            self.displayed = self.latest
-            if not self.active:
-                self.pause.setEnabled(False)
+            board.displayed = board.latest
+        self.update_card(self.selected)
+        self.refresh_interlock()
         self.updated.emit(True)
 
     def poll(self):
-        session = self.session
-        finished = not session.is_alive()
-        with session.lock:
-            progress, self.latest, preview_error = session.progress, session.frame, session.preview_error
-        redraw = not self.pause.isChecked() and self.latest is not self.displayed
-        if redraw:
-            self.displayed = self.latest
-        if progress:
-            self.count.setText(f"{progress.captured_events} / {progress.requested_events}")
-            self.message = str(progress.output_dir or "")
-            if self.stop_button.isEnabled():
-                self.state.setText("采样中")
-        if preview_error:
-            self.message += f"   ·   预览解码：{preview_error}"
-        if finished:
-            session.join()
-            self.timer.stop()
-            self.session = None
-            if session.result:
-                result = session.result
-                self.state.setText("已完成" if result.captured_events == result.requested_events else "已停止")
-                self.message = str(result.run_output_dir or "")
-            else:
-                self.state.setText("采样失败")
-                self.message = f"{session.error}   {self.message if progress else ''}"
-            self.set_busy(False)
-            self.pause.setEnabled(self.pause.isChecked() and self.latest is not None)
-        self.updated.emit(redraw)
+        redraw = False
+        released = False
+        for name, board in self.boards.items():
+            session = board.session
+            if session is None:
+                continue
+            finished = not session.is_alive()
+            with session.lock:
+                progress, board.latest, error = session.progress, session.frame, session.preview_error
+            if not board.paused and board.latest is not board.displayed:
+                board.displayed = board.latest
+                if name == self.selected:
+                    redraw = True
+            if progress:
+                board.count = progress.captured_events
+                board.message = str(progress.output_dir or "")
+                if not session.cancel.is_set():
+                    board.state = "采样中"
+                if error:
+                    board.message += f"   ·   预览解码：{error}"
+            if finished:
+                session.join()
+                board.session = None
+                released = True
+                if session.result:
+                    result = session.result
+                    board.count = result.captured_events
+                    board.state = "已完成" if result.captured_events == result.requested_events else "已停止"
+                    board.message = str(result.run_output_dir or "")
+                else:
+                    board.state = "采样失败"
+                    board.message = f"{session.error}   {board.message if progress else ''}".strip()
+            self.update_card(name)
+        if released:
+            if not self.active:
+                self.timer.stop()
+            self.refresh_interlock()
+            self.active_changed.emit(self.active)
+        self.show_selected(redraw)
 
     def draw(self, scope):
         frame = self.displayed
         count, mask, channels = frame if frame else (None, 0, [None] * 16)
-        heading = self.target.currentText() or "单板采样"
+        heading = self.selected or "单板采样"
         if count is not None:
             heading += f"   /   事件 {count}"
         if self.pause.isChecked():

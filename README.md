@@ -46,14 +46,14 @@ you can also launch `scripts\run_qt_replay.cmd`; it uses the project-local
 `.venv-qt` if available and opens `samples/four_board_00001` by default.
 Real capture samples are local files and are excluded from Git.
 
-Select **单板采样** in the top selector. Choose a profile (or launch with
-`daq-replay -p path/to/profile.yaml`), target board, event count, storage mode
-and output directory. Without a local replay sample the application opens in
-single-board mode. The live inputs use the profile defaults; for live preview
-a missing sampling stride defaults to one. **开始采样** starts a new run,
-**暂停波形** freezes the displayed event while reception and storage continue,
-and **停止采样** cancels capture and waits for the output files to close.
-After completion or stop, **开始采样** creates a new run directory.
+Select **单板采样** or launch with `daq-replay --single -p path/to/profile.yaml`.
+Click a board card, choose its event count, storage mode and output directory,
+then press **开始采样**. You can select another card and start a second capture
+while the first is running. Each card shows its own state and event count.
+The scope shows the selected board's 16 channels. **暂停波形** freezes that
+board's preview while all captures continue writing. **停止采样** stops only
+the selected board. Each start creates a separate run directory. Closing the
+workstation stops all active captures and waits for their files to close.
 The existing `daq-gui` entry point opens the Tk application.
 
 Select **多板采样** (or launch with `daq-replay --multi`) for group acquisition.

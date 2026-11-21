@@ -325,7 +325,7 @@ class ConfigPanel(W.QFrame):
 
     def locked(self):
         ip = self.target_ip()
-        return ((self.single.active and self.single.target_ip() == ip)
+        return (ip in self.single.reserved_ips
                 or (self.multi is not None and ip in self.multi.reserved_ips))
 
     def refresh(self):

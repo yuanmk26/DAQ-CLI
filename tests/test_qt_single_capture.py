@@ -141,3 +141,82 @@ def test_retry_after_connect_failure_and_close_during_capture(tmp_path, storage)
             assert not (directory / "complete_events.dat").exists()
         else:
             assert len(list((directory / "raw").glob("*.bin"))) == 1
+
+
+def test_concurrent_boards_pause_stop_restart_and_close(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    profile = tmp_path / "profile.yaml"
+    profile.write_text("devices:\n  a: {ip: 127.0.0.1}\n  alias: {ip: 127.0.0.1}\n"
+                       "  b: {ip: 127.0.0.2}\n")
+    window = Workstation(profile_path=profile)
+    pane = window.single
+    panel = window.config
+    a, b, restarted = ControlledStream(), ControlledStream(), ControlledStream()
+    runs = iter([a, restarted])
+    def open_stream(device, timeout_s):
+        return next(runs) if device.name == "a" else b
+
+    def send(stream, event):
+        stream.packets.put(_build_tcp_sent_packet(1, 1, event))
+
+    def check_file(directory, expected_events):
+        reader = MultiBoardAggregatedEventReader(directory / "complete_events.dat", event_kind="complete")
+        assert [event.boards[0].event_count for event in reader.iter_events()] == expected_events
+
+    with patch.object(LegacyBoardAdapter, "read_tcp_mode2_config", return_value=SimpleNamespace(send_mode=1)), \
+         patch.object(LegacySingleCaptureRunner, "_open_socket", side_effect=open_stream):
+        try:
+            pane.events.setValue(20)
+            pane.output.setText(str(tmp_path / "a"))
+            pane.start.click()
+            send(a, 10)
+            wait_for(app, lambda: pane.displayed is not None)
+            a_dir = Path(pane.message)
+            pane.pause.click()
+            size = (a_dir / "complete_events.dat").stat().st_size
+            pane.buttons["alias"].click()
+            assert not pane.start.isEnabled()
+            pane.buttons["b"].click()
+            assert pane.start.isEnabled() and not pane.pause.isChecked()
+            pane.events.setValue(15)
+            pane.output.setText(str(tmp_path / "b"))
+            pane.start.click()
+            send(b, 40)
+            send(a, 11)
+            wait_for(app, lambda: pane.boards["a"].count == 2 and pane.displayed is not None)
+            assert pane.displayed[0] == 40 and "b" in window.scope.scope_title.text()
+            assert "2 事件" in pane.buttons["a"].text()
+            assert (a_dir / "complete_events.dat").stat().st_size > size
+            b_dir = Path(pane.message)
+            assert b_dir.parent != a_dir.parent
+            for i in range(3):
+                panel.target.setCurrentIndex(i)
+                panel.tabs.setCurrentIndex(1)
+                assert panel.read.isEnabled() and not panel.write.isEnabled() and not panel.calibrate.isEnabled()
+            pane.buttons["a"].click()
+            assert pane.pause.isChecked() and pane.displayed[0] == 10
+            assert pane.events.value() == 20 and pane.output.text() == str(a_dir.parent)
+            pane.pause.click()
+            assert pane.displayed[0] == 11
+            pane.stop_button.click()
+            wait_for(app, lambda: pane.start.isEnabled())
+            assert pane.active and not window.mode.isEnabled()
+            panel.target.setCurrentIndex(0)
+            assert panel.write.isEnabled()
+            send(b, 41)
+            wait_for(app, lambda: pane.boards["b"].count == 2)
+            check_file(a_dir, [10, 11])
+            pane.start.click()
+            send(restarted, 19)
+            wait_for(app, lambda: pane.displayed is not None)
+            restarted_dir = Path(pane.message)
+            assert restarted_dir != a_dir
+            window.close()
+            wait_for(app, lambda: not pane.active)
+            assert restarted.closed and b.closed
+            check_file(restarted_dir, [19])
+            check_file(b_dir, [40, 41])
+        finally:
+            pane.stop_all()
+            wait_for(app, lambda: not pane.active)
+            window.close()
