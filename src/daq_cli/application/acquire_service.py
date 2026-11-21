@@ -10,6 +10,7 @@ from daq_cli.application.output_config import (
     OutputTargetConfig,
     TextOutputConfig,
 )
+from daq_cli.application.acquire_options import default_output_base_dir
 from daq_cli.application.profile_service import ProfileService
 from daq_cli.domain.device import DeviceConfig
 from daq_cli.domain.group import GroupConfig
@@ -167,7 +168,7 @@ class AcquireService:
             ) from exc
 
         base_dir = output_base_dir or (
-            self._default_output_base_dir(profile.path, profile) / "single"
+            default_output_base_dir(profile) / "single"
         )
         resolved_outputs = outputs or AcquireOutputsConfig(
             raw=OutputTargetConfig(enabled=True),
@@ -345,7 +346,7 @@ class AcquireService:
 
         devices = self._resolve_group_devices(profile.devices, group)
         base_dir = output_base_dir or (
-            self._default_output_base_dir(profile.path, profile) / "multi"
+            default_output_base_dir(profile) / "multi"
         )
         resolved_outputs = outputs or AcquireOutputsConfig(
             raw=OutputTargetConfig(enabled=True),
@@ -450,20 +451,6 @@ class AcquireService:
             ),
             text_output_files=getattr(raw_result, "text_output_files", 0),
         )
-
-    def _default_output_base_dir(self, profile_path: Path, profile) -> Path:
-        configured = profile.defaults.get("output_dir", "out")
-        base = Path(str(configured))
-        if not base.is_absolute():
-            # Repository layout: profiles/<name>.yaml -> <repo>/out.
-            # Deployments that place a profile outside a "profiles" directory
-            # (e.g. daq-profile.yaml next to the exe) keep outputs beside it.
-            profile_dir = profile_path.parent
-            if profile_dir.name.lower() == "profiles":
-                base = profile_dir.parent / base
-            else:
-                base = profile_dir / base
-        return base
 
     def _resolve_group_devices(
         self,

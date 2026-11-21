@@ -219,7 +219,7 @@ class BoardTab:
         ttk.Entry(grid, textvariable=self._m9_position_var, width=6).grid(
             row=0, column=3, sticky="w", padx=(4, 0)
         )
-        ttk.Label(grid, text="0x1B~1D SEND_START_DELAY").grid(
+        ttk.Label(grid, text="0x1B~1D SEND_START_DELAY (5 ns)").grid(
             row=1, column=0, sticky="w", pady=(4, 0)
         )
         ttk.Entry(grid, textvariable=self._m9_start_delay_var, width=8).grid(
@@ -493,8 +493,6 @@ class BoardTab:
         """应用全部：读面板全部字段 → 三组分别写 → 回读验证。"""
         # All form values are read on the GUI thread (tkinter variables are
         # not thread-safe) and captured into the task closure.
-        from daq_cli.application.config_models import BoardConfigOptions
-
         device = self._selected_device()
         model = formatting.parse_int_field(self._m9_model_var.get(), "Trigger_model")
         position = formatting.parse_int_field(self._m9_position_var.get(), "Trigger_position")
@@ -528,63 +526,20 @@ class BoardTab:
             )
             return
 
+        profile_path = self.app.profile_path
+
         def task():
-            # A. 触发源
-            board_result = self.board_service.configure_board(
-                device_name=device,
-                profile_path=self.app.profile_path,
-                send_start_delay_us=start_delay,
-                options=BoardConfigOptions(
-                    adc_enabled=False,
-                    clock_enabled=False,
-                    trigger_enabled=True,
-                    tcp_mode2_enabled=False,
-                    trigger_thresholds=(0, 0, 0, 0),  # unused in mode 9
-                    trigger_mode=model,
-                    trigger_position=position,
-                    timestamp_clean_enabled=time_clean,
-                    ext_trigger_enabled=ext_trigger,
-                    send_mode=send_mode,
-                ),
+            return self.board_service.configure_mode9(
+                device, profile_path, trigger_mode=model, trigger_position=position,
+                send_start_delay_ticks=start_delay, timestamp_clean=time_clean,
+                ext_trigger=ext_trigger, send_mode=send_mode, thresholds=thr,
+                mask=mask, polarity=polarity, debounce=debounce, pulse_width=width,
+                enable=enable, integration_pre=integ_pre, integration_post=integ_post,
             )
-            # B. 过阈链路
-            tcm_result = self.board_service.configure_tcm_link(
-                device_name=device,
-                profile_path=self.app.profile_path,
-                thresholds=thr,
-                mask=mask,
-                polarity=polarity,
-                debounce=debounce,
-                pulse_width=width,
-                enable=enable,
-            )
-            # C. 数据格式（0x43/0x44 无 service 方法，直写寄存器）
-            self.board_service.write_registers(
-                device_name=device,
-                profile_path=self.app.profile_path,
-                address=0x43,
-                data=bytes([integ_pre & 0xFF]),
-            )
-            self.board_service.write_registers(
-                device_name=device,
-                profile_path=self.app.profile_path,
-                address=0x44,
-                data=bytes([integ_post & 0xFF]),
-            )
-            # 回读验证
-            trigger = self.board_service.read_trigger_config(
-                device_name=device, profile_path=self.app.profile_path
-            )
-            tcm_read = self.board_service.read_tcm_link_config(
-                device_name=device, profile_path=self.app.profile_path
-            )
-            tcp_read = self.board_service.read_tcp_mode2_config(
-                device_name=device, profile_path=self.app.profile_path
-            )
-            return board_result, trigger, tcm_read, tcp_read
 
         def render(results) -> None:
-            board_result, trigger, tcm_read, tcp_read = results
+            board_result, readback = results
+            trigger, tcm_read, tcp_read = readback.trigger, readback.link, readback.tcp
             self.result.show(
                 "mode 9 配置完成（回读验证通过）\n"
                 + formatting.format_trigger_config(trigger)
@@ -661,17 +616,11 @@ class BoardTab:
         """回读刷新：读取三组寄存器当前值，填回面板表单。"""
         device = self._selected_device()  # read on the GUI thread
 
+        profile_path = self.app.profile_path
+
         def task():
-            trigger = self.board_service.read_trigger_config(
-                device_name=device, profile_path=self.app.profile_path
-            )
-            tcm = self.board_service.read_tcm_link_config(
-                device_name=device, profile_path=self.app.profile_path
-            )
-            tcp = self.board_service.read_tcp_mode2_config(
-                device_name=device, profile_path=self.app.profile_path
-            )
-            return formatting.mode9_readback_to_values(trigger, tcm, tcp)
+            result = self.board_service.read_mode9(device, profile_path)
+            return formatting.mode9_readback_to_values(result.trigger, result.link, result.tcp)
 
         def render(values) -> None:
             def apply_var(var, value) -> None:
@@ -738,7 +687,12 @@ class BoardTab:
 
     # ---------------------------------------------------------------- lifecycle
 
-    def refresh(self, profile) -> None:
+    def refresh(self, profile, board) -> None:
+        self._trigger_mode_var.set(board.trigger_mode)
+        self._trigger_position_var.set(board.trigger_position)
+        for var, threshold in zip(self._threshold_vars, board.trigger_thresholds):
+            var.set(threshold)
+        self._m9_position_var.set(profile.defaults.get("trigger_position", 74))
         devices = sorted(profile.devices)
         self._device_combo.configure(values=devices)
         if devices and self._device_var.get() not in devices:

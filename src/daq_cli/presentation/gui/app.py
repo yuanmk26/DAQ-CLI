@@ -12,6 +12,11 @@ from pathlib import Path
 from tkinter import filedialog, ttk
 
 from daq_cli import __version__
+from daq_cli.application.acquire_options import (
+    resolve_multi_acquire_options,
+    resolve_single_acquire_options,
+)
+from daq_cli.application.config_models import board_profile_options
 from daq_cli.application.profile_service import ProfileService
 from daq_cli.presentation.gui import fonts as gui_fonts
 
@@ -158,6 +163,9 @@ class DaqGuiApp:
     def load_profile(self, profile_path: Path) -> None:
         try:
             profile = self._profile_service.load_profile(profile_path)
+            board = board_profile_options(profile.defaults)
+            single = resolve_single_acquire_options(defaults=profile.defaults)
+            multi = resolve_multi_acquire_options(defaults=profile.defaults)
         except Exception as exc:  # noqa: BLE001 - surface to the user
             self.log(f"Profile 加载失败: {exc}")
             return
@@ -166,8 +174,10 @@ class DaqGuiApp:
         self._profile_var.set(str(profile.path))
         self.log(f"Profile 已加载: {profile.path}（设备 {len(profile.devices)}，"
                  f"组 {len(profile.groups)}，TCM {len(profile.tcm)}）")
-        for tab in self.tabs:
-            tab.refresh(profile)
+        self.board_tab.refresh(profile, board)
+        self.acquire_tab.refresh(profile, single, multi)
+        self.monitor_tab.refresh(profile)
+        self.tcm_tab.refresh(profile)
 
     def schedule(self, callback) -> None:
         """Run ``callback`` on the GUI thread (tkinter-safe from workers)."""

@@ -117,6 +117,13 @@ class BoardConfigSummaryResult:
     tcp_mode2: TcpMode2ConfigReadResult
 
 
+@dataclass(slots=True)
+class Mode9Readback:
+    trigger: TriggerConfigReadResult
+    link: TcmLinkConfigReadResult
+    tcp: TcpMode2ConfigReadResult
+
+
 class BoardService:
     """Board-oriented business workflows."""
 
@@ -377,6 +384,72 @@ class BoardService:
             enable=raw_result.enable,
             pulse_width=raw_result.pulse_width,
         )
+
+    def read_mode9(self, device_name: str, profile_path: Path | str) -> Mode9Readback:
+        return Mode9Readback(
+            trigger=self.read_trigger_config(device_name, profile_path),
+            link=self.read_tcm_link_config(device_name, profile_path),
+            tcp=self.read_tcp_mode2_config(device_name, profile_path),
+        )
+
+    def configure_mode9(
+        self, device_name: str, profile_path: Path | str, *,
+        trigger_mode: int, trigger_position: int, send_start_delay_ticks: int,
+        timestamp_clean: bool, ext_trigger: bool, send_mode: int | None,
+        thresholds: list[int], mask: int, polarity: int, debounce: int,
+        pulse_width: int, enable: bool, integration_pre: int, integration_post: int,
+    ) -> tuple[BoardConfigResult, Mode9Readback]:
+        """Apply the ADC-side trigger, threshold link and integration window."""
+        for name, value, maximum in (
+            ("trigger_position", trigger_position, 255),
+            ("send_start_delay_ticks", send_start_delay_ticks, 0xFFFFFF),
+            ("integration_pre", integration_pre, 255),
+            ("integration_post", integration_post, 255),
+            ("mask", mask, 0xFFFF), ("polarity", polarity, 0xFFFF),
+            ("debounce", debounce, 0xFFFF), ("pulse_width", pulse_width, 255),
+        ):
+            if not 0 <= value <= maximum:
+                raise ValueError(f"{name} must be in 0..{maximum}")
+        if send_mode is not None and not 0 <= send_mode <= 3:
+            raise ValueError("send_mode must be in 0..3")
+        if len(thresholds) != 16 or any(not 0 <= v <= 0xFFFF for v in thresholds):
+            raise ValueError("Expected 16 channel thresholds in 0..65535")
+        if enable and not any(thresholds):
+            raise ValueError("Enabled trigger link requires nonzero channel thresholds")
+
+        board = self.configure_board(
+            device_name, profile_path,
+            # The panel and readback use 5 ns register ticks, the driver takes us.
+            send_start_delay_us=send_start_delay_ticks / 200,
+            options=BoardConfigOptions(
+                trigger_mode=trigger_mode, trigger_position=trigger_position,
+                trigger_thresholds=(0, 0, 0, 0), tcp_mode2_enabled=False,
+                timestamp_clean_enabled=timestamp_clean, ext_trigger_enabled=ext_trigger,
+                send_mode=send_mode,
+            ),
+        )
+        if not board.success:
+            raise RuntimeError(f"{device_name} trigger configuration failed: {board.log_output}")
+        self.configure_tcm_link(
+            device_name, profile_path, thresholds=thresholds, mask=mask, polarity=polarity,
+            debounce=debounce, pulse_width=pulse_width, enable=enable,
+        )
+        self.write_registers(device_name, profile_path, address=0x43, data=bytes([integration_pre]))
+        self.write_registers(device_name, profile_path, address=0x44, data=bytes([integration_post]))
+        actual = self.read_mode9(device_name, profile_path)
+        for field, expected, observed in (
+            ("trigger mode", trigger_mode, actual.trigger.trigger_mode),
+            ("trigger position", trigger_position, actual.trigger.trigger_position),
+            ("start delay", send_start_delay_ticks, actual.trigger.send_start_delay),
+            ("timestamp clean", timestamp_clean, actual.trigger.timestamp_clean_enabled),
+            ("external trigger", ext_trigger, actual.trigger.ext_trigger_enabled),
+            ("send mode", send_mode, actual.tcp.send_mode),
+            ("integration pre", integration_pre, actual.tcp.integration_pre_samples),
+            ("integration post", integration_post, actual.tcp.integration_post_samples),
+        ):
+            if expected is not None and expected != observed:
+                raise RuntimeError(f"{device_name} {field}: requested {expected}, read back {observed}")
+        return board, actual
 
     def configure_tcm_link(
         self,

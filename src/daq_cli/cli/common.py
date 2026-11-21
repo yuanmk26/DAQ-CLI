@@ -8,6 +8,7 @@ ProfileOption = Annotated[
     typer.Option(
         "--profile",
         "-p",
+        envvar="DAQ_PROFILE",
         help="Path to the DAQ profile YAML file.",
         exists=True,
         file_okay=True,
@@ -22,6 +23,7 @@ RequiredProfileOption = Annotated[
         ...,
         "--profile",
         "-p",
+        envvar="DAQ_PROFILE",
         help="Path to the DAQ profile YAML file.",
         exists=True,
         file_okay=True,

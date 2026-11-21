@@ -4,10 +4,9 @@ from typing import Annotated
 import typer
 
 from daq_cli.application.acquire_service import AcquireService, SingleAcquireProgress
-from daq_cli.application.output_config import (
-    AcquireOutputsConfig,
-    OutputTargetConfig,
-    TextOutputConfig,
+from daq_cli.application.acquire_options import (
+    resolve_multi_acquire_options,
+    resolve_single_acquire_options,
 )
 from daq_cli.application.profile_service import ProfileService
 from daq_cli.cli.common import RequiredProfileOption
@@ -90,23 +89,22 @@ def acquire_single(
 ) -> None:
     """Capture raw TCP_SENT packets from one device."""
     profile_data = ProfileService().load_profile(profile)
-    resolved = _resolve_single_acquire_options(
-        defaults=profile_data.defaults,
-        events=events,
-        timeout_s=timeout_s,
-        output_dir=output_dir,
-        decode_json=decode_json,
-        decoded_output_dir=decoded_output_dir,
-        watch_every=watch_every,
-        progress_every=progress_every,
-        storage=storage,
-        rate_interval=rate_interval,
-    )
-    storage_mode = str(resolved["storage_mode"]).lower()
-    if storage_mode not in {"aggregate", "rate", "legacy"}:
-        raise typer.BadParameter(
-            "storage must be one of: aggregate, rate, legacy"
+    try:
+        resolved = resolve_single_acquire_options(
+            defaults=profile_data.defaults,
+            events=events,
+            timeout_s=timeout_s,
+            output_dir=output_dir,
+            decode_json=decode_json,
+            decoded_output_dir=decoded_output_dir,
+            watch_every=watch_every,
+            progress_every=progress_every,
+            storage=storage,
+            rate_interval=rate_interval,
         )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    storage_mode = resolved["storage_mode"]
     if storage_mode != "legacy" and (
         resolved["outputs"].json.enabled or resolved["outputs"].text.enabled
     ):
@@ -252,32 +250,29 @@ def acquire_multi(
 ) -> None:
     """Run multi-board acquisition for one logical group."""
     profile_data = ProfileService().load_profile(profile)
-    resolved = _resolve_multi_acquire_options(
-        defaults=profile_data.defaults,
-        output_dir=output_dir,
-        aggregation_key=aggregation_key,
-        timestamp_match_window_ticks=timestamp_match_window_ticks,
-        event_timeout_ms=event_timeout_ms,
-        tcp_timeout_s=tcp_timeout_s,
-        allow_start_without_ack=allow_start_without_ack,
-        decode_json=decode_json,
-        watch_waveforms=watch_waveforms,
-        watch_every=watch_every,
-        stop_on_watch_close=stop_on_watch_close,
-    )
-    normalized_aggregation_key = str(resolved["aggregation_key"]).lower()
-    if normalized_aggregation_key not in {"timestamp", "event_count"}:
-        raise typer.BadParameter(
-            "aggregation key must be 'timestamp' or 'event_count'"
+    try:
+        resolved = resolve_multi_acquire_options(
+            defaults=profile_data.defaults,
+            output_dir=output_dir,
+            aggregation_key=aggregation_key,
+            timestamp_match_window_ticks=timestamp_match_window_ticks,
+            event_timeout_ms=event_timeout_ms,
+            tcp_timeout_s=tcp_timeout_s,
+            allow_start_without_ack=allow_start_without_ack,
+            decode_json=decode_json,
+            watch_waveforms=watch_waveforms,
+            watch_every=watch_every,
+            stop_on_watch_close=stop_on_watch_close,
         )
-
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     service = AcquireService()
     try:
         result = service.capture_multi(
             group_name=group,
             profile_path=profile,
             output_base_dir=resolved["output_dir"],
-            aggregation_key=normalized_aggregation_key,
+            aggregation_key=resolved["aggregation_key"],
             timestamp_match_window_ticks=resolved["timestamp_match_window_ticks"],
             event_timeout_ms=resolved["event_timeout_ms"],
             tcp_timeout_s=resolved["tcp_timeout_s"],
@@ -291,241 +286,3 @@ def acquire_multi(
         typer.echo(f"Multi-board acquisition failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     print_multi_acquire_result(result)
-
-
-def _resolve_single_acquire_options(
-    *,
-    defaults: dict[str, object],
-    events: int | None,
-    timeout_s: float | None,
-    output_dir: Path | None,
-    decode_json: bool | None,
-    decoded_output_dir: Path | None,
-    watch_every: int | None,
-    progress_every: int | None,
-    storage: str | None = None,
-    rate_interval: float | None = None,
-) -> dict[str, object]:
-    acquire_defaults = defaults.get("acquire_single")
-    if not isinstance(acquire_defaults, dict):
-        acquire_defaults = {}
-
-    def _path_from_default(key: str) -> Path | None:
-        value = acquire_defaults.get(key)
-        if value in (None, ""):
-            return None
-        return Path(str(value))
-
-    outputs = _resolve_outputs_config(
-        acquire_defaults=acquire_defaults,
-        decode_json_override=decode_json,
-        decoded_output_dir_override=decoded_output_dir,
-        default_log_enabled=False,
-    )
-
-    return {
-        "events": events if events is not None else int(acquire_defaults.get("events", 1000)),
-        "timeout_s": (
-            timeout_s if timeout_s is not None else float(acquire_defaults.get("timeout_s", 10.0))
-        ),
-        "output_dir": output_dir if output_dir is not None else _path_from_default("output_dir"),
-        "outputs": outputs,
-        "watch_every": (
-            watch_every
-            if watch_every is not None
-            else (
-                int(acquire_defaults["watch_every"])
-                if acquire_defaults.get("watch_every") is not None
-                else None
-            )
-        ),
-        "progress_every": (
-            progress_every
-            if progress_every is not None
-            else int(acquire_defaults.get("progress_every", 50))
-        ),
-        "storage_mode": (
-            str(storage).lower()
-            if storage is not None
-            else str(acquire_defaults.get("storage_mode", "aggregate")).lower()
-        ),
-        "rate_interval_s": max(
-            0.1,
-            float(
-                rate_interval
-                if rate_interval is not None
-                else acquire_defaults.get("rate_interval_s", 1.0)
-            ),
-        ),
-    }
-
-
-def _resolve_multi_acquire_options(
-    *,
-    defaults: dict[str, object],
-    output_dir: Path | None,
-    aggregation_key: str | None,
-    timestamp_match_window_ticks: int | None,
-    event_timeout_ms: int | None,
-    tcp_timeout_s: float | None,
-    allow_start_without_ack: bool | None,
-    decode_json: bool | None,
-    watch_waveforms: bool | None,
-    watch_every: int | None,
-    stop_on_watch_close: bool | None,
-) -> dict[str, object]:
-    acquire_defaults = defaults.get("acquire_multi")
-    if not isinstance(acquire_defaults, dict):
-        acquire_defaults = {}
-
-    output_dir_value = acquire_defaults.get("output_dir")
-    outputs = _resolve_outputs_config(
-        acquire_defaults=acquire_defaults,
-        decode_json_override=decode_json,
-        decoded_output_dir_override=None,
-        default_log_enabled=True,
-    )
-    resolved_output_dir = (
-        output_dir
-        if output_dir is not None
-        else (
-            Path(str(output_dir_value))
-            if output_dir_value not in (None, "")
-            else None
-        )
-    )
-
-    return {
-        "output_dir": resolved_output_dir,
-        "aggregation_key": aggregation_key or str(
-            acquire_defaults.get("aggregation_key", "timestamp")
-        ),
-        "timestamp_match_window_ticks": (
-            timestamp_match_window_ticks
-            if timestamp_match_window_ticks is not None
-            else int(acquire_defaults.get("timestamp_match_window_ticks", 10))
-        ),
-        "event_timeout_ms": (
-            event_timeout_ms
-            if event_timeout_ms is not None
-            else int(acquire_defaults.get("event_timeout_ms", 50))
-        ),
-        "tcp_timeout_s": (
-            tcp_timeout_s
-            if tcp_timeout_s is not None
-            else float(acquire_defaults.get("tcp_timeout_s", 1.0))
-        ),
-        "allow_start_without_ack": (
-            allow_start_without_ack
-            if allow_start_without_ack is not None
-            else bool(acquire_defaults.get("allow_start_without_ack", False))
-        ),
-        "outputs": outputs,
-        "watch_waveforms": (
-            watch_waveforms
-            if watch_waveforms is not None
-            else bool(acquire_defaults.get("watch_waveforms", False))
-        ),
-        "watch_every": (
-            watch_every
-            if watch_every is not None
-            else (
-                int(acquire_defaults["watch_every"])
-                if acquire_defaults.get("watch_every") is not None
-                else 100
-            )
-        ),
-        "stop_on_watch_close": (
-            stop_on_watch_close
-            if stop_on_watch_close is not None
-            else bool(acquire_defaults.get("stop_on_watch_close", True))
-        ),
-    }
-
-
-def _resolve_outputs_config(
-    *,
-    acquire_defaults: dict[str, object],
-    decode_json_override: bool | None,
-    decoded_output_dir_override: Path | None,
-    default_log_enabled: bool,
-) -> AcquireOutputsConfig:
-    outputs_defaults = acquire_defaults.get("outputs")
-    if not isinstance(outputs_defaults, dict):
-        outputs_defaults = {}
-    legacy_text_defaults = acquire_defaults.get("text_output")
-    if not isinstance(legacy_text_defaults, dict):
-        legacy_text_defaults = {}
-
-    raw_defaults = outputs_defaults.get("raw")
-    if not isinstance(raw_defaults, dict):
-        raw_defaults = {}
-    json_defaults = outputs_defaults.get("json")
-    if not isinstance(json_defaults, dict):
-        json_defaults = {}
-    text_defaults = outputs_defaults.get("text")
-    if not isinstance(text_defaults, dict):
-        text_defaults = {}
-    log_defaults = outputs_defaults.get("log")
-    if not isinstance(log_defaults, dict):
-        log_defaults = {}
-
-    json_enabled = (
-        decode_json_override
-        if decode_json_override is not None
-        else bool(
-            json_defaults.get(
-                "enabled",
-                acquire_defaults.get("decode_json", False),
-            )
-        )
-    )
-    json_dir = decoded_output_dir_override or _path_from_value(
-        json_defaults.get("dir", acquire_defaults.get("decoded_output_dir"))
-    )
-
-    text_enabled = bool(
-        text_defaults.get("enabled", legacy_text_defaults.get("enabled", False))
-    )
-    text_dir = _path_from_value(
-        text_defaults.get("dir", legacy_text_defaults.get("output_dir"))
-    )
-    text_max_events_per_file = int(
-        text_defaults.get(
-            "max_events_per_file",
-            legacy_text_defaults.get("max_events_per_file", 100),
-        )
-    )
-    text_waveform_layout = str(
-        text_defaults.get(
-            "waveform_layout",
-            legacy_text_defaults.get("waveform_layout", "channel_blocks"),
-        )
-    )
-
-    return AcquireOutputsConfig(
-        raw=OutputTargetConfig(
-            enabled=bool(raw_defaults.get("enabled", True)),
-            dir=_path_from_value(raw_defaults.get("dir")),
-        ),
-        json=OutputTargetConfig(
-            enabled=json_enabled,
-            dir=json_dir,
-        ),
-        text=TextOutputConfig(
-            enabled=text_enabled,
-            dir=text_dir,
-            max_events_per_file=text_max_events_per_file,
-            waveform_layout=text_waveform_layout,
-        ),
-        log=OutputTargetConfig(
-            enabled=bool(log_defaults.get("enabled", default_log_enabled)),
-            dir=_path_from_value(log_defaults.get("dir")),
-        ),
-    )
-
-
-def _path_from_value(value: object) -> Path | None:
-    if value in (None, ""):
-        return None
-    return Path(str(value))

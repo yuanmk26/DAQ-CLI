@@ -11,7 +11,7 @@ app = typer.Typer(no_args_is_help=True, help="GUI console commands.")
 def gui(
     profile: Annotated[
         str | None,
-        typer.Option("--profile", "-p", help="Path to the DAQ profile YAML file."),
+        typer.Option("--profile", "-p", envvar="DAQ_PROFILE", help="Path to the DAQ profile YAML file."),
     ] = None,
 ) -> None:
     """Open the desktop GUI console.

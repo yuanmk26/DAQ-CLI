@@ -12,11 +12,15 @@ from daq_cli.cli.tcm import app as tcm_app
 app = typer.Typer(
     no_args_is_help=True,
     help="DAQ board configuration, acquisition, monitoring, and waveform tools.",
+    epilog=(
+        "Common operations: board config, acquire single, acquire multi, and decode. "
+        "Set DAQ_PROFILE once or pass -p to a hardware command."
+    ),
 )
 
 app.add_typer(profile_app, name="profile")
 app.add_typer(board_app, name="board")
-app.add_typer(group_app, name="group")
+app.add_typer(group_app, name="group", hidden=True)
 app.add_typer(acquire_app, name="acquire")
 app.add_typer(decode_app, name="decode")
 app.add_typer(gui_app, name="gui")

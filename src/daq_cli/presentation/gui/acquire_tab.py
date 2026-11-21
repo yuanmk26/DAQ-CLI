@@ -261,9 +261,7 @@ class AcquireTab:
 
         option_row = ttk.Frame(group)
         option_row.pack(fill=tk.X, pady=(6, 0))
-        # 默认放行：TCM MISO ack 物理链路未全通时（仅部分板回 ack）
-        # 强制要求 ack 会导致采集卡在 align
-        self._allow_no_ack = tk.BooleanVar(value=True)
+        self._allow_no_ack = tk.BooleanVar()
         self._multi_json_enabled = tk.BooleanVar(value=False)
         self._multi_text_enabled = tk.BooleanVar(value=False)
         for text, var in (
@@ -340,10 +338,12 @@ class AcquireTab:
         self._progress_label.configure(text="连接中...")
         self._progress_queue = queue.Queue()
 
+        profile_path = self.app.profile_path
+
         def task():
             return self.acquire_service.capture_single(
                 device_name=device,
-                profile_path=self.app.profile_path,
+                profile_path=profile_path,
                 events=events,
                 timeout_s=timeout_s,
                 output_base_dir=output_base_dir,
@@ -538,7 +538,7 @@ class AcquireTab:
         outputs = formatting.merge_outputs_config(
             self.app.profile,
             page,
-            raw_enabled=True,
+            raw_enabled=self._page_options[page]["outputs"].raw.enabled,
             json_enabled=(
                 self._json_enabled.get() if page == "single" else self._multi_json_enabled.get()
             ),
@@ -546,7 +546,7 @@ class AcquireTab:
                 self._text_enabled.get() if page == "single" else self._multi_text_enabled.get()
             ),
             log_enabled=(
-                self._log_enabled.get() if page == "single" else True
+                self._log_enabled.get() if page == "single" else self._page_options[page]["outputs"].log.enabled
             ),
             raw_dir=storage.dirs["raw"].get(),
             json_dir=storage.dirs["json"].get(),
@@ -556,7 +556,7 @@ class AcquireTab:
         base_text = storage.base.get().strip()
         prefix_text = storage.prefix.get().strip()
         return (
-            Path(base_text) if base_text else None,
+            Path(base_text) if base_text else self._page_options[page]["output_dir"],
             prefix_text or None,
             outputs,
         )
@@ -762,10 +762,16 @@ class AcquireTab:
         aggregation_key = self._aggregation_var.get()
         allow_start_without_ack = self._allow_no_ack.get()
 
+        multi = self._page_options["multi"]
+        profile_path = self.app.profile_path
+
         def task():
             return self.acquire_service.capture_multi(
                 group_name=group,
-                profile_path=self.app.profile_path,
+                profile_path=profile_path,
+                tcp_timeout_s=multi["tcp_timeout_s"],
+                event_timeout_ms=multi["event_timeout_ms"],
+                stop_capture_on_watch_close=multi["stop_on_watch_close"],
                 output_base_dir=output_base_dir,
                 outputs=outputs,
                 aggregation_key=aggregation_key,
@@ -820,7 +826,32 @@ class AcquireTab:
             raise ValueError(f"请选择{label}")
         return value
 
-    def refresh(self, profile) -> None:
+    def refresh(self, profile, single, multi) -> None:
+        self._page_options = {"single": single, "multi": multi}
+        self._events_var.set(single["events"])
+        self._timeout_var.set(single["timeout_s"])
+        self._rate_interval_var.set(single["rate_interval_s"])
+        for label, mode in self._single_storage_modes.items():
+            if mode == single["storage_mode"]:
+                self._storage_mode_var.set(label)
+                break
+        self._on_storage_mode_changed()
+        self._watch_enabled.set(single["watch_every"] is not None)
+        self._watch_every_var.set(single["watch_every"] or 1)
+        self._json_enabled.set(single["outputs"].json.enabled)
+        self._text_enabled.set(single["outputs"].text.enabled)
+        self._log_enabled.set(single["outputs"].log.enabled)
+        self._aggregation_var.set(multi["aggregation_key"])
+        self._match_window_var.set(multi["timestamp_match_window_ticks"])
+        self._allow_no_ack.set(multi["allow_start_without_ack"])
+        self._multi_watch_enabled.set(multi["watch_waveforms"])
+        self._multi_watch_every_var.set(multi["watch_every"])
+        self._multi_json_enabled.set(multi["outputs"].json.enabled)
+        self._multi_text_enabled.set(multi["outputs"].text.enabled)
+        for storage in (self._single_storage, self._multi_storage):
+            storage.base.set("")
+            for directory in storage.dirs.values():
+                directory.set("")
         devices = sorted(profile.devices)
         self._device_combo.configure(values=devices)
         if devices and self._device_var.get() not in devices:

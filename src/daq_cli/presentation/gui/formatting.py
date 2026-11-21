@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from daq_cli.application.acquire_options import default_output_base_dir, resolve_outputs_config
 from daq_cli.application.acquire_service import (
     MultiAcquireResult,
     SingleAcquireResult,
@@ -308,19 +309,6 @@ def parse_int_list(text: str, count: int, field_name: str) -> list[int]:
 # ---------------------------------------------------------------- storage
 
 
-def default_output_base_dir(profile) -> Path:
-    """Resolve the profile's base output directory (same rule as the service)."""
-    configured = profile.defaults.get("output_dir", "out")
-    base = Path(str(configured))
-    if not base.is_absolute():
-        profile_dir = profile.path.parent
-        if profile_dir.name.lower() == "profiles":
-            base = profile_dir.parent / base
-        else:
-            base = profile_dir / base
-    return base
-
-
 def effective_output_dir(
     gui_entry: str | None, profile_dir: object
 ) -> Path | None:
@@ -351,34 +339,29 @@ def merge_outputs_config(
     Per-type parent directory resolution:
     GUI entry > profile outputs.<type>.dir > default leaf inside the run dir.
     """
-    configured = profile.defaults.get(f"acquire_{page}", {}) or {}
-    outputs = configured.get("outputs", {}) or {}
-    text_cfg = outputs.get("text", {}) or {}
-
-    def profile_dir(key: str) -> object:
-        item = outputs.get(key)
-        if isinstance(item, dict):
-            return item.get("dir")
-        return None
-
+    configured = profile.defaults.get(f"acquire_{page}")
+    outputs = resolve_outputs_config(
+        acquire_defaults=configured if isinstance(configured, dict) else {},
+        default_log_enabled=page == "multi",
+    )
     return AcquireOutputsConfig(
         raw=OutputTargetConfig(
             enabled=raw_enabled,
-            dir=effective_output_dir(raw_dir, profile_dir("raw")),
+            dir=effective_output_dir(raw_dir, outputs.raw.dir),
         ),
         json=OutputTargetConfig(
             enabled=json_enabled,
-            dir=effective_output_dir(json_dir, profile_dir("json")),
+            dir=effective_output_dir(json_dir, outputs.json.dir),
         ),
         text=TextOutputConfig(
             enabled=text_enabled,
-            dir=effective_output_dir(text_dir, profile_dir("text")),
-            max_events_per_file=int(text_cfg.get("max_events_per_file", 100)),
-            waveform_layout=str(text_cfg.get("waveform_layout", "channel_blocks")),
+            dir=effective_output_dir(text_dir, outputs.text.dir),
+            max_events_per_file=outputs.text.max_events_per_file,
+            waveform_layout=outputs.text.waveform_layout,
         ),
         log=OutputTargetConfig(
             enabled=log_enabled,
-            dir=effective_output_dir(log_dir, profile_dir("log")),
+            dir=effective_output_dir(log_dir, outputs.log.dir),
         ),
     )
 

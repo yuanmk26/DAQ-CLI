@@ -13,7 +13,7 @@ from daq_cli.presentation.wave_monitor_viewer import (
 app = typer.Typer(no_args_is_help=True, help="Monitoring commands.")
 
 
-@app.command("board")
+@app.command("board", hidden=True)
 def monitor_board() -> None:
     """Placeholder for board monitoring."""
     typer.echo("Not implemented yet.")

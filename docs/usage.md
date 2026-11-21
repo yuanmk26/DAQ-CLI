@@ -101,6 +101,20 @@ Example command with explicit profile:
 daq board info dev1 --profile profiles/examples/example.yaml
 ```
 
+In PowerShell, select the production profile once per terminal. An explicit
+`-p` or `--profile` overrides `DAQ_PROFILE` for one command.
+
+```powershell
+$env:DAQ_PROFILE = "profiles/muon-imaging.yaml"
+daq profile validate
+daq board info dev1
+daq acquire multi four_board
+```
+
+The GUI acquisition forms and CLI share the single-board and multi-board
+profile defaults. Loading a profile fills the GUI controls. Edits in the form
+or explicit CLI arguments override the defaults for that operation.
+
 ## 5. Inspecting the Profile
 
 Use these commands to inspect and validate a profile:
@@ -192,7 +206,13 @@ daq board config dev1 --no-trigger --tcp-mode2
 
 ### 8.2 Trigger Parameters
 
-The current implementation supports trigger-related options directly from CLI:
+The board configuration form and `daq board config` read `defaults.trigger_mode`,
+`defaults.trigger_position`, and the four `defaults.thresholds` values. Each CLI
+override replaces only its corresponding field. The mode 9 trigger link has
+its own sixteen channel thresholds. Its panel displays SEND_START_DELAY in
+5 ns register ticks; the general CLI option `--send-start-delay-us` uses microseconds.
+
+Example with explicit overrides:
 
 ```bash
 daq board config dev1 \

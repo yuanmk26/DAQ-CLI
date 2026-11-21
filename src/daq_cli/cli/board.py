@@ -4,7 +4,8 @@ from pathlib import Path
 import typer
 
 from daq_cli.application.board_service import BoardService
-from daq_cli.application.config_models import BoardConfigOptions
+from daq_cli.application.config_models import BoardConfigOptions, board_profile_options
+from daq_cli.application.profile_service import ProfileService
 from daq_cli.application.telemetry_service import TelemetryService
 from daq_cli.cli.common import RequiredProfileOption
 from daq_cli.presentation.console.printers import (
@@ -21,6 +22,8 @@ from daq_cli.presentation.console.printers import (
     print_trigger_config_read_result,
 )
 
+DIAGNOSTICS = "Diagnostics and calibration"
+
 app = typer.Typer(no_args_is_help=True, help="Single-board operations.")
 
 
@@ -35,7 +38,7 @@ def board_info(
     print_board_info(info)
 
 
-@app.command("sysmon")
+@app.command("sysmon", rich_help_panel=DIAGNOSTICS)
 def board_sysmon(
     device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
     profile: RequiredProfileOption = ...,
@@ -85,23 +88,23 @@ def board_config(
         ),
     ] = 0.0,
     threshold_1: Annotated[
-        int,
+        int | None,
         typer.Option("--threshold-1", help="Trigger threshold 1."),
-    ] = 1950,
+    ] = None,
     threshold_2: Annotated[
-        int,
+        int | None,
         typer.Option("--threshold-2", help="Trigger threshold 2."),
-    ] = 2400,
+    ] = None,
     threshold_3: Annotated[
-        int,
+        int | None,
         typer.Option("--threshold-3", help="Trigger threshold 3."),
-    ] = 2300,
+    ] = None,
     threshold_4: Annotated[
-        int,
+        int | None,
         typer.Option("--threshold-4", help="Trigger threshold 4."),
-    ] = 2300,
+    ] = None,
     trigger_mode: Annotated[
-        int,
+        int | None,
         typer.Option(
             "--trigger-mode",
             min=0,
@@ -111,11 +114,11 @@ def board_config(
                 "current firmware defines 0..12)."
             ),
         ),
-    ] = 1,
+    ] = None,
     trigger_position: Annotated[
-        int,
+        int | None,
         typer.Option("--trigger-position", help="Trigger position register value."),
-    ] = 40,
+    ] = None,
     timestamp_clean_enabled: Annotated[
         bool,
         typer.Option(
@@ -147,6 +150,11 @@ def board_config(
 ) -> None:
     """Configure a board through the legacy configuration script."""
     service = BoardService()
+    try:
+        configured = board_profile_options(ProfileService().load_profile(profile).defaults)
+    except (ValueError, TypeError) as exc:
+        raise typer.BadParameter(str(exc), param_hint="--profile") from exc
+    thresholds = (threshold_1, threshold_2, threshold_3, threshold_4)
     result = service.configure_board(
         device_name=device,
         profile_path=profile,
@@ -156,14 +164,12 @@ def board_config(
             clock_enabled=clock_enabled,
             trigger_enabled=trigger_enabled,
             tcp_mode2_enabled=tcp_mode2_enabled,
-            trigger_thresholds=(
-                threshold_1,
-                threshold_2,
-                threshold_3,
-                threshold_4,
+            trigger_thresholds=tuple(
+                value if value is not None else default
+                for value, default in zip(thresholds, configured.trigger_thresholds)
             ),
-            trigger_mode=trigger_mode,
-            trigger_position=trigger_position,
+            trigger_mode=trigger_mode if trigger_mode is not None else configured.trigger_mode,
+            trigger_position=trigger_position if trigger_position is not None else configured.trigger_position,
             timestamp_clean_enabled=timestamp_clean_enabled,
             ext_trigger_enabled=ext_trigger_enabled,
             send_mode=send_mode,
@@ -172,7 +178,7 @@ def board_config(
     print_board_config_result(result)
 
 
-@app.command("trigger-show")
+@app.command("trigger-show", rich_help_panel=DIAGNOSTICS)
 def board_trigger_show(
     device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
     profile: RequiredProfileOption = ...,
@@ -183,7 +189,7 @@ def board_trigger_show(
     print_trigger_config_read_result(result)
 
 
-@app.command("tcp-mode2-show")
+@app.command("tcp-mode2-show", rich_help_panel=DIAGNOSTICS)
 def board_tcp_mode2_show(
     device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
     profile: RequiredProfileOption = ...,
@@ -194,7 +200,7 @@ def board_tcp_mode2_show(
     print_tcp_mode2_config_read_result(result)
 
 
-@app.command("send-mode-set")
+@app.command("send-mode-set", rich_help_panel=DIAGNOSTICS)
 def board_send_mode_set(
     device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
     mode: Annotated[
@@ -232,7 +238,7 @@ def _parse_thr_list(text: str) -> list[int]:
     return values
 
 
-@app.command("tcm-link-measure")
+@app.command("tcm-link-measure", rich_help_panel=DIAGNOSTICS)
 def board_tcm_link_measure(
     device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
     seconds: Annotated[
@@ -285,7 +291,7 @@ def board_tcm_link_measure(
     )
 
 
-@app.command("tcm-link-show")
+@app.command("tcm-link-show", rich_help_panel=DIAGNOSTICS)
 def board_tcm_link_show(
     device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
     profile: RequiredProfileOption = ...,
@@ -296,7 +302,7 @@ def board_tcm_link_show(
     print_tcm_link_config_read_result(result)
 
 
-@app.command("tcm-link-config")
+@app.command("tcm-link-config", rich_help_panel=DIAGNOSTICS)
 def board_tcm_link_config(
     device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
     mask: Annotated[
@@ -384,7 +390,7 @@ def board_config_show(
     print_board_config_summary_result(result)
 
 
-@app.command("reg-read")
+@app.command("reg-read", rich_help_panel=DIAGNOSTICS)
 def board_reg_read(
     device: Annotated[str, typer.Argument(help="Logical device name from the profile.")],
     address: Annotated[
