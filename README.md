@@ -38,13 +38,23 @@ Not implemented yet:
 
 ## Quick start
 
-### Qt waveform replay prototype
+### Qt waveform workstation
 
-The optional Qt workstation reads a recorded run locally. Install with
+The optional Qt workstation supports offline replay and single-board capture. Install with
 `pip install -e ".[qt-replay]"`, then run `daq-replay path/to/run`. On Windows
 you can also launch `scripts\run_qt_replay.cmd`; it uses the project-local
 `.venv-qt` if available and opens `samples/four_board_00001` by default.
 Real capture samples are local files and are excluded from Git.
+
+Select **单板采样** in the top selector. Choose a profile (or launch with
+`daq-replay -p path/to/profile.yaml`), target board, event count, storage mode
+and output directory. Without a local replay sample the application opens in
+single-board mode. The live inputs use the profile defaults; for live preview
+a missing sampling stride defaults to one. **开始采样** starts a new run,
+**暂停波形** freezes the displayed event while reception and storage continue,
+and **停止采样** cancels capture and waits for the output files to close.
+After completion or stop, **开始采样** creates a new run directory.
+The existing `daq-gui` entry point opens the Tk application.
 
 The timeline combines complete and partial events in recorded flush-time order.
 The default preview loads up to 256 events; use `--limit N` to change it.

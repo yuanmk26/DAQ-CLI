@@ -254,16 +254,6 @@ class LegacySingleCaptureRunner:
         )
         exception_queue: queue.Queue[BaseException] = queue.Queue()
         stop_event = threading.Event()
-        if cancel_event is not None:
-            # Map an external cancel request onto the internal stop event so
-            # the receive loop stops at the next event boundary.
-            def _watch_cancel() -> None:
-                cancel_event.wait()
-                stop_event.set()
-
-            threading.Thread(
-                target=_watch_cancel, name="capture_cancel_watcher", daemon=True
-            ).start()
         stats = ParallelCaptureStats(
             requested_events=events,
             decode_enabled=resolved_outputs.json.enabled,
@@ -293,6 +283,7 @@ class LegacySingleCaptureRunner:
                 log_lines.append(f"Embedded frame watch every: {watch_every}")
             else:
                 log_lines.append(f"Wave watch every: {watch_every}")
+        sock = self._open_socket(device=device, timeout_s=timeout_s)
         decode_backend = (
             self._start_decode_backend()
             if resolved_outputs.json.enabled or resolved_outputs.text.enabled
@@ -304,7 +295,6 @@ class LegacySingleCaptureRunner:
             else None
         )
 
-        sock = self._open_socket(device=device, timeout_s=timeout_s)
         receiver = threading.Thread(
             target=self._receiver_loop,
             name="single_capture_receiver",
@@ -316,6 +306,8 @@ class LegacySingleCaptureRunner:
                 exception_queue,
                 events,
                 send_mode,
+                timeout_s if cancel_event is not None else None,
+                cancel_event,
             ),
         )
         writer = threading.Thread(
@@ -566,6 +558,8 @@ class LegacySingleCaptureRunner:
             reader = _TcpSentRawStreamReader(
                 sock=sock,
                 expected_send_mode=send_mode,
+                cancelled=cancel_event.is_set if cancel_event is not None else None,
+                timeout_s=timeout_s,
             )
             for _ in range(events):
                 if cancel_event is not None and cancel_event.is_set():
@@ -595,6 +589,8 @@ class LegacySingleCaptureRunner:
                             output_dir=run_dir,
                         )
                     )
+        except _ReadCancelled:
+            status = "stopped"
         except socket.timeout as exc:
             if cancel_event is not None and cancel_event.is_set():
                 status = "stopped"
@@ -720,14 +716,21 @@ class LegacySingleCaptureRunner:
         exception_queue: queue.Queue[BaseException],
         events: int,
         expected_send_mode: int,
+        timeout_s: float | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> None:
-        reader = _TcpSentRawStreamReader(
-            sock=sock,
-            expected_send_mode=expected_send_mode,
-        )
+        def cancelled():
+            return stop_event.is_set() or (cancel_event is not None and cancel_event.is_set())
+
         try:
+            reader = _TcpSentRawStreamReader(
+                sock=sock,
+                expected_send_mode=expected_send_mode,
+                cancelled=cancelled,
+                timeout_s=timeout_s,
+            )
             for event_idx in range(events):
-                if stop_event.is_set():
+                if cancelled():
                     return
                 packet = reader.read_packet()
                 hit_mask = _u16_be(packet, 16)
@@ -740,8 +743,9 @@ class LegacySingleCaptureRunner:
                     ),
                     stop_event=stop_event,
                 )
+        except _ReadCancelled:
+            pass
         except BaseException as exc:
-            stop_event.set()
             exception_queue.put(exc)
         finally:
             self._put_sentinel(packet_queue=packet_queue, stop_event=stop_event)
@@ -1143,6 +1147,10 @@ class TcpSentHeaderFields:
     accept_fine: int | None
 
 
+class _ReadCancelled(Exception):
+    """A stop request interrupted a pending frame."""
+
+
 class _TcpSentRawStreamReader:
     def __init__(
         self,
@@ -1150,14 +1158,32 @@ class _TcpSentRawStreamReader:
         expected_send_mode: int | None = None,
         *,
         adc_length: int = ADC_LENGTH,
+        cancelled: Callable[[], bool] | None = None,
+        timeout_s: float | None = None,
     ) -> None:
         self.sock = sock
         self.buffer = bytearray()
         self.expected_send_mode = expected_send_mode
         self.adc_length = int(adc_length)
+        self.cancelled = cancelled if timeout_s is not None else None
+        self.timeout_s = timeout_s
+        if self.cancelled is not None:
+            self.sock.settimeout(min(0.2, timeout_s))
 
     def _recv_more(self) -> None:
-        chunk = self.sock.recv(4096)
+        if self.cancelled is None:
+            chunk = self.sock.recv(4096)
+        else:
+            deadline = time.monotonic() + self.timeout_s
+            while not self.cancelled():
+                try:
+                    chunk = self.sock.recv(4096)
+                    break
+                except socket.timeout:
+                    if time.monotonic() >= deadline and not self.cancelled():
+                        raise
+            else:
+                raise _ReadCancelled()
         if not chunk:
             raise EOFError("TCP connection closed while waiting for data")
         self.buffer.extend(chunk)

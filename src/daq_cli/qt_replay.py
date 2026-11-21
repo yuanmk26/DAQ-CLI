@@ -1,4 +1,4 @@
-"""Offline Qt workstation for event-by-event inspection of an aggregated run."""
+"""Qt workstation for single-board capture and offline waveform replay."""
 
 import argparse
 from functools import lru_cache
@@ -9,7 +9,8 @@ from time import monotonic
 
 import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets as W
-import pyqtgraph as pg
+from daq_cli.qt_scope import WaveformScope, label
+from daq_cli.qt_single import SingleCapturePane
 
 from daq_cli.infrastructure.multi_board_decode import (
     MultiBoardAggregatedEventReader, build_board_context, build_board_packet,
@@ -74,26 +75,18 @@ QSlider::handle:horizontal { background: #11786e; width: 12px; margin: -5px 0; b
 """
 
 
-def label(text, style=None):
-    item = W.QLabel(text)
-    item.setTextFormat(QtCore.Qt.TextFormat.PlainText)
-    if style:
-        item.setObjectName(style)
-    return item
-
-
 class Workstation(W.QMainWindow):
-    def __init__(self, replay):
+    def __init__(self, replay=None, profile_path=None):
         super().__init__()
         self.run = replay
         self.index = 0
-        self.board = min(replay.boards)
+        self.board = min(replay.boards) if replay else None
         self.timer = QtCore.QTimer(self)
         self.timer.setTimerType(QtCore.Qt.TimerType.PreciseTimer)
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(self.advance)
         self.playing = False
-        self.setWindowTitle("DAQ · 四板波形回放")
+        self.setWindowTitle("DAQ · 采样与回放工作台")
         shell = W.QWidget(objectName="shell")
         self.setCentralWidget(shell)
         layout = W.QVBoxLayout(shell)
@@ -102,11 +95,16 @@ class Workstation(W.QMainWindow):
         header = W.QHBoxLayout()
         header.addWidget(label("DAQ  /  波形工作台", "title"))
         header.addSpacing(10)
-        header.addWidget(label("离线回放", "tag"))
+        self.mode = W.QComboBox()
+        self.mode.addItems(["离线回放", "单板采样"])
+        self.mode.model().item(0).setEnabled(replay is not None)
+        header.addWidget(self.mode)
         header.addStretch()
-        header.addWidget(label(replay.directory.name, "section"))
+        self.run_name = label("", "section")
+        header.addWidget(self.run_name)
         header.addSpacing(8)
-        header.addWidget(label(str(replay.meta.get("start_time", "")), "muted"))
+        self.run_time = label("", "muted")
+        header.addWidget(self.run_time)
         layout.addLayout(header)
 
         splitter = W.QSplitter(QtCore.Qt.Orientation.Horizontal)
@@ -119,18 +117,20 @@ class Workstation(W.QMainWindow):
         side_layout.addWidget(label("板卡总览", "section"))
         self.group = W.QButtonGroup(self)
         self.board_buttons = {}
-        for board_id in sorted(replay.boards):
+        for board_id in sorted(replay.boards) if replay else []:
             button = W.QPushButton(objectName="board", checkable=True)
             self.group.addButton(button, board_id)
             self.board_buttons[board_id] = button
             side_layout.addWidget(button)
-        self.board_buttons[self.board].setChecked(True)
+        if replay:
+            self.board_buttons[self.board].setChecked(True)
         self.group.idClicked.connect(self.select_board)
         side_layout.addSpacing(12)
         side_layout.addWidget(label("TCM 对齐快照", "section"))
-        snapshot = replay.meta.get("align_snapshot") or {}
+        meta = replay.meta if replay else {}
+        snapshot = meta.get("align_snapshot") or {}
         ack = snapshot.get("ack_mask")
-        side_layout.addWidget(label(str(replay.meta.get("tcm_ip", "—")), "muted"))
+        side_layout.addWidget(label(str(meta.get("tcm_ip", "—")), "muted"))
         side_layout.addWidget(label(f"ACK     {ack:#06x}" if ack is not None else "ACK     —"))
         side_layout.addSpacing(10)
         side_layout.addWidget(label("当前板帧", "section"))
@@ -138,57 +138,17 @@ class Workstation(W.QMainWindow):
         side_layout.addWidget(self.board_detail)
         side_layout.addStretch()
         side_layout.addWidget(label("回放事件", "section"))
-        complete = sum(e.event_kind == "complete" for e in replay.events)
-        side_layout.addWidget(label(f"完整    {complete}      缺板    {len(replay.events)-complete}", "muted"))
-        splitter.addWidget(side)
+        complete = sum(e.event_kind == "complete" for e in replay.events) if replay else 0
+        side_layout.addWidget(label(f"完整    {complete}      缺板    {len(replay.events)-complete if replay else 0}", "muted"))
+        self.single = SingleCapturePane(profile_path)
+        self.sides = W.QStackedWidget()
+        self.sides.addWidget(side)
+        self.sides.addWidget(self.single)
+        splitter.addWidget(self.sides)
 
-        scope = W.QFrame(objectName="scope")
-        scope_layout = W.QVBoxLayout(scope)
-        title_row = W.QHBoxLayout()
-        self.scope_title = label("", "scopeTitle")
-        title_row.addWidget(self.scope_title)
-        title_row.addStretch()
-        title_row.addWidget(label("纵轴 ADC  ·  横轴 采样点", "scopeNote"))
-        self.channel = W.QComboBox()
-        self.channel.addItems(["16 路总览"] + [f"放大 CH {i:02d}" for i in range(16)])
-        if len(replay.boards) == 4:
-            for first in range(0, 16, 4):
-                self.channel.addItem(f"四板对照 · CH {first:02d}–{first+3:02d}")
-        title_row.addWidget(self.channel)
-        scope_layout.addLayout(title_row)
-        self.canvas = pg.GraphicsLayoutWidget()
-        self.canvas.setBackground("#12212c")
-        self.chart_pages = W.QStackedWidget()
-        scope_layout.addWidget(self.chart_pages, 1)
-        self.chart_pages.addWidget(self.canvas)
-        self.focus = pg.PlotWidget(background="#12212c")
-        self.focus.setLabel("bottom", "采样点")
-        self.focus.setLabel("left", "ADC")
-        self.focus.showGrid(x=True, y=True, alpha=0.2)
-        self.focus_curve = self.focus.plot()
-        self.chart_pages.addWidget(self.focus)
-        self.canvas.ci.layout.setContentsMargins(0, 0, 0, 0)
-        self.canvas.ci.layout.setSpacing(4)
-        self.plots = []
-        self.curves = []
-        self.plot_labels = [None] * 16
-        self.pens = {False: pg.mkPen("#5cdbcb"), True: pg.mkPen("#ffbf72")}
-        for i in range(16):
-            plot = self.canvas.addPlot(row=i//4, col=i%4)
-            plot.setMenuEnabled(False)
-            plot.hideButtons()
-            plot.showGrid(x=True, y=True, alpha=0.18)
-            plot.setMouseEnabled(x=False, y=False)
-            for axis_name in ("left", "bottom"):
-                axis = plot.getAxis(axis_name)
-                axis.setTextPen("#a0b7c4")
-                axis.setPen("#38505c")
-                axis.setStyle(tickFont=QtGui.QFont("Consolas", 8))
-            plot.getAxis("left").setWidth(37)
-            self.plots.append(plot)
-            self.curves.append(plot.plot())
-        self.channel.currentIndexChanged.connect(self.change_channel)
-        splitter.addWidget(scope)
+        self.scope = WaveformScope()
+        self.scope.view_changed.connect(self.render)
+        splitter.addWidget(self.scope)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([200, 1050])
 
@@ -203,7 +163,7 @@ class Workstation(W.QMainWindow):
         for button in (self.play, self.back, self.forward):
             bar.addWidget(button)
         self.slider = W.QSlider(QtCore.Qt.Orientation.Horizontal)
-        self.slider.setRange(0, len(replay.events)-1)
+        self.slider.setRange(0, len(replay.events)-1 if replay else 0)
         self.slider.valueChanged.connect(self.seek)
         bar.addWidget(self.slider, 1)
         self.position = label("")
@@ -217,37 +177,78 @@ class Workstation(W.QMainWindow):
         self.loop = W.QCheckBox("循环")
         self.loop.setChecked(True)
         bar.addWidget(self.loop)
-        layout.addWidget(controls)
+        self.bars = W.QStackedWidget()
+        self.bars.addWidget(controls)
+        self.bars.addWidget(self.single.controls)
+        self.bars.setSizePolicy(W.QSizePolicy.Policy.Preferred, W.QSizePolicy.Policy.Maximum)
+        layout.addWidget(self.bars)
         self.status = label("", "muted")
+        self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        self.replay_shortcuts = []
         for key, action in (("Space", self.toggle), ("Left", lambda: self.seek(self.index-1)),
                             ("Right", lambda: self.seek(self.index+1))):
-            QtGui.QShortcut(QtGui.QKeySequence(key), self, activated=action)
+            self.replay_shortcuts.append(QtGui.QShortcut(QtGui.QKeySequence(key), self, activated=action))
         for n, button in enumerate(self.board_buttons.values(), start=1):
             if n <= 9:
-                QtGui.QShortcut(QtGui.QKeySequence(str(n)), self, activated=button.click)
+                self.replay_shortcuts.append(QtGui.QShortcut(QtGui.QKeySequence(str(n)), self, activated=button.click))
                 button.setToolTip(f"切换板卡 ({n})")
         self.play.setToolTip("播放 / 暂停 (空格)")
+        self.single.updated.connect(self.live_updated)
+        self.single.active_changed.connect(self.capture_active_changed)
+        self.closing = False
+        self.mode.setCurrentIndex(0 if replay else 1)
+        self.mode.currentIndexChanged.connect(self.switch_mode)
         self.setStyleSheet(STYLE)
         available = self.screen().availableGeometry()
         self.resize(min(1320, available.width()-32), min(820, available.height()-56))
+        self.switch_mode(self.mode.currentIndex())
+
+    def switch_mode(self, mode):
+        self.set_playing(False)
+        self.sides.setCurrentIndex(mode)
+        self.bars.setCurrentIndex(mode)
+        for shortcut in self.replay_shortcuts:
+            shortcut.setEnabled(mode == 0)
+        self.scope.allow_comparison(mode == 0 and len(self.run.boards) == 4)
         self.render()
+
+    def live_updated(self, redraw):
+        if self.mode.currentIndex() == 1:
+            self.run_name.setText(self.single.target.currentText())
+            self.run_time.setText(self.single.state.text())
+            self.status.setText(self.single.message)
+            if redraw:
+                self.single.draw(self.scope)
+
+    def capture_active_changed(self, active):
+        self.mode.setDisabled(active)
+        if self.closing and not active:
+            QtCore.QTimer.singleShot(0, self.close)
+
+    def closeEvent(self, event):
+        if self.single.active:
+            self.closing = True
+            self.single.stop()
+            event.ignore()
+        else:
+            event.accept()
 
     def select_board(self, board_id):
         self.board = board_id
         self.render()
 
-    def change_channel(self, selected):
-        self.chart_pages.setCurrentIndex(int(1 <= selected <= 16))
-        self.focus.enableAutoRange()
-        self.render()
-
     def seek(self, index):
+        if self.mode.currentIndex():
+            return
         self.set_playing(False)
         self.index = max(0, min(index, len(self.run.events)-1))
         self.render()
 
     def toggle(self):
+        if self.mode.currentIndex():
+            self.single.pause.click()
+            return
         if not self.playing and self.index == len(self.run.events)-1:
             self.index = 0
             self.render()
@@ -282,6 +283,11 @@ class Workstation(W.QMainWindow):
         self.schedule()
 
     def render(self):
+        if self.mode.currentIndex() == 1:
+            self.live_updated(True)
+            return
+        self.run_name.setText(self.run.directory.name)
+        self.run_time.setText(str(self.run.meta.get("start_time", "")))
         event = self.run.events[self.index]
         present = {b.board_id: b for b in event.boards}
         for board_id, button in self.board_buttons.items():
@@ -297,29 +303,20 @@ class Workstation(W.QMainWindow):
             f"发送模式    {chunk.mode}\n时间戳        {chunk.timestamp}\n事件计数    {chunk.event_count}"
             if chunk else "本事件无板帧"
         )
-        view = self.channel.currentIndex()
+        view = self.scope.channel.currentIndex()
         compare = view >= 17
-        self.scope_title.setText("四板同步对照" if compare else
-                                 f"{self.run.boards[self.board]['board_name']}   /   通道波形")
+        heading = "四板同步对照" if compare else f"{self.run.boards[self.board]['board_name']}   /   通道波形"
         board_ids = sorted(self.run.boards)
-        for i, (plot, curve) in enumerate(zip(self.plots, self.curves)):
-            if 1 <= view <= 16 and view != i+1:
-                continue
+        traces = []
+        for i in range(16):
             board_id = board_ids[i//4] if compare else self.board
             channel_id = (view-17)*4 + i%4 if compare else i
             y = self.run.channels(self.index, board_id)[channel_id]
             source = present.get(board_id)
             hit = bool(source and source.hit_mask & (1 << channel_id))
-            color = "#ffbf72" if hit else "#5cdbcb"
             prefix = self.run.boards[board_id]["board_name"] + "   /   " if compare else ""
-            title = f"{prefix}CH {channel_id:02d}" + ("   ·   无波形" if y is None else "")
-            if 1 <= view <= 16:
-                plot, curve = self.focus, self.focus_curve
-                plot.setTitle(title, color=color, size="9pt")
-            elif self.plot_labels[i] != (hit, title):
-                plot.setTitle(title, color=color, size="9pt")
-                self.plot_labels[i] = (hit, title)
-            curve.setData([] if y is None else y, pen=self.pens[hit])
+            traces.append((f"{prefix}CH {channel_id:02d}", y, hit))
+        self.scope.display(heading, traces)
         with QtCore.QSignalBlocker(self.slider):
             self.slider.setValue(self.index)
         self.position.setText(f"{self.index+1} / {len(self.run.events)}")
@@ -334,19 +331,22 @@ class Workstation(W.QMainWindow):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Qt 四板波形回放工作台")
-    parser.add_argument("run_dir", nargs="?", type=Path, default=Path("samples/four_board_00001"))
+    parser = argparse.ArgumentParser(description="Qt 单板采样与波形回放工作台")
+    parser.add_argument("run_dir", nargs="?", type=Path, default=None)
+    parser.add_argument("-p", "--profile", type=Path, help="单板采样配置文件")
     parser.add_argument("--limit", type=int, default=256, help="最多载入的事件数（默认 256）")
     args = parser.parse_args()
     if args.limit < 1:
         parser.error("--limit must be positive")
     try:
-        replay = Replay(args.run_dir, args.limit)
+        default_run = Path("samples/four_board_00001")
+        directory = args.run_dir or (default_run if default_run.is_dir() else None)
+        replay = Replay(directory, args.limit) if directory else None
     except (OSError, ValueError, RuntimeError) as exc:
         parser.exit(1, f"无法加载回放目录 {args.run_dir}: {exc}\n")
     app = W.QApplication([])
     app.setStyle("Fusion")
-    window = Workstation(replay)
+    window = Workstation(replay, args.profile)
     window.show()
     app.exec()
 

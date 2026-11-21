@@ -1,0 +1,143 @@
+"""Exercise the workstation with the real stream reader and aggregate writer."""
+
+import json
+import os
+from pathlib import Path
+import queue
+import time
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import pytest
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+pytest.importorskip("PySide6")
+pytest.importorskip("pyqtgraph")
+from PySide6.QtWidgets import QApplication
+
+from daq_cli.infrastructure.adapters.legacy_board_adapter import LegacyBoardAdapter
+from daq_cli.infrastructure.adapters.legacy_capture_runner import LegacySingleCaptureRunner
+from daq_cli.infrastructure.multi_board_decode import MultiBoardAggregatedEventReader
+from daq_cli.qt_replay import Replay, Workstation
+from test_acquire_single_monitoring import FakeSocket, _build_tcp_sent_packet
+
+
+class ControlledStream(FakeSocket):
+    def __init__(self):
+        super().__init__([])
+        self.packets = queue.Queue()
+        self.timeout = 1.0
+
+    def settimeout(self, timeout):
+        self.timeout = timeout
+
+    def recv(self, _size):
+        try:
+            return self.packets.get(timeout=self.timeout)
+        except queue.Empty:
+            raise TimeoutError from None
+
+
+def wait_for(app, check):
+    deadline = time.monotonic() + 5
+    while not check():
+        app.processEvents()
+        time.sleep(0.005)
+        assert time.monotonic() < deadline, "Qt session timed out"
+
+
+def test_pause_storage_stop_restart_and_replay(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    profile = tmp_path / "profile.yaml"
+    profile.write_text("devices:\n  board: {ip: 127.0.0.1}\n"
+                       "defaults:\n  acquire_single: {events: 20, timeout_s: 10}\n")
+    window = Workstation(profile_path=profile)
+    pane = window.single
+    pane.output.setText(str(tmp_path / "runs"))
+    first, second = ControlledStream(), ControlledStream()
+    packet = _build_tcp_sent_packet(send_mode=1, hit_mask=1, event_count=1)
+    try:
+        with patch.object(LegacyBoardAdapter, "read_tcp_mode2_config",
+                          return_value=SimpleNamespace(send_mode=1)), patch.object(
+            LegacySingleCaptureRunner, "_open_socket", side_effect=[first, second],
+        ):
+            pane.start.click()
+            assert not window.mode.isEnabled() and not pane.start.isEnabled()
+            first.packets.put(packet)
+            wait_for(app, lambda: pane.displayed is not None)
+            first_dir = Path(pane.message)
+            data = first_dir / "complete_events.dat"
+            size = data.stat().st_size
+            pane.pause.click()
+            frozen = pane.displayed
+            for event in range(2, 6):
+                first.packets.put(_build_tcp_sent_packet(1, 1, event))
+            wait_for(app, lambda: pane.count.text().startswith("5 /") and pane.latest[0] == 5)
+            assert pane.displayed is frozen
+            assert data.stat().st_size > size
+            pane.pause.click()
+            assert pane.displayed[0] == 5
+            # The stream is idle, with a ten-second timeout. Stop should still finish promptly.
+            pane.stop_button.click()
+            assert not pane.start.isEnabled()
+            wait_for(app, lambda: not pane.active)
+            assert pane.state.text() == "已停止"
+            assert json.loads((first_dir / "run_meta.json").read_text())["status"] == "stopped"
+            assert len(list(MultiBoardAggregatedEventReader(data, event_kind="complete").iter_events())) == 5
+            pane.events.setValue(2)
+            pane.start.click()
+            second.packets.put(packet * 2)
+            wait_for(app, lambda: not pane.active)
+            assert pane.state.text() == "已完成"
+            second_dir = Path(pane.message)
+            assert second_dir != first_dir
+            replay = Replay(second_dir, 20)
+            assert len(replay.events) == 2
+            assert (replay.channels(1, 0)[0] == pane.displayed[2][0]).all()
+            assert pane.start.isEnabled() and window.mode.isEnabled()
+            viewer = Workstation(replay, profile)
+            try:
+                curve = viewer.scope.curves[0]
+                assert (curve.getData()[1] == pane.displayed[2][0]).all()
+                viewer.mode.setCurrentIndex(1)
+                assert curve.getData()[1] is None or not curve.getData()[1].size
+                viewer.mode.setCurrentIndex(0)
+                assert (curve.getData()[1] == pane.displayed[2][0]).all()
+            finally:
+                viewer.close()
+    finally:
+        if pane.active:
+            pane.stop()
+            wait_for(app, lambda: not pane.active)
+        window.close()
+
+
+@pytest.mark.parametrize("storage", ["legacy", "rate"])
+def test_retry_after_connect_failure_and_close_during_capture(tmp_path, storage):
+    app = QApplication.instance() or QApplication([])
+    profile = tmp_path / "profile.yaml"
+    profile.write_text("devices:\n  board: {ip: 127.0.0.1}\n")
+    window = Workstation(profile_path=profile)
+    pane = window.single
+    pane.storage.setCurrentIndex(pane.storage.findData(storage))
+    pane.output.setText(str(tmp_path / "runs"))
+    stream = ControlledStream()
+    with patch.object(LegacyBoardAdapter, "read_tcp_mode2_config", side_effect=[
+        OSError("test connection failure"), SimpleNamespace(send_mode=1)
+    ]), patch.object(LegacySingleCaptureRunner, "_open_socket", return_value=stream):
+        pane.start.click()
+        wait_for(app, lambda: not pane.active)
+        assert "test connection failure" in pane.message and pane.start.isEnabled()
+        pane.start.click()
+        stream.packets.put(_build_tcp_sent_packet(1, 1, 7))
+        wait_for(app, lambda: pane.displayed is not None)
+        directory = Path(pane.message)
+        window.close()
+        assert window.closing and not pane.start.isEnabled()
+        wait_for(app, lambda: not pane.active)
+        assert pane.state.text() == "已停止" and stream.closed
+        if storage == "rate":
+            assert (directory / "rate.csv").is_file()
+            assert not (directory / "complete_events.dat").exists()
+        else:
+            assert len(list((directory / "raw").glob("*.bin"))) == 1
