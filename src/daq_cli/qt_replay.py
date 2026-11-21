@@ -1,6 +1,8 @@
 """Qt workstation for single-board capture and offline waveform replay."""
 
 import argparse
+import os
+import sys
 from functools import lru_cache
 from heapq import merge
 from itertools import islice
@@ -408,14 +410,31 @@ def main():
     args = parser.parse_args()
     if args.limit < 1:
         parser.error("--limit must be positive")
+    app = W.QApplication([])
+    app.setStyle("Fusion")
+    if getattr(sys, "frozen", False):
+        from daq_cli.presentation.gui.startup import discover_profile
+
+        base = Path(sys.executable).resolve().parent
+        if args.run_dir:
+            args.run_dir = args.run_dir.resolve()
+        profile = args.profile or discover_profile(base)
+        if profile:
+            args.profile = profile.resolve()
+        else:
+            target = base / "daq-profile.yaml"
+            seed = Path(sys._MEIPASS) / "workstation_defaults" / "muon-imaging.yaml"
+            if not QtCore.QFile.copy(str(seed), str(target)) and not target.is_file():
+                W.QMessageBox.warning(None, "无法创建配置文件", f"请将程序放入可写目录，或手动选择已有配置。\n{target}")
+            if target.is_file():
+                args.profile = target
+        os.chdir(base)
     try:
         default_run = Path("samples/four_board_00001")
         directory = args.run_dir or (default_run if default_run.is_dir() else None)
         replay = Replay(directory, args.limit) if directory else None
     except (OSError, ValueError, RuntimeError) as exc:
         parser.exit(1, f"无法加载回放目录 {args.run_dir}: {exc}\n")
-    app = W.QApplication([])
-    app.setStyle("Fusion")
     window = Workstation(replay, args.profile)
     if args.multi:
         window.mode.setCurrentIndex(2)

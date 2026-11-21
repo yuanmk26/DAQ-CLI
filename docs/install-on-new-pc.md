@@ -66,7 +66,7 @@ Then, if needed:
 
 ```powershell
 daq board sysmon dev1 --profile .\profiles\lab-pc-01.local.yaml
-daq acquire multi two_board --decode-json --profile .\profiles\lab-pc-01.local.yaml
+daq acquire multi two_board --profile .\profiles\lab-pc-01.local.yaml
 ```
 
 ## Troubleshooting

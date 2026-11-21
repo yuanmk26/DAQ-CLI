@@ -51,21 +51,7 @@ defaults:
     events: 1000
     timeout_s: 10.0
     watch_every: 1
-    outputs:
-      raw:
-        enabled: true
-        dir: out/single_raw     # 父目录语义：文件落 out/single_raw/<run名>/
-      json:
-        enabled: true
-        dir: out/single_json
-      text:
-        enabled: false
-        dir: out/single_text
-        max_events_per_file: 1000
-        waveform_layout: point_rows
-      log:
-        enabled: true
-        dir: out/single_log
+    storage_mode: aggregate
 
   # ---- 多板采集默认输出布局 ----
   acquire_multi:
@@ -78,9 +64,6 @@ defaults:
       raw:
         enabled: true
         dir: out/multi_raw
-      json:
-        enabled: true
-        dir: out/multi_json
       text:
         enabled: false
         dir: out/multi_text

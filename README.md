@@ -108,6 +108,21 @@ pip install -e .
 
 ### Standalone executables (no Python needed on the target PC)
 
+For the **Qt acquisition workstation**, run the following on the build PC:
+
+```powershell
+.\.venv-qt\Scripts\python.exe -m pip install -e ".[qt-replay]" pyinstaller
+.\scripts\build_workstation_exe.ps1
+```
+
+Copy `dist\daq-workstation-<version>-win64.exe` to a writable folder on
+the target Windows x64 PC and double-click it. On first launch, the EXE
+creates an editable `daq-profile.yaml` beside itself from the build-time
+`profiles/muon-imaging.yaml` if it finds no existing profile. To carry
+later edits to another PC, copy that YAML with the EXE. Relative output
+paths in the bundled default configuration write under `out\` beside
+the executable. Use **板卡与采样组** to change IPs and acquisition groups.
+
 Build the versioned, one-file GUI executable with PyInstaller:
 
 ```powershell
@@ -204,33 +219,14 @@ Run multi-board acquisition:
 ```bash
 daq acquire multi two_board --profile profiles/examples/example.yaml
 daq acquire multi two_board --aggregation-key event_count --allow-start-without-ack --profile profiles/examples/example.yaml
-daq acquire multi two_board --decode-json --profile profiles/examples/example.yaml
 ```
 
-Configure capture outputs in the profile with independent `raw`, `json`, `text`,
-and `log` switches and directories:
-
-```yaml
-defaults:
-  acquire_single:
-    outputs:
-      raw:
-        enabled: true
-        dir: out/raw
-      json:
-        enabled: false
-      text:
-        enabled: true
-        dir: out/text
-        max_events_per_file: 1000
-        waveform_layout: channel_blocks
-      log:
-        enabled: true
-        dir: out/log
-```
-
-With this layout you can, for example, disable JSON while still keeping TXT
-event dumps enabled.
+Single-board capture writes binary events to `complete_events.dat` in the run
+directory with its index and run metadata. Select `--storage rate` to record
+rate statistics only. Old profiles selecting `legacy` now use aggregate DAT.
+Multi-board capture writes complete and partial events to separate DAT files.
+Capture ignores per-event JSON settings in older profiles. The standalone
+offline decoder can still read existing runs.
 
 Preview or watch waveforms:
 

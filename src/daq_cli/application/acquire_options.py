@@ -38,8 +38,6 @@ def resolve_single_acquire_options(
     events: int | None = None,
     timeout_s: float | None = None,
     output_dir: Path | None = None,
-    decode_json: bool | None = None,
-    decoded_output_dir: Path | None = None,
     watch_every: int | None = None,
     progress_every: int | None = None,
     storage: str | None = None,
@@ -49,16 +47,17 @@ def resolve_single_acquire_options(
     if not isinstance(acquire_defaults, dict):
         acquire_defaults = {}
 
-    outputs = resolve_outputs_config(
-        acquire_defaults=acquire_defaults,
-        decode_json_override=decode_json,
-        decoded_output_dir_override=decoded_output_dir,
-        default_log_enabled=False,
+    outputs = AcquireOutputsConfig(
+        raw=OutputTargetConfig(enabled=True),
+        json=OutputTargetConfig(enabled=False),
+        text=TextOutputConfig(enabled=False),
+        log=OutputTargetConfig(enabled=True),
     )
-
     storage_mode = str(storage if storage is not None else acquire_defaults.get("storage_mode", "aggregate")).lower()
-    if storage_mode not in {"aggregate", "rate", "legacy"}:
-        raise ValueError("storage must be one of: aggregate, rate, legacy")
+    if storage is None and storage_mode == "legacy":
+        storage_mode = "aggregate"
+    if storage_mode not in {"aggregate", "rate"}:
+        raise ValueError("storage must be one of: aggregate, rate")
     return {
         "events": events if events is not None else int(acquire_defaults.get("events", 1000)),
         "timeout_s": (
@@ -101,7 +100,6 @@ def resolve_multi_acquire_options(
     event_timeout_ms: int | None = None,
     tcp_timeout_s: float | None = None,
     allow_start_without_ack: bool | None = None,
-    decode_json: bool | None = None,
     watch_waveforms: bool | None = None,
     watch_every: int | None = None,
     stop_on_watch_close: bool | None = None,
@@ -112,8 +110,6 @@ def resolve_multi_acquire_options(
 
     outputs = resolve_outputs_config(
         acquire_defaults=acquire_defaults,
-        decode_json_override=decode_json,
-        decoded_output_dir_override=None,
         default_log_enabled=True,
     )
     key = str(aggregation_key or acquire_defaults.get("aggregation_key", "timestamp")).lower()
@@ -168,8 +164,6 @@ def resolve_multi_acquire_options(
 def resolve_outputs_config(
     *,
     acquire_defaults: dict[str, object],
-    decode_json_override: bool | None = None,
-    decoded_output_dir_override: Path | None = None,
     default_log_enabled: bool,
 ) -> AcquireOutputsConfig:
     outputs_defaults = acquire_defaults.get("outputs")
@@ -182,29 +176,12 @@ def resolve_outputs_config(
     raw_defaults = outputs_defaults.get("raw")
     if not isinstance(raw_defaults, dict):
         raw_defaults = {}
-    json_defaults = outputs_defaults.get("json")
-    if not isinstance(json_defaults, dict):
-        json_defaults = {}
     text_defaults = outputs_defaults.get("text")
     if not isinstance(text_defaults, dict):
         text_defaults = {}
     log_defaults = outputs_defaults.get("log")
     if not isinstance(log_defaults, dict):
         log_defaults = {}
-
-    json_enabled = (
-        decode_json_override
-        if decode_json_override is not None
-        else bool(
-            json_defaults.get(
-                "enabled",
-                acquire_defaults.get("decode_json", False),
-            )
-        )
-    )
-    json_dir = decoded_output_dir_override or _path_from_value(
-        json_defaults.get("dir", acquire_defaults.get("decoded_output_dir"))
-    )
 
     text_enabled = bool(
         text_defaults.get("enabled", legacy_text_defaults.get("enabled", False))
@@ -227,13 +204,10 @@ def resolve_outputs_config(
 
     return AcquireOutputsConfig(
         raw=OutputTargetConfig(
-            enabled=bool(raw_defaults.get("enabled", True)),
+            enabled=True,
             dir=_path_from_value(raw_defaults.get("dir")),
         ),
-        json=OutputTargetConfig(
-            enabled=json_enabled,
-            dir=json_dir,
-        ),
+        json=OutputTargetConfig(enabled=False),
         text=TextOutputConfig(
             enabled=text_enabled,
             dir=text_dir,

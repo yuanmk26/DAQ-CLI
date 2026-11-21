@@ -142,7 +142,6 @@ class AcquireTab:
         self._single_storage_modes = {
             "聚合 (complete_events.dat)": "aggregate",
             "只记事例率": "rate",
-            "旧格式 (event_*.bin)": "legacy",
         }
         self._storage_mode_var = tk.StringVar(value="聚合 (complete_events.dat)")
         self._storage_mode_combo = ttk.Combobox(
@@ -153,36 +152,11 @@ class AcquireTab:
             values=tuple(self._single_storage_modes),
         )
         self._storage_mode_combo.pack(side=tk.LEFT, padx=(4, 12))
-        self._storage_mode_combo.bind(
-            "<<ComboboxSelected>>", self._on_storage_mode_changed
-        )
         ttk.Label(mode_row, text="率间隔 (s):").pack(side=tk.LEFT)
         self._rate_interval_var = tk.StringVar(value="1.0")
         ttk.Entry(mode_row, textvariable=self._rate_interval_var, width=6).pack(
             side=tk.LEFT, padx=(4, 0)
         )
-        ttk.Label(
-            group,
-            text="聚合/只记率模式只写 run 目录；旧格式才使用存储区的 raw/json/text/log 目录",
-            foreground="#666666",
-        ).pack(anchor="w", pady=(2, 0))
-
-        output_row = ttk.Frame(group)
-        output_row.pack(fill=tk.X, pady=(6, 0))
-        self._json_enabled = tk.BooleanVar(value=False)
-        self._text_enabled = tk.BooleanVar(value=False)
-        self._log_enabled = tk.BooleanVar(value=True)
-        self._json_check = ttk.Checkbutton(
-            output_row, text="JSON", variable=self._json_enabled
-        )
-        self._json_check.pack(side=tk.LEFT, padx=(0, 10))
-        self._text_check = ttk.Checkbutton(
-            output_row, text="TXT", variable=self._text_enabled
-        )
-        self._text_check.pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Checkbutton(
-            output_row, text="LOG", variable=self._log_enabled
-        ).pack(side=tk.LEFT, padx=(0, 10))
         watch_row = ttk.Frame(group)
         watch_row.pack(fill=tk.X, pady=(6, 0))
         self._watch_enabled = tk.BooleanVar(value=False)
@@ -207,18 +181,11 @@ class AcquireTab:
         self._progress.pack(fill=tk.X, pady=(6, 0))
         self._progress_label = ttk.Label(group, text="")
         self._progress_label.pack(anchor="w")
-        self._on_storage_mode_changed()
 
     def _selected_storage_mode(self) -> str:
         return self._single_storage_modes.get(
             self._storage_mode_var.get(), "aggregate"
         )
-
-    def _on_storage_mode_changed(self, _event=None) -> None:
-        state = tk.NORMAL if self._selected_storage_mode() == "legacy" else tk.DISABLED
-        if hasattr(self, "_json_check"):
-            self._json_check.configure(state=state)
-            self._text_check.configure(state=state)
 
     def _build_multi_group(self, parent) -> None:
         group = ttk.LabelFrame(parent, text="多板采集", padding=(8, 4))
@@ -262,11 +229,9 @@ class AcquireTab:
         option_row = ttk.Frame(group)
         option_row.pack(fill=tk.X, pady=(6, 0))
         self._allow_no_ack = tk.BooleanVar()
-        self._multi_json_enabled = tk.BooleanVar(value=False)
         self._multi_text_enabled = tk.BooleanVar(value=False)
         for text, var in (
             ("无 ack 放行", self._allow_no_ack),
-            ("JSON", self._multi_json_enabled),
             ("TXT", self._multi_text_enabled),
         ):
             ttk.Checkbutton(option_row, text=text, variable=var).pack(
@@ -491,7 +456,8 @@ class AcquireTab:
 
         base_var = tk.StringVar(value="")
         prefix_var = tk.StringVar(value=default_prefix)
-        dir_vars = {key: tk.StringVar(value="") for key in ("raw", "json", "text", "log")}
+        keys = ("raw", "text", "log") if page == "multi" else ()
+        dir_vars = {key: tk.StringVar(value="") for key in keys}
 
         ttk.Label(grid, text="输出目录:").grid(row=0, column=0, sticky="w")
         ttk.Entry(grid, textvariable=base_var, width=20).grid(
@@ -506,23 +472,24 @@ class AcquireTab:
         )
         hint = ttk.Label(
             group,
-            text=f"留空=默认（输出目录和四类目录均可用 浏览 选择，空则用 profile 配置）",
+            text="目录留空时使用配置文件中的设置",
             foreground="#666666",
         )
         hint.pack(anchor="w", pady=(2, 0))
 
-        for row_index in (1, 2):
-            for col_index, key in enumerate(("raw", "json") if row_index == 1 else ("text", "log")):
-                base_col = col_index * 3
-                ttk.Label(grid, text=f"{key}:").grid(
-                    row=row_index, column=base_col, sticky="w", pady=(4, 0)
-                )
-                ttk.Entry(grid, textvariable=dir_vars[key], width=16).grid(
-                    row=row_index, column=base_col + 1, sticky="we", padx=(4, 2), pady=(4, 0)
-                )
-                ttk.Button(
-                    grid, text="浏览", command=lambda var=dir_vars[key]: self._browse_dir(var)
-                ).grid(row=row_index, column=base_col + 2, padx=(0, 12), pady=(4, 0))
+        for index, key in enumerate(keys):
+            row_index, col_index = divmod(index, 2)
+            row_index += 1
+            base_col = col_index * 3
+            ttk.Label(grid, text=f"{key}:").grid(
+                row=row_index, column=base_col, sticky="w", pady=(4, 0)
+            )
+            ttk.Entry(grid, textvariable=dir_vars[key], width=16).grid(
+                row=row_index, column=base_col + 1, sticky="we", padx=(4, 2), pady=(4, 0)
+            )
+            ttk.Button(
+                grid, text="浏览", command=lambda var=dir_vars[key]: self._browse_dir(var)
+            ).grid(row=row_index, column=base_col + 2, padx=(0, 12), pady=(4, 0))
 
         grid.columnconfigure(1, weight=1)
         grid.columnconfigure(4, weight=1)
@@ -535,24 +502,14 @@ class AcquireTab:
 
     def _collect_storage(self, storage, page: str):
         """Assemble service params from a storage section."""
-        outputs = formatting.merge_outputs_config(
-            self.app.profile,
-            page,
-            raw_enabled=self._page_options[page]["outputs"].raw.enabled,
-            json_enabled=(
-                self._json_enabled.get() if page == "single" else self._multi_json_enabled.get()
-            ),
-            text_enabled=(
-                self._text_enabled.get() if page == "single" else self._multi_text_enabled.get()
-            ),
-            log_enabled=(
-                self._log_enabled.get() if page == "single" else self._page_options[page]["outputs"].log.enabled
-            ),
-            raw_dir=storage.dirs["raw"].get(),
-            json_dir=storage.dirs["json"].get(),
-            text_dir=storage.dirs["text"].get(),
-            log_dir=storage.dirs["log"].get(),
-        )
+        outputs = self._page_options[page]["outputs"]
+        if page == "multi":
+            outputs = formatting.merge_outputs_config(
+                self.app.profile, page, raw_enabled=True,
+                text_enabled=self._multi_text_enabled.get(), log_enabled=outputs.log.enabled,
+                raw_dir=storage.dirs["raw"].get(), text_dir=storage.dirs["text"].get(),
+                log_dir=storage.dirs["log"].get(),
+            )
         base_text = storage.base.get().strip()
         prefix_text = storage.prefix.get().strip()
         return (
@@ -835,18 +792,13 @@ class AcquireTab:
             if mode == single["storage_mode"]:
                 self._storage_mode_var.set(label)
                 break
-        self._on_storage_mode_changed()
         self._watch_enabled.set(single["watch_every"] is not None)
         self._watch_every_var.set(single["watch_every"] or 1)
-        self._json_enabled.set(single["outputs"].json.enabled)
-        self._text_enabled.set(single["outputs"].text.enabled)
-        self._log_enabled.set(single["outputs"].log.enabled)
         self._aggregation_var.set(multi["aggregation_key"])
         self._match_window_var.set(multi["timestamp_match_window_ticks"])
         self._allow_no_ack.set(multi["allow_start_without_ack"])
         self._multi_watch_enabled.set(multi["watch_waveforms"])
         self._multi_watch_every_var.set(multi["watch_every"])
-        self._multi_json_enabled.set(multi["outputs"].json.enabled)
         self._multi_text_enabled.set(multi["outputs"].text.enabled)
         for storage in (self._single_storage, self._multi_storage):
             storage.base.set("")

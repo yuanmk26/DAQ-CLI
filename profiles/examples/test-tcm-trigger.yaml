@@ -57,9 +57,6 @@ defaults:
       raw:
         enabled: true
         dir: out/test_raw
-      json:
-        enabled: true
-        dir: out/test_json
       text:
         enabled: false
       log:

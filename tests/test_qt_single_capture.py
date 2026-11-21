@@ -50,10 +50,11 @@ def test_pause_storage_stop_restart_and_replay(tmp_path):
     app = QApplication.instance() or QApplication([])
     profile = tmp_path / "profile.yaml"
     profile.write_text("devices:\n  board: {ip: 127.0.0.1}\n"
-                       "defaults:\n  acquire_single: {events: 20, timeout_s: 10}\n")
+                       "defaults:\n  acquire_single: {events: 20, timeout_s: 10, storage_mode: legacy, decode_json: true}\n")
     window = Workstation(profile_path=profile)
     pane = window.single
     pane.output.setText(str(tmp_path / "runs"))
+    assert pane.storage.currentData() == "aggregate" and pane.storage.findData("legacy") == -1
     first, second = ControlledStream(), ControlledStream()
     packet = _build_tcp_sent_packet(send_mode=1, hit_mask=1, event_count=1)
     try:
@@ -112,7 +113,7 @@ def test_pause_storage_stop_restart_and_replay(tmp_path):
         window.close()
 
 
-@pytest.mark.parametrize("storage", ["legacy", "rate"])
+@pytest.mark.parametrize("storage", ["aggregate", "rate"])
 def test_retry_after_connect_failure_and_close_during_capture(tmp_path, storage):
     app = QApplication.instance() or QApplication([])
     profile = tmp_path / "profile.yaml"
@@ -140,7 +141,8 @@ def test_retry_after_connect_failure_and_close_during_capture(tmp_path, storage)
             assert (directory / "rate.csv").is_file()
             assert not (directory / "complete_events.dat").exists()
         else:
-            assert len(list((directory / "raw").glob("*.bin"))) == 1
+            assert (directory / "complete_events.dat").is_file()
+            assert not list(directory.rglob("*.bin"))
 
 
 def test_concurrent_boards_pause_stop_restart_and_close(tmp_path):
@@ -312,7 +314,7 @@ def test_monitor_alongside_capture_and_restore(tmp_path, restore_failure):
             window.close()
 
 
-@pytest.mark.parametrize("storage", ["aggregate", "rate", "legacy"])
+@pytest.mark.parametrize("storage", ["aggregate", "rate"])
 def test_timed_capture_finishes_with_idle_stream(tmp_path, storage):
     app = QApplication.instance() or QApplication([])
     profile = tmp_path / "profile.yaml"
@@ -343,14 +345,10 @@ def test_timed_capture_finishes_with_idle_stream(tmp_path, storage):
             assert time.monotonic() - start >= 1
             assert pane.state.text() == "已完成" and stream.closed
             directory = Path(pane.message)
-            if storage == "legacy":
-                assert "requested_duration_s=1" in (directory / "capture_info.txt").read_text()
-                assert len(list((directory / "raw").glob("*.bin"))) == 2
-            else:
-                meta = json.loads((directory / "run_meta.json").read_text())
-                assert meta["status"] == "complete" and meta["requested_events"] is None
-                assert meta["requested_duration_s"] == 1
-                assert meta["captured_events"] == (0 if storage == "rate" else 2)
+            meta = json.loads((directory / "run_meta.json").read_text())
+            assert meta["status"] == "complete" and meta["requested_events"] is None
+            assert meta["requested_duration_s"] == 1
+            assert meta["captured_events"] == (0 if storage == "rate" else 2)
         finally:
             pane.stop_all()
             wait_for(app, lambda: not pane.active)

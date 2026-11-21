@@ -36,20 +36,6 @@ def acquire_single(
             help="Base output directory for run folders. Defaults to profile defaults.",
         ),
     ] = None,
-    decode_json: Annotated[
-        bool | None,
-        typer.Option(
-            "--decode-json/--raw-only",
-            help="Also decode packets to JSON during capture without replacing raw files.",
-        ),
-    ] = None,
-    decoded_output_dir: Annotated[
-        Path | None,
-        typer.Option(
-            "--decoded-output-dir",
-            help="Directory for decoded JSON files when --decode-json is enabled. Defaults to <run_dir>/decoded.",
-        ),
-    ] = None,
     watch_every: Annotated[
         int | None,
         typer.Option(
@@ -72,8 +58,7 @@ def acquire_single(
             "--storage",
             help=(
                 "Single-board storage mode: aggregate (complete_events.dat, "
-                "default), rate (rate.csv/monitor.jsonl only), or legacy "
-                "(per-event raw/JSON/TXT files)."
+                "default) or rate (rate statistics only)."
             ),
         ),
     ] = None,
@@ -95,8 +80,6 @@ def acquire_single(
             events=events,
             timeout_s=timeout_s,
             output_dir=output_dir,
-            decode_json=decode_json,
-            decoded_output_dir=decoded_output_dir,
             watch_every=watch_every,
             progress_every=progress_every,
             storage=storage,
@@ -105,14 +88,6 @@ def acquire_single(
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     storage_mode = resolved["storage_mode"]
-    if storage_mode != "legacy" and (
-        resolved["outputs"].json.enabled or resolved["outputs"].text.enabled
-    ):
-        typer.echo(
-            "Warning: JSON/TXT outputs are only available in legacy storage "
-            "mode; they are ignored in aggregate/rate mode.",
-            err=True,
-        )
     service = AcquireService()
     last_printed_events = 0
 
@@ -217,13 +192,6 @@ def acquire_multi(
             help="Continue even if TCM alignment does not report all ACK bits.",
         ),
     ] = None,
-    decode_json: Annotated[
-        bool | None,
-        typer.Option(
-            "--decode-json/--raw-only",
-            help="Also decode aggregated multi-board events to JSON after capture.",
-        ),
-    ] = None,
     watch_waveforms: Annotated[
         bool | None,
         typer.Option(
@@ -259,7 +227,6 @@ def acquire_multi(
             event_timeout_ms=event_timeout_ms,
             tcp_timeout_s=tcp_timeout_s,
             allow_start_without_ack=allow_start_without_ack,
-            decode_json=decode_json,
             watch_waveforms=watch_waveforms,
             watch_every=watch_every,
             stop_on_watch_close=stop_on_watch_close,

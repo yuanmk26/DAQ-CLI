@@ -173,7 +173,7 @@ class SingleCapturePane(W.QFrame):
         self.duration.setRange(1, 2_147_483_647)
         self.duration.setSuffix(" 秒")
         self.storage = W.QComboBox()
-        for name, value in (("聚合文件", "aggregate"), ("仅事例率", "rate"), ("逐事件", "legacy")):
+        for name, value in (("二进制 DAT", "aggregate"), ("仅事例率", "rate")):
             self.storage.addItem(name, value)
         self.stride = W.QSpinBox()
         self.stride.setRange(1, 2_147_483_647)

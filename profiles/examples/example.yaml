@@ -41,21 +41,7 @@ defaults:
     timeout_s: 10.0
     progress_every: 50
     watch_every: 50
-    outputs:
-      raw:
-        enabled: true
-        dir: out/raw
-      json:
-        enabled: true
-        dir: out/json
-      text:
-        enabled: false
-        dir: out/text
-        max_events_per_file: 100
-        waveform_layout: point_rows
-      log:
-        enabled: false
-        dir: out/log
+    storage_mode: aggregate
   acquire_multi:
     aggregation_key: timestamp
     timestamp_match_window_ticks: 10
@@ -69,9 +55,6 @@ defaults:
       raw:
         enabled: true
         dir: out/multi_raw
-      json:
-        enabled: true
-        dir: out/multi_json
       text:
         enabled: false
         dir: out/multi_text

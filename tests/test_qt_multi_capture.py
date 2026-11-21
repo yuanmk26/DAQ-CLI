@@ -1,4 +1,4 @@
-"""Four simulated ADC streams exercise the native writer through the Qt controls."""
+﻿"""Four simulated ADC streams exercise the native writer through the Qt controls."""
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -18,7 +18,7 @@ def test_four_board_pause_switch_store_and_unlock(tmp_path):
     ) + "tcm: {main: {ip: 127.0.0.6}}\ngroups:\n"
         "  four: {devices: [adc0, adc1, adc2, adc3], tcm: main}\n"
         "defaults:\n  acquire_multi: {aggregation_key: event_count, watch_every: 1, "
-        "tcp_timeout_s: 0.1, event_timeout_ms: 2000}\n")
+        "tcp_timeout_s: 0.1, event_timeout_ms: 2000, outputs: {raw: {enabled: false}, json: {enabled: true}}}\n")
     w = Workstation(profile_path=profile)
     pane = w.multi
     w.mode.setCurrentIndex(2)
@@ -63,6 +63,7 @@ def test_four_board_pause_switch_store_and_unlock(tmp_path):
             wait_for(app, lambda: not pane.active)
             assert w.config.write.isEnabled() and pane.start.isEnabled()
             events = list(MultiBoardAggregatedEventReader(data, event_kind="complete").iter_events())
+            assert not list(tmp_path.rglob("event_*.json"))
             assert [len(event.boards) for event in events] == [4, 4]
         finally:
             pane.stop()

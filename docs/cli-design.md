@@ -190,7 +190,6 @@ Current implementation:
 daq acquire single <device> --events 1000
 daq acquire single <device> --timeout 10
 daq acquire single <device> --output-dir out/single
-daq acquire single <device> --decode-json
 daq acquire single <device> --watch-every 100
 daq decode run <run_dir>
 daq decode event <event_file>
@@ -202,7 +201,6 @@ daq acquire multi <group> --watch-waveforms --watch-every 100
 Implementation note:
 
 - `single` now uses a native single-board TCP_SENT capture path
-- `single --decode-json` adds a best-effort online decode pipeline while keeping raw capture as the priority path
 - `single --watch-every N` adds a best-effort sampled waveform watch path while keeping raw capture as the priority path
 - `decode` provides offline packet-to-JSON decoding for saved raw event files
 - `multi` runs through the native multi-board pipeline (`infrastructure/multi_board_acquire/`)

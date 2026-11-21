@@ -1,4 +1,4 @@
-import os
+﻿import os
 from pathlib import Path
 from shutil import copyfile
 
@@ -27,7 +27,7 @@ def test_edit_profile_from_workbench(tmp_path):
         dialog = app.activeModalWidget()
         assert isinstance(dialog, ProfileEditor)
         dialog.boards.item(0, 2).setText("192.168.10.110")
-        dialog.boards.item(4, 2).setText("192.168.10.116")
+        dialog.boards.item(len(before["devices"]), 2).setText("192.168.10.116")
         dialog.groups.removeRow(0)
         dialog.add_group("pair", {"devices": ["dev2", "dev4"], "tcm": "main"})
         dialog.save()

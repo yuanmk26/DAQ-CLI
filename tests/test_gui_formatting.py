@@ -307,12 +307,11 @@ class ResultFormattingTests(unittest.TestCase):
             profile,
             "single",
             raw_enabled=True,
-            json_enabled=True,
             text_enabled=True,
             log_enabled=True,
         )
         self.assertEqual(outputs.raw.dir, Path("out/raw"))
-        self.assertEqual(outputs.json.dir, Path("out/json"))
+        self.assertIsNone(outputs.json.dir)
         self.assertEqual(outputs.text.dir, Path("out/text"))
         self.assertEqual(outputs.text.max_events_per_file, 250)
         self.assertEqual(outputs.text.waveform_layout, "point_rows")
@@ -331,7 +330,6 @@ class ResultFormattingTests(unittest.TestCase):
             profile,
             "multi",
             raw_enabled=True,
-            json_enabled=False,
             text_enabled=False,
             log_enabled=False,
             raw_dir=r"D:\data\raw",
@@ -348,7 +346,6 @@ class ResultFormattingTests(unittest.TestCase):
             profile,
             "single",
             raw_enabled=True,
-            json_enabled=False,
             text_enabled=True,
             log_enabled=False,
         )

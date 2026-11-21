@@ -701,7 +701,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                     "10",
                     "--progress-every",
                     "1",
-                    "--decode-json",
+
                     "--profile",
                     "profiles/examples/example.yaml",
                 ],
@@ -714,8 +714,8 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         self.assertIn("bytes=3212", result.output)
         self.assertIn("Single Acquire: dev1", result.output)
         self.assertIn("send_mode", result.output)
-        self.assertIn("decode_enabled", result.output)
-        self.assertIn("decoded_events", result.output)
+        self.assertNotIn("decode_enabled", result.output)
+        self.assertNotIn("decoded_events", result.output)
         self.assertIn("watch_enabled", result.output)
         self.assertIn("watched_frames", result.output)
 
@@ -834,7 +834,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         self.assertEqual(kwargs["events"], 25)
         self.assertEqual(kwargs["timeout_s"], 3.5)
         self.assertIsInstance(kwargs["outputs"], AcquireOutputsConfig)
-        self.assertTrue(kwargs["outputs"].json.enabled)
+        self.assertFalse(kwargs["outputs"].json.enabled)
         self.assertEqual(kwargs["watch_every"], 5)
         self.assertIn("events=0/25", result.output)
 
@@ -901,7 +901,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         self.assertEqual(kwargs["tcp_timeout_s"], 2.5)
         self.assertTrue(kwargs["allow_start_without_ack"])
         self.assertIsInstance(kwargs["outputs"], AcquireOutputsConfig)
-        self.assertTrue(kwargs["outputs"].json.enabled)
+        self.assertFalse(kwargs["outputs"].json.enabled)
         self.assertTrue(kwargs["stop_capture_on_watch_close"])
 
     def test_cli_multi_accepts_keep_running_after_watch_close(self) -> None:
@@ -953,7 +953,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         self.assertFalse(kwargs["stop_capture_on_watch_close"])
         self.assertIsInstance(kwargs["outputs"], AcquireOutputsConfig)
 
-    def test_cli_multi_passes_decode_json_flag(self) -> None:
+    def test_cli_multi_disables_event_json(self) -> None:
         runner = CliRunner()
         result_payload = SimpleNamespace(
             group=SimpleNamespace(name="two_board"),
@@ -989,7 +989,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                     "acquire",
                     "multi",
                     "two_board",
-                    "--decode-json",
+
                     "--profile",
                     "profiles/examples/example.yaml",
                 ],
@@ -998,11 +998,11 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0, result.output)
         kwargs = service.capture_multi.call_args.kwargs
         self.assertIsInstance(kwargs["outputs"], AcquireOutputsConfig)
-        self.assertTrue(kwargs["outputs"].json.enabled)
-        self.assertIn("decode_enabled", result.output)
-        self.assertIn("decoded_complete_events", result.output)
+        self.assertFalse(kwargs["outputs"].json.enabled)
+        self.assertNotIn("decode_enabled", result.output)
+        self.assertNotIn("decoded_complete_events", result.output)
 
-    def test_cli_single_outputs_can_enable_text_without_json(self) -> None:
+    def test_cli_single_ignores_obsolete_per_event_outputs(self) -> None:
         runner = CliRunner()
         profile = SimpleNamespace(
             defaults={
@@ -1059,14 +1059,11 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0, result.output)
         outputs = service.capture_single.call_args.kwargs["outputs"]
         self.assertFalse(outputs.json.enabled)
-        self.assertTrue(outputs.text.enabled)
-        self.assertEqual(outputs.text.dir, Path("txt_out"))
-        self.assertEqual(outputs.text.max_events_per_file, 7)
-        self.assertEqual(outputs.text.waveform_layout, "channel_blocks")
+        self.assertFalse(outputs.text.enabled)
         self.assertTrue(outputs.raw.enabled)
-        self.assertEqual(outputs.raw.dir, Path("raw_out"))
+        self.assertEqual(service.capture_single.call_args.kwargs["storage_mode"], "aggregate")
 
-    def test_cli_multi_raw_only_does_not_disable_text_output(self) -> None:
+    def test_cli_multi_ignores_old_json_switch_and_preserves_text_output(self) -> None:
         runner = CliRunner()
         profile = SimpleNamespace(
             defaults={
@@ -1115,7 +1112,7 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                         "acquire",
                         "multi",
                         "two_board",
-                        "--raw-only",
+
                         "--profile",
                         "profiles/examples/example.yaml",
                     ],
@@ -1178,7 +1175,6 @@ class AcquireSingleMonitoringTests(unittest.TestCase):
                 result = service.capture_multi(
                     group_name="two_board",
                     profile_path="profiles/examples/example.yaml",
-                    decode_json=True,
                 )
 
         self.assertTrue(result.decode_enabled)
@@ -1515,11 +1511,9 @@ class OutputsConfigDrivesDecodeTests(unittest.TestCase):
             timeout_s=5.0,
             outputs=outputs,
         )
-        self.assertTrue(captured["decode_json"])
-        self.assertTrue(captured["text_output_enabled"])
-        self.assertEqual(captured["decoded_output_dir"], Path("out/j"))
-        self.assertEqual(captured["text_output_dir"], Path("out/t"))
-        self.assertEqual(captured["text_max_events_per_file"], 50)
+        self.assertEqual(captured["storage_mode"], "aggregate")
+        self.assertFalse(captured.get("decode_json", False))
+        self.assertFalse(captured.get("text_output_enabled", False))
 
     def test_defaults_kept_when_no_outputs(self):
         service, captured = self._service_and_profile()
@@ -1529,8 +1523,8 @@ class OutputsConfigDrivesDecodeTests(unittest.TestCase):
             events=10,
             timeout_s=5.0,
         )
-        self.assertFalse(captured["decode_json"])
-        self.assertFalse(captured["text_output_enabled"])
+        self.assertFalse(captured.get("decode_json", False))
+        self.assertFalse(captured.get("text_output_enabled", False))
 
 
 class SingleStorageModeTests(unittest.TestCase):

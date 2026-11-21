@@ -308,18 +308,7 @@ defaults:
     timeout_s: 10.0
     progress_every: 50
     watch_every: null
-    outputs:
-      raw:
-        enabled: true
-      json:
-        enabled: false
-      text:
-        enabled: true
-        dir: out/text
-        max_events_per_file: 1000
-        waveform_layout: point_rows
-      log:
-        enabled: false
+    storage_mode: aggregate
   acquire_multi:
     aggregation_key: timestamp
     timestamp_match_window_ticks: 10
@@ -331,8 +320,6 @@ defaults:
     outputs:
       raw:
         enabled: true
-      json:
-        enabled: false
       text:
         enabled: true
         dir: out/multi_text
@@ -350,20 +337,16 @@ Useful options:
 - `--events`: number of events to capture
 - `--timeout`: TCP socket timeout in seconds
 - `--output-dir`: base output directory for generated run folders
-- `--decode-json`: also generate decoded JSON during capture
-- `--decoded-output-dir`: choose where online decoded JSON files are written
 - `--watch-every`: show a low-rate waveform watch window using every Nth captured event
 - `--progress-every`: print one live progress line every N captured events
 
-Profile-driven output routing:
+Multi-board output routing:
 
-- `outputs.raw.enabled/dir`: control raw packet file output
-- `outputs.json.enabled/dir`: control decoded JSON output
+- `outputs.raw.dir`: directory for the binary DAT copy
 - `outputs.text.enabled/dir`: control TXT event output
 - `outputs.text.max_events_per_file`: roll TXT files after N events
 - `outputs.text.waveform_layout`: recommends `point_rows`; legacy `channel_blocks` values remain accepted and render with the same point-row output
 - `outputs.log.enabled/dir`: control capture log file output
-- `--decode-json` and `--raw-only` only toggle JSON output; they do not disable TXT output
 
 Examples:
 
@@ -371,7 +354,6 @@ Examples:
 daq acquire single dev1 --events 100 --profile profiles/examples/example.yaml
 daq acquire single dev1 --events 1000 --timeout 10 --profile profiles/examples/example.yaml
 daq acquire single dev1 --events 200 --output-dir out/single --profile profiles/examples/example.yaml
-daq acquire single dev1 --events 100 --storage legacy --decode-json --profile profiles/examples/example.yaml
 daq acquire single dev1 --events 100000 --storage rate --rate-interval 1.0 --profile profiles/examples/example.yaml
 daq acquire single dev1 --events 1000 --watch-every 100 --profile profiles/examples/example.yaml
 daq acquire single dev1 --events 1000 --progress-every 50 --profile profiles/examples/example.yaml
@@ -386,15 +368,12 @@ Single-board storage modes (`--storage`):
   not generated online in this mode (offline decode is a later step).
 - `rate`: only `rate.csv` + `monitor.jsonl` + `run_meta.json` + `log.txt`;
   no event payload files.  Use this when only the event-rate history matters.
-- `legacy`: the previous per-event format: `raw/event_XXXXX.bin` (or the
-  configured raw directory), optional JSON/TXT/log, and `capture_info.txt`.
 
 `--rate-interval` (default 1.0s) controls rate sampling in aggregate/rate
 modes.  `rate.csv` columns are
 `elapsed_s,unix_time,total_events,window_events,rate_hz`; `monitor.jsonl`
 contains the same samples as JSON.  In aggregate/rate modes the core files
-always live in the run directory; the profile/GUI `outputs.*` directories
-apply only to `legacy`.  `log.txt` is written continuously in these modes:
+always live in the run directory.  `log.txt` is written continuously in these modes:
 every `rate_interval` it appends a multi-board-style `[MON]` line with
 `elapsed`, `total_events`, `window_events`, and `rate`, then appends the
 final summary at stop.
@@ -405,13 +384,10 @@ Current behavior:
 - The native single-board receiver parses packet length from that `send_mode`
 - Current single-board capture supports firmware `send_mode` 0, 1, 2, and 3
 - A run directory `<prefix>_00001` is created under the selected output base
-- The default storage is `aggregate`; use `--storage legacy` for per-event raw files
-- `--decode-json` and TXT output are only available in `legacy` storage mode
-- `--watch-every N` opens the CLI waveform watch viewer only in `legacy` mode;
-  the GUI embedded watch works in all single-board modes
+- The workstation can preview live waveforms in both single-board modes
 - A line-by-line live monitor shows progress, event rate, latest `hit_mask`, packet bytes, and output directory during capture
 - `--progress-every N` throttles those live progress lines while still forcing the final `events=N/N` line
-- `defaults.acquire_single` in the profile can provide default values for `events`, `timeout_s`, `output_dir`, `watch_every`, `progress_every`, `storage_mode`, `rate_interval_s`, and `outputs.*`
+- `defaults.acquire_single` in the profile can provide default values for `events`, `timeout_s`, `output_dir`, `watch_every`, `progress_every`, `storage_mode`, and `rate_interval_s`.
 - A summary table is printed after the run
 - A final native capture summary is also shown
 
@@ -420,17 +396,13 @@ Typical output data includes:
 - `aggregate`: `complete_events.dat`, `complete_events.idx`, `run_meta.json`,
   `rate.csv`, `monitor.jsonl`, `log.txt`
 - `rate`: `rate.csv`, `monitor.jsonl`, `run_meta.json`, `log.txt`
-- `legacy`: event binary files; optional decoded JSON files under the
-  configured JSON output directory; optional TXT files such as
-  `events_00001.txt` under the configured text output directory; optional
-  capture log; `capture_info.txt`
 
 ## 10. Offline Decode
 
 Use `decode` to convert raw single-board event packets into structured JSON.
 
 > Aggregate-mode offline decode (`complete_events.dat` → JSON) is not
-> implemented yet.  `decode run` applies to `--storage legacy` runs with
+> implemented yet.  `decode run` applies to historical per-event runs with
 > `event_*.bin` files; `/storage rate` runs have no event data to decode.
 
 Run-level decode:
@@ -691,7 +663,6 @@ Useful options:
 - `--event-timeout-ms`
 - `--timeout`
 - `--allow-start-without-ack`
-- `--decode-json`
 - `--watch-waveforms`
 - `--watch-every`
 - `--output-dir`
@@ -701,7 +672,6 @@ Examples:
 ```bash
 daq acquire multi two_board --aggregation-key timestamp --timestamp-match-window 10
 daq acquire multi two_board --aggregation-key event_count --allow-start-without-ack
-daq acquire multi two_board --decode-json
 daq acquire multi two_board --watch-waveforms --watch-every 100
 ```
 
@@ -715,7 +685,6 @@ Current behavior:
   previously captured runs still work)
 - Set `DAQ_MULTI_VENDOR=1` to fall back to the vendored
   `multi_board_acquire.py` path for A/B comparison
-- `--decode-json` enables multi-board decoded JSON output
 - `--watch-waveforms` adds a best-effort sampled waveform monitor with one window, same-aggregate-event board switching, and short history navigation
 - Multi waveform watch only supports boards currently sending waveform-bearing modes `1` or `3`
 - The watcher samples packets from the legacy multi receive path; it does not read waveform data from `monitor.jsonl`
@@ -731,10 +700,9 @@ Typical output data includes:
 - `complete_events.idx`
 - `monitor.jsonl`
 - `log.txt`
-- `complete/event_XXXXX.json` and `partial/event_XXXXX.json` under the configured JSON output root when multi decode is enabled
 - `complete/events_00001.txt` and `partial/events_00001.txt` under the configured text output root when TXT output is enabled
 
-Multi decoded JSON is written per aggregated event, not per original board packet.
+Offline multi-board decode writes JSON per aggregated event, not per original board packet.
 Each JSON contains top-level aggregation metadata plus one decoded board entry
 for each board that was present in that event. Partial events are decoded too,
 and include `missing_board_ids` derived from the aggregated file mask.
@@ -856,7 +824,7 @@ The window has four tabs plus a shared log panel at the bottom:
   board selection and prev/next/latest event navigation. Result summaries
   are compact strips so the waveforms get the remaining space. Both pages
   have a **存储** section: base output directory and run-name prefix
-  (empty = defaults), plus per-type parent directories for raw / json /
+  (empty = defaults), plus multi-board parent directories for raw /
   text / log — each type's files land under `<chosen dir>/<run name>/`,
   GUI entries override the profile, empty falls back to the profile
   configuration, then to the default leaf inside the run directory.

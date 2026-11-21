@@ -1,7 +1,7 @@
 import os
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
 
@@ -76,7 +76,7 @@ class SingleAcquireResult:
     text_output_dir: Path | None = None
     text_output_events: int = 0
     text_output_files: int = 0
-    storage_mode: str = "legacy"
+    storage_mode: str = "aggregate"
     rate_interval_s: float = 1.0
     rate_csv_path: Path | None = None
     run_meta_path: Path | None = None
@@ -145,18 +145,12 @@ class AcquireService:
         timeout_s: float,
         output_base_dir: Path | None = None,
         outputs: AcquireOutputsConfig | None = None,
-        decode_json: bool = False,
-        decoded_output_dir: Path | None = None,
-        text_output_enabled: bool = False,
-        text_output_dir: Path | None = None,
-        text_max_events_per_file: int = 100,
-        text_waveform_layout: str = "channel_blocks",
         watch_every: int | None = None,
         progress_callback: Callable[[SingleAcquireProgress], None] | None = None,
         watch_frame_callback: Callable[[bytes], None] | None = None,
         run_name_prefix: str | None = None,
         cancel_event: threading.Event | None = None,
-        storage_mode: str = "legacy",
+        storage_mode: str = "aggregate",
         rate_interval_s: float = 1.0,
         duration_s: float | None = None,
     ) -> SingleAcquireResult:
@@ -172,27 +166,8 @@ class AcquireService:
         base_dir = output_base_dir or (
             default_output_base_dir(profile) / "single"
         )
-        resolved_outputs = outputs or AcquireOutputsConfig(
-            raw=OutputTargetConfig(enabled=True),
-            json=OutputTargetConfig(enabled=decode_json, dir=decoded_output_dir),
-            text=TextOutputConfig(
-                enabled=text_output_enabled,
-                dir=text_output_dir,
-                max_events_per_file=text_max_events_per_file,
-                waveform_layout=text_waveform_layout,
-            ),
-            log=OutputTargetConfig(enabled=False),
-        )
-        # When a caller supplies an outputs config (e.g. the GUI), its
-        # json/text switches are authoritative: the legacy runner keys the
-        # decode/text outputs off these standalone params.
-        if outputs is not None:
-            decode_json = resolved_outputs.json.enabled
-            decoded_output_dir = decoded_output_dir or resolved_outputs.json.dir
-            text_output_enabled = resolved_outputs.text.enabled
-            text_output_dir = text_output_dir or resolved_outputs.text.dir
-            text_max_events_per_file = resolved_outputs.text.max_events_per_file
-            text_waveform_layout = resolved_outputs.text.waveform_layout
+        if storage_mode not in {"aggregate", "rate"}:
+            raise ValueError("storage must be aggregate or rate")
         board_adapter = LegacyBoardAdapter()
         tcp_config = board_adapter.read_tcp_mode2_config(device)
         runner = LegacySingleCaptureRunner()
@@ -245,13 +220,6 @@ class AcquireService:
             events=events,
             timeout_s=timeout_s,
             send_mode=tcp_config.send_mode,
-            outputs=resolved_outputs,
-            decode_json=decode_json,
-            decoded_output_dir=decoded_output_dir,
-            text_output_enabled=text_output_enabled,
-            text_output_dir=text_output_dir,
-            text_max_events_per_file=text_max_events_per_file,
-            text_waveform_layout=text_waveform_layout,
             watch_every=watch_every,
             progress_callback=on_progress,
             watch_frame_callback=watch_frame_callback,
@@ -318,7 +286,6 @@ class AcquireService:
         event_timeout_ms: int = 50,
         tcp_timeout_s: float = 1.0,
         allow_start_without_ack: bool = False,
-        decode_json: bool = False,
         text_output_enabled: bool = False,
         text_output_dir: Path | None = None,
         text_max_events_per_file: int = 100,
@@ -355,7 +322,7 @@ class AcquireService:
         )
         resolved_outputs = outputs or AcquireOutputsConfig(
             raw=OutputTargetConfig(enabled=True),
-            json=OutputTargetConfig(enabled=decode_json),
+            json=OutputTargetConfig(enabled=False),
             text=TextOutputConfig(
                 enabled=text_output_enabled,
                 dir=text_output_dir,
@@ -365,10 +332,8 @@ class AcquireService:
             log=OutputTargetConfig(enabled=True),
         )
         if outputs is not None:
-            # Same as capture_single: an explicit outputs config (GUI) owns
-            # the json/text switches; the runner reads these standalone
-            # params, so mirror the config into them.
-            decode_json = resolved_outputs.json.enabled
+            resolved_outputs = replace(outputs, raw=replace(outputs.raw, enabled=True),
+                                       json=OutputTargetConfig(enabled=False))
             text_output_enabled = resolved_outputs.text.enabled
             text_output_dir = text_output_dir or resolved_outputs.text.dir
             text_max_events_per_file = resolved_outputs.text.max_events_per_file
@@ -401,7 +366,7 @@ class AcquireService:
                 allow_start_without_ack=allow_start_without_ack,
                 boards=devices,
                 outputs=resolved_outputs,
-                decode_json=decode_json,
+                decode_json=False,
                 text_output_enabled=text_output_enabled,
                 text_output_dir=text_output_dir,
                 text_max_events_per_file=text_max_events_per_file,
